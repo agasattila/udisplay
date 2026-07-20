@@ -1,0 +1,392 @@
+{
+  "_comment": "Canonical test vectors for uDisplay v1. Both pytest (udisplay-gen) and gtest (libudisplay) MUST validate against these. Any encoding disagreement is a bug in the implementation, not in this file.",
+  "merkle": {
+    "v1_tiny_single_chunk": {
+      "description": "YAML-derived. Single chunk (50 bytes compressed, 206 bytes of zero padding applied before hash).",
+      "yaml_hex": "6465766963653a0a20206e616d653a20740a776964676574733a0a2020613a0a20202020747970653a20746f67676c650a",
+      "blob_hex": "789c4b492dcb4c4eb5e25250c84bcc4db55228e12acf4c494f2d290609258208058592ca02904c7e7a7a4e2a1700767e0eb6",
+      "blob_len_compressed": 50,
+      "blob_len_uncompressed": 49,
+      "n_chunks": 1,
+      "chunk_hashes": [
+        "847679e35883a47a6e35b2c4113ec7edcda6b1eba5c402f6dfb7bb7097919490"
+      ],
+      "raw_chunks_hex": [
+        "789c4b492dcb4c4eb5e25250c84bcc4db55228e12acf4c494f2d290609258208058592ca02904c7e7a7a4e2a1700767e0eb6"
+      ],
+      "root_hex": "74ac9fa684287d0cab3e64e3f25ee369c74b46e7f2ec0025cd10bac7bdffdb6e"
+    },
+    "v2_raw_exact_256_no_padding": {
+      "description": "Raw bytes 0x00..0xFF (not YAML-derived). Tests single-chunk with no padding: blob_len is exactly CHUNK_SIZE.",
+      "blob_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "blob_len_compressed": 256,
+      "n_chunks": 1,
+      "chunk_hashes": [
+        "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880"
+      ],
+      "raw_chunks_hex": [
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+      ],
+      "root_hex": "60bd11c69262f84ddfea5f0d116d40af862c4dd8c2a92fb90e368b132e8fa89c"
+    },
+    "v3_multi_chunk_yaml": {
+      "description": "YAML-derived (37 toggles). Two chunks: chunk 0 is 256 bytes (no padding), chunk 1 is 3 bytes (253 bytes of zero padding applied).",
+      "yaml_hex": "6465766963653a0a20206e616d653a2074657374206465766963650a202076657273696f6e3a2027312e30270a776964676574733a0a202072656c61795f30303a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792030300a202072656c61795f30313a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792030310a202072656c61795f30323a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792030320a202072656c61795f30333a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792030330a202072656c61795f30343a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792030340a202072656c61795f30353a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792030350a202072656c61795f30363a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792030360a202072656c61795f30373a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792030370a202072656c61795f30383a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792030380a202072656c61795f30393a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792030390a202072656c61795f31303a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792031300a202072656c61795f31313a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792031310a202072656c61795f31323a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792031320a202072656c61795f31333a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792031330a202072656c61795f31343a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792031340a202072656c61795f31353a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792031350a202072656c61795f31363a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792031360a202072656c61795f31373a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792031370a202072656c61795f31383a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792031380a202072656c61795f31393a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792031390a202072656c61795f32303a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792032300a202072656c61795f32313a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792032310a202072656c61795f32323a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792032320a202072656c61795f32333a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792032330a202072656c61795f32343a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792032340a202072656c61795f32353a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792032350a202072656c61795f32363a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792032360a202072656c61795f32373a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792032370a202072656c61795f32383a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792032380a202072656c61795f32393a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792032390a202072656c61795f33303a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792033300a202072656c61795f33313a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792033310a202072656c61795f33323a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792033320a202072656c61795f33333a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792033330a202072656c61795f33343a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792033340a202072656c61795f33353a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792033350a202072656c61795f33363a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61792033360a",
+      "blob_hex": "789c8dd1316ec2501084e1dea7d88e2e7a330b067c0c2e1039f19365c981085b44dc3e3145a69d6e35dabffa86fa983e6bd7445cfbafdac55a973586d7f8b73dea7d996ed72e76782bbbe6671ac6ba2edbf7bdcefdf3bd94ed8e589fdf5b7b1bc7b9be86b9ffa8731797ed2b4a51002b80025a0115a415a482bd15ec151cace0a0a0b58256c1d10a8e0a4e56705270b682f37f004b1a9286250d49c39286a4614943d2b0a4216958d290342c69481a9634240d4b1a9286250d49d392a6a4694953d2b4a429695ad294342d694a9a9634254d4b9a92a6254d49d392a6a4694953d26949a7a4d3924e49a7259d924e4b3a259d96744a3a2de994745ad2d936bfca2b1575",
+      "blob_len_compressed": 259,
+      "blob_len_uncompressed": 1867,
+      "n_chunks": 2,
+      "chunk_hashes": [
+        "8341cfd59a9f9b4ced5e23df0b068f5deb112040f3c441b45a49952b3bb9c109",
+        "2b92cb0957664e01109e2ea5a85eefdb81ad3f76940c40298e4cb158a7f3ca85"
+      ],
+      "raw_chunks_hex": [
+        "789c8dd1316ec2501084e1dea7d88e2e7a330b067c0c2e1039f19365c981085b44dc3e3145a69d6e35dabffa86fa983e6bd7445cfbafdac55a973586d7f8b73dea7d996ed72e76782bbbe6671ac6ba2edbf7bdcefdf3bd94ed8e589fdf5b7b1bc7b9be86b9ffa8731797ed2b4a51002b80025a0115a415a482bd15ec151cace0a0a0b58256c1d10a8e0a4e56705270b682f37f004b1a9286250d49c39286a4614943d2b0a4216958d290342c69481a9634240d4b1a9286250d49d392a6a4694953d2b4a429695ad294342d694a9a9634254d4b9a92a6254d49d392a6a4694953d26949a7a4d3924e49a7259d924e4b3a259d96744a3a2de994745ad2d936bfca",
+        "2b1575"
+      ],
+      "root_hex": "4242869d756f22c2d2318270ec4a6c31600e52fe333842ab4b4fd7660e8897d1"
+    },
+    "v4_raw_max_padding": {
+      "description": "Raw bytes 0x00..0xFF + 0xAB (257 bytes, not YAML-derived). Tests maximum padding: last chunk = 1 byte \u2192 255 zero bytes appended before hash.",
+      "blob_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeffab",
+      "blob_len_compressed": 257,
+      "n_chunks": 2,
+      "chunk_hashes": [
+        "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880",
+        "f73b9b0e1481654eeeab5837391f9b3ba623bd9cc837fe0c63d0b81e1323ee20"
+      ],
+      "raw_chunks_hex": [
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+        "ab"
+      ],
+      "root_hex": "ac7057d1bcd07b0be92c0a826dcab531db5325f6c8b2bc68f6216484f723fa91"
+    },
+    "v5_full_vocabulary": {
+      "description": "All 7 widget types in non-alphabetical YAML order. Tests widget ID sort and assignment starting at 0x10.",
+      "yaml_hex": "6465766963653a0a20206e616d653a2066756c6c20766f63616220746573740a776964676574733a0a2020736c696465725f726174653a0a20202020747970653a20736c696465720a202020206c6162656c3a20526174650a202020206d696e3a20310a202020206d61783a203130300a20202020737465703a20310a20202020756e69743a20487a0a2020746f67676c655f72656c61793a0a20202020747970653a20746f67676c650a202020206c6162656c3a2052656c61790a2020666972655f62746e3a0a20202020747970653a20627574746f6e0a202020206c6162656c3a20466972650a2020202073686170653a20636972636c650a20202020776964676574733a0a2020202020207374617475735f6c65643a0a2020202020202020747970653a206c65640a20202020202020206c6162656c3a204163746976650a2020646973706c61795f766f6c743a0a20202020747970653a20646973706c61790a202020206c6162656c3a20566f6c746167650a20202020756e69743a20560a20202020666f726d61743a2027252e3366270a202020207374796c653a206c617267650a20206d6f64655f73656c3a0a20202020747970653a20627574746f6e2d67726f75700a202020206c61796f75743a20677269640a202020206974656d733a0a20202020202064633a0a20202020202020206c6162656c3a204443560a20202020202061633a0a20202020202020206c6162656c3a204143560a2020706f7765725f6c65643a0a20202020747970653a206c65640a202020206c6162656c3a20506f7765720a2020737369645f6669656c643a0a20202020747970653a20746578740a202020206c6162656c3a20535349440a202020206d6f64653a2072770a",
+      "blob_hex": "789c65924d4fc3300c86effb15b9a09d40206eb94d4c086e8849bb4669e3164b6953256eb7f2eb713e3665ec66bf7e6afb756360c116e44688510f2045375b2b16d7ea461004da9cd0f4402102c1a201afbca6c40b41ebc45f643909563760a5f86622e5038e52bce4509f397c7e4e4920982e85794492e2e39713727d6f4179b07aad2764fd66424458e8d0836a68ace9662672634dbf3395e7fee848b4e8dbd2afb29717d3340765c15c944b5796ae4a69bb6b0997d8c66098781fb5384bf52645af573932a27ba89c1f53dc393f68ceb60f4fafddb61c69b571b0f6891f9c0115b8c79dd5c7debb792a535637739bde635e170986ab3bd3caff1ef66fc722e9fbe22e152777e2bf7e3dc9ed390af91599f844021ad521d81b98e04c357d387ceef3a3604f52f8d3e60f791fb83e",
+      "blob_len_compressed": 303,
+      "blob_len_uncompressed": 646,
+      "n_chunks": 2,
+      "chunk_hashes": [
+        "5ce646c9346ab1696e3d734ff4e1b7fae269f63d26e46b46683e9cc8cef65b36",
+        "aabfcd6d42bea062ecb0f91ee85cc7d4d94f76dde1f46bf5335a6e514e9dad6d"
+      ],
+      "raw_chunks_hex": [
+        "789c65924d4fc3300c86effb15b9a09d40206eb94d4c086e8849bb4669e3164b6953256eb7f2eb713e3665ec66bf7e6afb756360c116e44688510f2045375b2b16d7ea461004da9cd0f4402102c1a201afbca6c40b41ebc45f643909563760a5f86622e5038e52bce4509f397c7e4e4920982e85794492e2e39713727d6f4179b07aad2764fd66424458e8d0836a68ace9662672634dbf3395e7fee848b4e8dbd2afb29717d3340765c15c944b5796ae4a69bb6b0997d8c66098781fb5384bf52645af573932a27ba89c1f53dc393f68ceb60f4fafddb61c69b571b0f6891f9c0115b8c79dd5c7debb792a535637739bde635e170986ab3bd3caff1ef66fc722",
+        "e9fbe22e152777e2bf7e3dc9ed390af91599f844021ad521d81b98e04c357d387ceef3a3604f52f8d3e60f791fb83e"
+      ],
+      "root_hex": "f88890333351a9d1c71169aaa8942c8855c3d3db3abf38ff8b554955372f8f84",
+      "widget_ids": {
+        "display_volt": "0x10",
+        "fire_btn": "0x11",
+        "fire_btn.status_led": "0x12",
+        "mode_sel": "0x13",
+        "mode_sel.ac": "0x14",
+        "mode_sel.dc": "0x15",
+        "power_led": "0x16",
+        "slider_rate": "0x17",
+        "ssid_field": "0x18",
+        "toggle_relay": "0x19"
+      }
+    }
+  },
+  "messages": {
+    "HANDSHAKE": {
+      "description": "Device\u2192client on connect. proto_version=4, flags=0x00 (no auth), uses V1 merkle root, chunk_count=1, chunk_size=256. flags byte inserted at offset 2; merkle_root shifted to offset 3.",
+      "input": {
+        "msg_type": "0x00",
+        "proto_version": 4,
+        "flags": "0x00",
+        "merkle_root": "74ac9fa684287d0cab3e64e3f25ee369c74b46e7f2ec0025cd10bac7bdffdb6e",
+        "chunk_count": 1,
+        "chunk_size": 256
+      },
+      "bytes": "00 04 00 74 ac 9f a6 84 28 7d 0c ab 3e 64 e3 f2 5e e3 69 c7 4b 46 e7 f2 ec 00 25 cd 10 ba c7 bd ff db 6e 01 00 00 01",
+      "total_bytes": 39
+    },
+    "HANDSHAKE_AUTH": {
+      "description": "Device\u2192client on connect when auth_algo=HMAC-SHA256. proto_version=4, flags=0x01 (auth required), algorithm=0x01 (HMAC-SHA256), salt=0x01..0x20. No merkle_root in this message; sent after auth succeeds.",
+      "input": {
+        "msg_type": "0x00",
+        "proto_version": 4,
+        "flags": "0x01",
+        "algorithm": "0x01",
+        "salt_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+      },
+      "bytes": "00 04 01 01 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20",
+      "total_bytes": 36
+    },
+    "HANDSHAKE_ACK": {
+      "description": "Client\u2192device. client_proto_max=4, flags=0x00 (no auth). flags byte added at offset 2 (proto v0.04). Old firmware ignores extra byte (len \u2265 2 check).",
+      "input": {
+        "msg_type": "0x01",
+        "client_proto_max": 4,
+        "flags": "0x00"
+      },
+      "bytes": "01 04 00",
+      "total_bytes": 3
+    },
+    "HANDSHAKE_ACK_AUTH": {
+      "description": "Client\u2192device when device sent HANDSHAKE(flags=1). client_proto_max=4, flags=0x01, credential=HMAC-SHA256(key=password, message=salt) as 32 bytes (test vector uses 0x21..0x40).",
+      "input": {
+        "msg_type": "0x01",
+        "client_proto_max": 4,
+        "flags": "0x01",
+        "credential_hex": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40"
+      },
+      "bytes": "01 04 01 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40",
+      "total_bytes": 35
+    },
+    "CLIENT_READY": {
+      "description": "Client\u2192device. Sent after bootstrap completes (cache hit or full download). Signals device to enter active state.",
+      "input": {
+        "msg_type": "0x02"
+      },
+      "bytes": "02",
+      "total_bytes": 1
+    },
+    "CHUNK_HEADER_REQUEST": {
+      "description": "Client\u2192device requesting header for chunk 0. [0x10, idx_lo, idx_hi].",
+      "input": {
+        "msg_type": "0x10",
+        "chunk_index": 0
+      },
+      "bytes": "10 00 00",
+      "total_bytes": 3
+    },
+    "CHUNK_HEADER_RESPONSE_full": {
+      "description": "Device\u2192client. V3 chunk-0 hash (256-byte full chunk). len_byte=0.",
+      "input": {
+        "msg_type": "0x11",
+        "chunk_hash": "8341cfd59a9f9b4ced5e23df0b068f5deb112040f3c441b45a49952b3bb9c109",
+        "len_byte": 0
+      },
+      "bytes": "11 83 41 cf d5 9a 9f 9b 4c ed 5e 23 df 0b 06 8f 5d eb 11 20 40 f3 c4 41 b4 5a 49 95 2b 3b b9 c1 09 00",
+      "total_bytes": 34
+    },
+    "CHUNK_HEADER_RESPONSE_partial": {
+      "description": "Device\u2192client. V3 chunk-1 hash (3-byte partial last chunk). len_byte=3.",
+      "input": {
+        "msg_type": "0x11",
+        "chunk_hash": "2b92cb0957664e01109e2ea5a85eefdb81ad3f76940c40298e4cb158a7f3ca85",
+        "len_byte": 3
+      },
+      "bytes": "11 2b 92 cb 09 57 66 4e 01 10 9e 2e a5 a8 5e ef db 81 ad 3f 76 94 0c 40 29 8e 4c b1 58 a7 f3 ca 85 03",
+      "total_bytes": 34
+    },
+    "CHUNK_REQUEST_index_0": {
+      "description": "Client\u2192device requesting chunk 0.",
+      "input": {
+        "msg_type": "0x20",
+        "chunk_index": 0
+      },
+      "bytes": "20 00 00",
+      "total_bytes": 3
+    },
+    "CHUNK_REQUEST_index_5": {
+      "description": "Client\u2192device requesting chunk 5.",
+      "input": {
+        "msg_type": "0x20",
+        "chunk_index": 5
+      },
+      "bytes": "20 05 00",
+      "total_bytes": 3
+    },
+    "CHUNK_RESPONSE": {
+      "description": "Device\u2192client. Chunk 0 of V1 (50 raw bytes). Client pads to 256 before verifying hash.",
+      "input": {
+        "msg_type": "0x21",
+        "chunk_index": 0,
+        "chunk_len": 50,
+        "chunk_data_hex": "789c4b492dcb4c4eb5e25250c84bcc4db55228e12acf4c494f2d290609258208058592ca02904c7e7a7a4e2a1700767e0eb6"
+      },
+      "bytes": "21 00 00 32 00 78 9c 4b 49 2d cb 4c 4e b5 e2 52 50 c8 4b cc 4d b5 52 28 e1 2a cf 4c 49 4f 2d 29 06 09 25 82 08 05 85 92 ca 02 90 4c 7e 7a 7a 4e 2a 17 00 76 7e 0e b6",
+      "total_bytes": 55
+    },
+    "ERR_INVALID_CHUNK": {
+      "description": "Device\u2192client when chunk_index >= chunk_count. chunk_index=5.",
+      "input": {
+        "msg_type": "0xff",
+        "chunk_index": 5
+      },
+      "bytes": "ff 05 00",
+      "total_bytes": 3
+    },
+    "HEARTBEAT": {
+      "description": "Device\u2192client keepalive. No payload.",
+      "input": {
+        "msg_type": "0x40"
+      },
+      "bytes": "40",
+      "total_bytes": 1
+    },
+    "STATE_UPDATE_float32": {
+      "description": "widget_id=0x10, value_type=float32 (0x01), value=3.14 IEEE 754 LE.",
+      "input": {
+        "msg_type": "0x30",
+        "widget_id": "0x10",
+        "value_type": "0x01",
+        "value": 3.14
+      },
+      "bytes": "30 10 01 c3 f5 48 40",
+      "total_bytes": 7
+    },
+    "STATE_UPDATE_int32": {
+      "description": "widget_id=0x10, value_type=int32 (0x02), value=-42 two's complement LE.",
+      "input": {
+        "msg_type": "0x30",
+        "widget_id": "0x10",
+        "value_type": "0x02",
+        "value": -42
+      },
+      "bytes": "30 10 02 d6 ff ff ff",
+      "total_bytes": 7
+    },
+    "STATE_UPDATE_uint8": {
+      "description": "widget_id=0x10, value_type=uint8 (0x03), value=1 (boolean true).",
+      "input": {
+        "msg_type": "0x30",
+        "widget_id": "0x10",
+        "value_type": "0x03",
+        "value": 1
+      },
+      "bytes": "30 10 03 01",
+      "total_bytes": 4
+    },
+    "STATE_UPDATE_string": {
+      "description": "widget_id=0x10, value_type=string (0x04), value=\"hello\" (5 UTF-8 bytes).",
+      "input": {
+        "msg_type": "0x30",
+        "widget_id": "0x10",
+        "value_type": "0x04",
+        "value": "hello"
+      },
+      "bytes": "30 10 04 05 68 65 6c 6c 6f",
+      "total_bytes": 9
+    },
+    "SET_PROPERTY": {
+      "description": "SET_PROPERTY (0x32): set PROP_ENABLED (0x01) = 0 on widget 0x10.",
+      "input": {
+        "msg_type": "0x32",
+        "target_id": "0x10",
+        "property_id": "0x01",
+        "value": 0
+      },
+      "bytes": "32 10 01 00",
+      "total_bytes": 4
+    },
+    "RESET_PROPERTY": {
+      "description": "RESET_PROPERTY (0x33): reset PROP_ENABLED (0x01) on widget 0x10 to YAML default.",
+      "input": {
+        "msg_type": "0x33",
+        "target_id": "0x10",
+        "property_id": "0x01"
+      },
+      "bytes": "33 10 01",
+      "total_bytes": 3
+    },
+    "EVENT_button_click": {
+      "description": "widget_id=0x10, event_type=button_click (0x01). Complete tap: press + release within bounds. No value payload.",
+      "input": {
+        "msg_type": "0x31",
+        "widget_id": "0x10",
+        "event_type": "0x01"
+      },
+      "bytes": "31 10 01",
+      "total_bytes": 3
+    },
+    "EVENT_button_press": {
+      "description": "widget_id=0x10, event_type=button_press (0x06). Button pressed down. No value payload.",
+      "input": {
+        "msg_type": "0x31",
+        "widget_id": "0x10",
+        "event_type": "0x06"
+      },
+      "bytes": "31 10 06",
+      "total_bytes": 3
+    },
+    "EVENT_button_release": {
+      "description": "widget_id=0x10, event_type=button_release (0x07). Button released. No value payload.",
+      "input": {
+        "msg_type": "0x31",
+        "widget_id": "0x10",
+        "event_type": "0x07"
+      },
+      "bytes": "31 10 07",
+      "total_bytes": 3
+    },
+    "EVENT_slider_change": {
+      "description": "widget_id=0x11, event_type=slider_change (0x02), value=75.0 f32 LE.",
+      "input": {
+        "msg_type": "0x31",
+        "widget_id": "0x11",
+        "event_type": "0x02",
+        "value": 75.0
+      },
+      "bytes": "31 11 02 00 00 96 42",
+      "total_bytes": 7
+    },
+    "EVENT_toggle_change": {
+      "description": "widget_id=0x12, event_type=toggle_change (0x03), new_state=1.",
+      "input": {
+        "msg_type": "0x31",
+        "widget_id": "0x12",
+        "event_type": "0x03",
+        "new_state": 1
+      },
+      "bytes": "31 12 03 01",
+      "total_bytes": 4
+    },
+    "EVENT_text_submit": {
+      "description": "widget_id=0x13, event_type=text_submit (0x04), value=\"hello\" (5 UTF-8 bytes).",
+      "input": {
+        "msg_type": "0x31",
+        "widget_id": "0x13",
+        "event_type": "0x04",
+        "value": "hello"
+      },
+      "bytes": "31 13 04 05 68 65 6c 6c 6f",
+      "total_bytes": 9
+    },
+    "EVENT_selection_change": {
+      "description": "widget_id=0x14, event_type=selection_change (0x05), index=2. Dropdown item selected.",
+      "input": {
+        "msg_type": "0x31",
+        "widget_id": "0x14",
+        "event_type": "0x05",
+        "index": 2
+      },
+      "bytes": "31 14 05 02",
+      "total_bytes": 4
+    },
+    "BLE_fragment_first": {
+      "description": "First ATT notification fragment of CHUNK_HEADER_RESPONSE_full at MTU=23. Flags byte 0x80: more_fragments=1, seq=0. Payload = first 22 bytes of CHUNK_HEADER_RESPONSE_full.",
+      "input": {
+        "source_message": "CHUNK_HEADER_RESPONSE_full",
+        "mtu": 23,
+        "fragment": "first"
+      },
+      "bytes": "80 11 83 41 cf d5 9a 9f 9b 4c ed 5e 23 df 0b 06 8f 5d eb 11 20 40 f3",
+      "total_bytes": 23
+    },
+    "BLE_fragment_last": {
+      "description": "Last ATT notification fragment of CHUNK_HEADER_RESPONSE_full at MTU=23. Flags byte 0x00: more_fragments=0. Payload = remaining 12 bytes.",
+      "input": {
+        "source_message": "CHUNK_HEADER_RESPONSE_full",
+        "mtu": 23,
+        "fragment": "last"
+      },
+      "bytes": "00 c4 41 b4 5a 49 95 2b 3b b9 c1 09 00",
+      "total_bytes": 13
+    },
+    "TCP_framed_STATE_float32": {
+      "description": "TCP framing: u16_le length prefix (7) + STATE_UPDATE_float32 payload.",
+      "input": {
+        "framed_message": "STATE_UPDATE_float32"
+      },
+      "bytes": "07 00 30 10 01 c3 f5 48 40",
+      "total_bytes": 9
+    }
+  }
+}

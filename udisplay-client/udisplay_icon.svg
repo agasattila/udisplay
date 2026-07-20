@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">uDisplay app icon</title>
+  <desc id="desc">A floating abstract user interface above a wireless microcontroller.</desc>
+
+  <defs>
+    <radialGradient id="background" cx="50%" cy="43%" r="72%">
+      <stop offset="0" stop-color="#202326"/>
+      <stop offset="1" stop-color="#111315"/>
+    </radialGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67edf2"/>
+      <stop offset="1" stop-color="#42cbd0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Android adaptive-icon-style background /* fill="url(#background)" */-->
+  
+  <rect x="31" y="31" width="962" height="962" rx="210" fill="#0d0d1a"  />
+    
+  <defs>
+    <!-- D-pad arrow -->
+    <path
+      id="dpad-arrow"
+      d="M0 -21
+         L26 13
+         Q30 20 21 20
+         H-21
+         Q-30 20 -26 13
+         Z" />
+  </defs>
+
+
+  <!-- Floating display -->
+  <g transform="scale(1.25) translate(-100,-100)">
+    <rect x="276" y="193" width="472" height="308" rx="43"
+          fill="#171a1c" stroke="#f7f7f7" stroke-width="18"/>
+
+    <!-- Abstract form, left side url(#cyan) -->
+    <g fill="#00d4aa">
+      <rect x="328" y="253" width="137" height="78" rx="14"/>
+      <rect x="328" y="354" width="137" height="23" rx="12"/>
+      <rect x="333" y="397" width="86" height="18" rx="9" opacity="0.78"/>
+      <circle cx="342" cy="443" r="9"/>
+      <circle cx="376" cy="443" r="9"/>
+      <circle cx="410" cy="443" r="9"/>
+      <rect x="485" y="253" width="23" height="198" rx="12" opacity="0.82"/>
+    </g>
+
+    <!-- Stylized D-pad, right side -->
+    <g fill="#00d4aa">
+      <!-- Upper arrow -->
+      <use
+        href="#dpad-arrow"
+        transform="translate(608 293)" />
+
+      <!-- Right arrow -->
+      <use
+        href="#dpad-arrow"
+        transform="translate(665 350) rotate(90)" />
+
+      <!-- Bottom arrow -->
+      <use
+        href="#dpad-arrow"
+        transform="translate(608 407) rotate(180)" />
+
+      <!-- Left arrow -->
+      <use
+        href="#dpad-arrow"
+        transform="translate(551 350) rotate(-90)" />
+      
+      <!-- Center -->
+      <circle cx="608" cy="348" r="25"/>
+    </g>
+  </g>
+
+  <!-- Wireless / projection mark -->
+  <g fill="none" stroke="url(#cyan)" stroke-linecap="round" transform="translate(0 25)">
+    <path d="M445 556 Q512 523 579 556" stroke-width="22"/>
+    <path d="M478 587 Q512 571 546 587" stroke-width="20"/>
+    <circle cx="512" cy="618" r="14" fill="url(#cyan)"/>
+  </g>
+
+  <!-- MCU -->
+  <g fill="none" stroke="#f7f7f7" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 50)">
+    <rect x="431" y="661" width="162" height="150" rx="16"/>
+
+    <!-- Top pins -->
+    <path d="M463 661 V637"/>
+    <path d="M512 661 V637"/>
+    <path d="M561 661 V637"/>
+
+    <!-- Bottom pins -->
+    <path d="M463 811 V836"/>
+    <path d="M512 811 V836"/>
+    <path d="M561 811 V836"/>
+
+    <!-- Left pins -->
+    <path d="M431 694 H397"/>
+    <path d="M431 736 H397"/>
+    <path d="M431 778 H397"/>
+
+    <!-- Right pins -->
+    <path d="M593 694 H627"/>
+    <path d="M593 736 H627"/>
+    <path d="M593 778 H627"/>
+    
+    <!-- circle -->
+    <circle cx="463" cy="695" r="10" fill="#f7f7f7"/>
+  </g>
+</svg>

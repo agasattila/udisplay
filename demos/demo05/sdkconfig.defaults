@@ -1,0 +1,14 @@
+# demo05 sdkconfig defaults — NimBLE BLE-only, no WiFi
+#
+# Apply with:  idf.py reconfigure   (or delete sdkconfig and run idf.py menuconfig)
+
+# BLE stack: NimBLE only (not Bluedroid)
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=n
+
+# Prefer 512-byte ATT MTU so the client can exchange larger messages
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=512
+
+# Disable WiFi — this is a BLE-only demo
+CONFIG_ESP_WIFI_ENABLED=n

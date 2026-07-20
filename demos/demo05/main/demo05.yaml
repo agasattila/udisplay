@@ -1,0 +1,40 @@
+device:
+  name: "Demo05"
+  version: "1.0"
+  description: "Minimal BLE demo — button toggles LED"
+
+widgets:
+  row0:
+      type: row
+      widgets:
+        intro1:
+          type: label
+          text: "==="
+          align: left
+        intro2:
+          type: label
+          text: "Greetings"
+          align: center
+        intro3:
+          type: label
+          text: "==="
+          align: right
+  sep0:
+    type: separator
+  space:
+    type: label
+    text: " "
+  sec0:
+    type: section
+    label: "Try it out!"
+    collapsible: true
+    widgets:
+      row1:
+        type: row
+        widgets:
+          push_btn:
+            type: button
+            label: "Toggle"
+          status_led:
+            type: led
+            label: "LED"

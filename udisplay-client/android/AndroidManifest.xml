@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  uDisplay Android manifest.
+
+  androiddeployqt does NOT merge this file with a Qt-generated base manifest —
+  when QT_ANDROID_PACKAGE_SOURCE_DIR/AndroidManifest.xml exists, androiddeployqt
+  copies Qt's template dir into the build output first, then overwrites it
+  file-for-file with this directory's contents. This file IS the complete
+  manifest used to build the APK, so it must declare everything: permissions,
+  the <application> block, and the launcher <activity>.
+
+  Android 6–11: BLUETOOTH + BLUETOOTH_ADMIN + ACCESS_FINE_LOCATION (required for
+    scanning even when not using location — Android platform requirement).
+  Android 12+ (API 31+): BLUETOOTH_SCAN + BLUETOOTH_CONNECT replace BLUETOOTH_ADMIN.
+    ACCESS_FINE_LOCATION still required for scan results that include device addresses.
+    usesPermissionFlags="neverForLocation" can suppress the location requirement only
+    when scan results are filtered to not return addresses — we do not set this flag
+    because we use the BT address as the stable uniqueId for deduplication.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Legacy Bluetooth (Android 6–11) -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+                     android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+                     android:maxSdkVersion="30" />
+
+    <!-- Android 12+ (API 31+) runtime permissions -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+                     android:minSdkVersion="31" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"
+                     android:minSdkVersion="31" />
+
+    <!-- Location permission required for BLE scan on all Android versions -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Declare BLE feature requirement so the Play Store filters correctly -->
+    <uses-feature android:name="android.hardware.bluetooth_le"
+                  android:required="true" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:name="org.qtproject.qt.android.bindings.QtApplication"
+        android:label="uDisplay"
+        android:icon="-- %%INSERT_APP_ICON%% --"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:allowBackup="true"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:label="uDisplay"
+            android:screenOrientation="unspecified"
+            android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
+            android:launchMode="singleTop"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="udisplay-client" />
+
+        </activity>
+
+    </application>
+
+</manifest>

@@ -1,0 +1,5 @@
+build
+**/build
+**/.qtcreator
+**/CMakeLists.txt.user
+udisplay-gen/udisplay_gen.egg-info*

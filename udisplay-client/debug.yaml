@@ -1,0 +1,74 @@
+device:
+  name: "My Device"          # required
+  version: "1.0"             # optional — informational, not parsed by client
+  description: "..."         # optional — shown in Qt client detail view
+
+widgets:
+  # ledX:
+  #     type: led
+  #     label: "On"
+  #     color: "#FF0000"
+  #     debug_state: on
+  #     align: right
+
+  led0:
+    type: rgbled
+    label: "On"
+    debug_state: "0x00FFFF00"
+  toggle0:
+    type: toggle
+    label: "Try me"
+    debug_state: on
+  hello:
+    type: button
+    label: "Hello, world!"
+    # shape: square
+    # textAlign: right
+  sep1:
+    type: separator
+  button1:
+    type: button
+    # label: "Push da Button"
+    widgets:
+          led1:
+            type: rgbled
+            label: "On"
+            # color: "#FF0000"
+            debug_state: "0x00FF0000"
+          label_led1:
+            type: label
+            text: "Push me"
+            textAlign: center
+            flex: 1
+  # hello:
+  #   type: label
+  #   text: "Hello, world!"
+  # myrow:
+  #   type: row
+  #   widgets:
+  #     outerlabel:
+  #       type: label
+  #       text: "Hello"
+  #     outerlabel2:
+  #       type: label
+  #       text: "Hello2"      
+  #     # rightlabel:
+  #     #   type: label
+  #     #   text: "Hello"
+  #     innerrow:
+  #       type: row
+  #       widgets:
+  #         innerlabel1:
+  #           type: label
+  #           text: "Label1"
+  #           flex: 1
+  #         innerlabel2:
+  #           type: label
+  #           text: "Label2"
+  #           flex: 1
+  #         innerlabel3:
+  #           type: label
+  #           text: "Label3 very very long text"
+  #           flex: 1
+  sep2:
+    type: separator

@@ -1,0 +1,589 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "udisplay.schema.json",
+  "title": "uDisplay UI Definition",
+  "description": "Schema for uDisplay YAML UI definitions. Validated by `udisplay-gen validate`. Widget IDs are assigned by codegen (not declared in YAML). Maximum 240 user widgets per device (IDs 0x10–0xFF); codegen fails if this limit is exceeded.",
+  "type": "object",
+  "required": ["device", "widgets"],
+  "additionalProperties": false,
+  "properties": {
+    "device": { "$ref": "#/$defs/device" },
+    "style": { "$ref": "#/$defs/styleBlock" },
+    "widgets": { "$ref": "#/$defs/widgetMap" }
+  },
+
+  "$defs": {
+
+    "device": {
+      "description": "Device metadata. Used in the Qt client's discovery list and connection screen.",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Human-readable device name shown in the Qt client discovery list.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "version": {
+          "description": "Firmware version string (informational only, not parsed by client).",
+          "type": "string",
+          "maxLength": 32
+        },
+        "description": {
+          "description": "Optional device description shown in the client detail view.",
+          "type": "string",
+          "maxLength": 255
+        },
+        "capabilities": {
+          "description": "Optional list of capability hint strings. Reserved for future use — the client currently accepts any capability string (kKnownCapabilities is empty; check is a no-op). Will gate features requiring a minimum client version once the first official release ships.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "minItems": 1
+        }
+      }
+    },
+
+    "widgetMap": {
+      "description": "Named widget or container map. Names become C macro suffixes. Rendered in declaration order. Names must be globally unique across all container scopes.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/widgetOrContainer" },
+      "propertyNames": {
+        "description": "Names must be lowercase snake_case identifiers.",
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "minProperties": 1
+    },
+
+    "widgetOrContainer": {
+      "description": "Any valid widget or layout container. The `type` field is the discriminator.",
+      "oneOf": [
+        { "$ref": "#/$defs/displayWidget" },
+        { "$ref": "#/$defs/ledWidget" },
+        { "$ref": "#/$defs/rgbledWidget" },
+        { "$ref": "#/$defs/buttonWidget" },
+        { "$ref": "#/$defs/buttonGroupWidget" },
+        { "$ref": "#/$defs/sliderWidget" },
+        { "$ref": "#/$defs/toggleWidget" },
+        { "$ref": "#/$defs/textWidget" },
+        { "$ref": "#/$defs/dropdownWidget" },
+        { "$ref": "#/$defs/labelWidget" },
+        { "$ref": "#/$defs/separatorWidget" },
+        { "$ref": "#/$defs/sectionContainer" },
+        { "$ref": "#/$defs/rowContainer" },
+        { "$ref": "#/$defs/gridContainer" }
+      ]
+    },
+
+    "widget": {
+      "description": "Alias for widgetOrContainer — preserved for backward compatibility.",
+      "$ref": "#/$defs/widgetOrContainer"
+    },
+
+    "flexProp": {
+      "description": "Layout weight within a row or grid container. Integer >= 1. Omit for auto-width (the widget sizes to its own content and does not stretch).",
+      "type": "integer",
+      "minimum": 1
+    },
+
+    "alignProp": {
+      "description": "Content alignment within a row or grid cell, used when the item does not stretch to fill it (flex: omitted, or extra space remains). Omit to inherit the parent row/grid's own align (or \"left\" if the parent didn't set one either).",
+      "type": "string",
+      "enum": ["left", "right", "center"]
+    },
+
+    "labelAlignProp": {
+      "description": "Text alignment within a label widget. Default: \"left\".",
+      "type": "string",
+      "enum": ["left", "right", "center", "justify"],
+      "default": "left"
+    },
+
+    "displayWidget": {
+      "description": "Numeric read-only display. Renders the latest value pushed by the device via STATE_UPDATE. No user interaction.",
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "display" },
+        "label": {
+          "description": "Text label shown above or beside the value.",
+          "type": "string",
+          "maxLength": 32
+        },
+        "unit": {
+          "description": "Unit suffix shown to the right of the value (e.g. \"V\", \"°C\", \"Hz\").",
+          "type": "string",
+          "maxLength": 16
+        },
+        "format": {
+          "description": "printf-style format string applied to the raw float value before display (e.g. \"%.2f\", \"%d\", \"%.1f\"). Default: \"%.2f\".",
+          "type": "string",
+          "maxLength": 32
+        },
+        "style": {
+          "description": "Rendering style. `large` renders as a full-width hero block with a 32px bold value — intended for primary instrument readings.",
+          "type": "string",
+          "enum": ["default", "large"],
+          "default": "default"
+        },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" },
+        "debug_state": {
+          "description": "Design-mode preview value. Ignored when YAML originates from a real device.",
+          "type": ["boolean", "number", "string"]
+        }
+      }
+    },
+
+    "ledWidget": {
+      "description": "Boolean indicator LED. Can be used standalone (renders as a dot + label row) or as a child of a `button` (renders inline within the button face). State is always device-authoritative — driven by STATE_UPDATE only, never optimistically flipped by the client.",
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "led" },
+        "label": {
+          "description": "Text label shown beside the LED dot (standalone) or on the button face (child). Omit for icon-only use.",
+          "type": "string",
+          "maxLength": 32
+        },
+        "color": {
+          "description": "Active (on) color of the LED dot as a 6-digit hex color (e.g. \"#ff0000\" for red). Default: \"#00d4aa\". The inactive (off) color is always fixed (#2a2a4a).",
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" },
+        "debug_state": {
+          "description": "Design-mode preview value. Ignored when YAML originates from a real device.",
+          "type": ["boolean", "number", "string"]
+        }
+      }
+    },
+
+    "rgbledWidget": {
+      "description": "Full-colour RGB LED indicator. State is a packed 24-bit integer (0x00RRGGBB) pushed by the device via STATE_UPDATE (VAL_INT32). Value 0 renders the LED as off (#2a2a4a). No user interaction.",
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "rgbled" },
+        "label": {
+          "description": "Text label shown beside the LED dot.",
+          "type": "string",
+          "maxLength": 32
+        },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" },
+        "debug_state": {
+          "description": "Design-mode preview value. Ignored when YAML originates from a real device.",
+          "type": ["boolean", "number", "string"]
+        }
+      }
+    },
+
+    "buttonFaceChild": {
+      "description": "A widget allowed inline on a button's face. Restricted to passive/decorative leaf types plus `row`/`grid` for multi-widget or vertical face layouts — no interactive controls (toggle, slider, text, dropdown, button, button-group), which would create overlapping touch targets with the button's own tap handling. The restriction applies recursively: a nested `row`/`grid`'s own `widgets:` are just as restricted, at every depth.",
+      "oneOf": [
+        { "$ref": "#/$defs/ledWidget" },
+        { "$ref": "#/$defs/rgbledWidget" },
+        { "$ref": "#/$defs/displayWidget" },
+        { "$ref": "#/$defs/labelWidget" },
+        { "$ref": "#/$defs/buttonFaceRowContainer" },
+        { "$ref": "#/$defs/buttonFaceGridContainer" }
+      ]
+    },
+
+    "buttonFaceWidgetMap": {
+      "description": "Named widget map for a button face or a container nested inside one — restricted to buttonFaceChild types, enforced recursively (every nested row/grid's own widgets: uses this same map, not the unrestricted top-level widgetMap).",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/buttonFaceChild" },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "minProperties": 1
+    },
+
+    "buttonFaceRowContainer": {
+      "description": "Horizontal layout container scoped to a button face. Same as `row`, but its `widgets:` is recursively restricted to buttonFaceChild types instead of the unrestricted top-level widgetMap.",
+      "type": "object",
+      "required": ["type", "widgets"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "row" },
+        "widgets": { "$ref": "#/$defs/buttonFaceWidgetMap" },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" }
+      }
+    },
+
+    "buttonFaceGridContainer": {
+      "description": "Grid layout container scoped to a button face. Same as `grid`, but its `widgets:` is recursively restricted to buttonFaceChild types instead of the unrestricted top-level widgetMap.",
+      "type": "object",
+      "required": ["type", "columns", "widgets"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "grid" },
+        "columns": {
+          "description": "Number of columns in the grid. Minimum 1 (columns: 1 renders as a single-column stacked layout).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "widgets": { "$ref": "#/$defs/buttonFaceWidgetMap" },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" }
+      }
+    },
+
+    "buttonWidget": {
+      "description": "Momentary push button. Sends a `button_press` EVENT to the device on tap. No optimistic state — the device drives any resulting state change via STATE_UPDATE. Supports optional child widgets (led, rgbled, display, label, or a nested row/grid of those) rendered inline, at compact scale, on the button face. Button color is controlled globally via the top-level `style:` block (`button` token).",
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "button" },
+        "label": {
+          "description": "Text label on the button face.",
+          "type": "string",
+          "maxLength": 32
+        },
+        "shape": {
+          "description": "Button shape. `rect` = rounded rectangle (default). `circle` = circular (use for icon/action buttons). `square` = square (use for gamepad-style layouts).",
+          "type": "string",
+          "enum": ["rect", "circle", "square"],
+          "default": "rect"
+        },
+        "widgets": {
+          "description": "Optional child widgets rendered inline on the button face — led, rgbled, display, label, or a nested row/grid of those (recursively restricted to the same types). Any number of children (matches the client's existing rendering support).",
+          "$ref": "#/$defs/buttonFaceWidgetMap"
+        },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" }
+      }
+    },
+
+    "buttonGroupWidget": {
+      "description": "Exclusive-select button group. Exactly one item is active at a time. Sends a `button_press` EVENT with the selected item's widget_id when the selection changes. Renders as a segmented control (grid layout) or directional pad (dpad layout).",
+      "type": "object",
+      "required": ["type", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "button-group" },
+        "label": {
+          "description": "Optional group label shown above the button group.",
+          "type": "string",
+          "maxLength": 32
+        },
+        "layout": {
+          "description": "`grid` = items laid out in a wrapping grid (default). `dpad` = classic 5-position directional pad (cross shape); items must specify `position` (top/right/bottom/left/center).",
+          "type": "string",
+          "enum": ["grid", "dpad"],
+          "default": "grid"
+        },
+        "items": {
+          "description": "Named selectable items. Each item gets its own widget_id assigned by codegen. For `dpad` layout, each item must specify a `position`. Minimum 2 items required.",
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/buttonGroupItem" },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "minProperties": 2
+        },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" }
+      }
+    },
+
+    "buttonGroupItem": {
+      "description": "A single selectable item within a button-group.",
+      "type": "object",
+      "required": ["label"],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "description": "Text label shown on the item button.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "position": {
+          "description": "Position within a `dpad` layout. Required when the parent button-group has `layout: dpad`. Ignored for `grid` layout.",
+          "type": "string",
+          "enum": ["top", "right", "bottom", "left", "center"]
+        }
+      }
+    },
+
+    "sliderWidget": {
+      "description": "Numeric read-write slider. The client sends a `slider_change` EVENT when the user releases the slider. The device sends STATE_UPDATE to confirm the accepted value (which may differ from the requested value if the device clamps or quantizes).",
+      "type": "object",
+      "required": ["type", "min", "max"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "slider" },
+        "label": {
+          "description": "Text label shown above the slider.",
+          "type": "string",
+          "maxLength": 32
+        },
+        "min": {
+          "description": "Minimum slider value (inclusive).",
+          "type": "number"
+        },
+        "max": {
+          "description": "Maximum slider value (inclusive). Must be greater than `min`.",
+          "type": "number"
+        },
+        "step": {
+          "description": "Slider step increment. Must be positive. Default: 1.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1
+        },
+        "unit": {
+          "description": "Unit suffix shown beside the current value (e.g. \"Hz\", \"ms\").",
+          "type": "string",
+          "maxLength": 16
+        },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" },
+        "debug_state": {
+          "description": "Design-mode preview value. Ignored when YAML originates from a real device.",
+          "type": ["boolean", "number", "string"]
+        }
+      }
+    },
+
+    "toggleWidget": {
+      "description": "Boolean read-write toggle switch. The client sends a `toggle_change` EVENT on user interaction. The device sends STATE_UPDATE to confirm the new state. No optimistic flip — the widget stays in its current visual state until the device confirms.",
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "toggle" },
+        "label": {
+          "description": "Text label shown beside the toggle.",
+          "type": "string",
+          "maxLength": 32
+        },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" },
+        "debug_state": {
+          "description": "Design-mode preview value. Ignored when YAML originates from a real device.",
+          "type": ["boolean", "number", "string"]
+        }
+      }
+    },
+
+    "textWidget": {
+      "description": "String widget. In `ro` mode renders the device-pushed string value. In `rw` mode renders an editable text field; the client sends a `text_submit` EVENT when the user confirms input (keyboard Done key or submit button) — not on every keystroke.",
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "text" },
+        "label": {
+          "description": "Text label shown above the field.",
+          "type": "string",
+          "maxLength": 32
+        },
+        "mode": {
+          "description": "`ro` = display-only (default). `rw` = editable; submits on keyboard confirm.",
+          "type": "string",
+          "enum": ["ro", "rw"],
+          "default": "ro"
+        },
+        "placeholder": {
+          "description": "Placeholder text shown in the field when empty (rw mode only).",
+          "type": "string",
+          "maxLength": 64
+        },
+        "maxlength": {
+          "description": "Maximum character count the user can enter (rw mode only). Enforced client-side. Default: 255.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255,
+          "default": 255
+        },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" },
+        "debug_state": {
+          "description": "Design-mode preview value. Ignored when YAML originates from a real device.",
+          "type": ["boolean", "number", "string"]
+        }
+      }
+    },
+
+    "dropdownWidget": {
+      "description": "Compact exclusive-select dropdown. Renders as a collapsed label+chevron row, expands to a scrollable item list. The device sends STATE_UPDATE (VAL_UINT8, index) to set the current selection. The client sends a SELECTION_CHANGE EVENT (widget_id + uint8 index) when the user picks a new item. Requires capabilities: [dropdown].",
+      "type": "object",
+      "required": ["type", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "dropdown" },
+        "label": {
+          "description": "Text label shown above the collapsed dropdown row.",
+          "type": "string",
+          "maxLength": 32
+        },
+        "items": {
+          "description": "Ordered map of key → display label pairs. The selection index (sent in STATE_UPDATE and SELECTION_CHANGE) is the 0-based position in YAML declaration order. Items do NOT get individual widget IDs — only the dropdown itself gets one. Minimum 2 items.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "minProperties": 2
+        },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" },
+        "debug_state": {
+          "description": "Design-mode preview value. Ignored when YAML originates from a real device.",
+          "type": ["boolean", "number", "string"]
+        }
+      }
+    },
+
+    "labelWidget": {
+      "description": "Static text decoration. Renders a heading, body, or caption text block set in YAML. No widget ID assigned — no protocol exchange. Requires capabilities: [label].",
+      "type": "object",
+      "required": ["type", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "label" },
+        "text": {
+          "description": "The static text to render.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "style": {
+          "description": "Text style. `heading` = bold, larger. `body` = normal weight (default). `caption` = small, muted.",
+          "type": "string",
+          "enum": ["heading", "body", "caption"],
+          "default": "body"
+        },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" },
+        "textAlign": { "$ref": "#/$defs/labelAlignProp" }
+      }
+    },
+
+    "separatorWidget": {
+      "description": "Horizontal visual divider. No widget ID assigned — no protocol exchange. Requires capabilities: [label].",
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "separator" },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" }
+      }
+    },
+
+    "sectionContainer": {
+      "description": "Named collapsible group container. Children get widget IDs as if they were top-level (section name excluded from ID path). Requires capabilities: [layout-v2].",
+      "type": "object",
+      "required": ["type", "widgets"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "section" },
+        "label": {
+          "description": "Section header label.",
+          "type": "string",
+          "maxLength": 64
+        },
+        "collapsible": {
+          "description": "Whether the section can be collapsed by the user. Default: false.",
+          "type": "boolean",
+          "default": false
+        },
+        "widgets": { "$ref": "#/$defs/widgetMap" },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" }
+      }
+    },
+
+    "rowContainer": {
+      "description": "Horizontal layout container. Children are laid out left-to-right with optional flex weights. Container name excluded from child ID paths. Requires capabilities: [layout-v2].",
+      "type": "object",
+      "required": ["type", "widgets"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "row" },
+        "widgets": { "$ref": "#/$defs/widgetMap" },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" }
+      }
+    },
+
+    "gridContainer": {
+      "description": "Grid layout container. Children are placed left-to-right, wrapping at `columns` items per row. Container name excluded from child ID paths. Requires capabilities: [layout-v2].",
+      "type": "object",
+      "required": ["type", "columns", "widgets"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "grid" },
+        "columns": {
+          "description": "Number of columns in the grid. Minimum 1 (columns: 1 renders as a single-column ColumnWidget-style layout).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "widgets": { "$ref": "#/$defs/widgetMap" },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" }
+      }
+    },
+
+    "colorToken": {
+      "description": "A CSS hex color value (#rgb, #rrggbb, #rrggbbaa) or the keyword 'transparent'.",
+      "type": "string",
+      "pattern": "^(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|transparent)$"
+    },
+
+    "styleTokenSet": {
+      "description": "A named set of color tokens. All fields are optional — unspecified tokens inherit from the `default` theme (or C++ hardcoded defaults if no `default` is present).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "background":   { "$ref": "#/$defs/colorToken", "description": "App / page background. Default: #0d0d1a" },
+        "surface":      { "$ref": "#/$defs/colorToken", "description": "Card / panel surface. Default: #1a1a2e" },
+        "text":         { "$ref": "#/$defs/colorToken", "description": "Body text. Default: #c0c0c0" },
+        "text_muted":   { "$ref": "#/$defs/colorToken", "description": "Secondary / placeholder text. Default: #888888" },
+        "text_heading":  { "$ref": "#/$defs/colorToken", "description": "Heading / prominent text. Default: #e0e0e0" },
+        "border":       { "$ref": "#/$defs/colorToken", "description": "Widget / component border. Default: #1e1e3a" },
+        "line":         { "$ref": "#/$defs/colorToken", "description": "Horizontal separator line. Default: #1e1e3a" },
+        "accent":       { "$ref": "#/$defs/colorToken", "description": "Primary accent color (values, highlights). Default: #00d4aa" },
+        "button":       { "$ref": "#/$defs/colorToken", "description": "Button background (active / selected state). Default: #00d4aa" },
+        "button_text":  { "$ref": "#/$defs/colorToken", "description": "Button label text. Default: #0d0d1a" },
+        "led_on":       { "$ref": "#/$defs/colorToken", "description": "LED fill color when on (button face dot). Default: #ffffff" },
+        "led_off":      { "$ref": "#/$defs/colorToken", "description": "LED fill color when off (button face dot). Default: transparent" },
+        "led_border":   { "$ref": "#/$defs/colorToken", "description": "LED dot border (button face dot). Default: #ffffff" },
+        "success":      { "$ref": "#/$defs/colorToken", "description": "Success / positive indicator. Default: #00d4aa" },
+        "warning":      { "$ref": "#/$defs/colorToken", "description": "Warning / caution indicator. Default: #f5a623" },
+        "error":        { "$ref": "#/$defs/colorToken", "description": "Error / danger indicator. Default: #e05555" }
+      }
+    },
+
+    "styleBlock": {
+      "description": "Optional top-level style block. Defines one or more named themes as sets of color tokens. The `default` theme sets the base that all other themes cascade from. Firmware switches themes via a TBD protocol mechanism (TODO-027). Invalid color strings are silently ignored by the client.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/styleTokenSet" },
+      "propertyNames": {
+        "description": "Theme names must be lowercase snake_case identifiers.",
+        "pattern": "^[a-z][a-z0-9_]*$"
+      }
+    }
+
+  }
+}
