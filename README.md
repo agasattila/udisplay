@@ -6,7 +6,12 @@
 
 It allows firmware developers to define a device UI declaratively (using a YAML-based format), and automatically generate the corresponding firmware-side code. A cross-platform client application (desktop and mobile) then renders and interacts with this UI over a direct connection (BLE or TCP), without requiring any cloud infrastructure.
 
-![image](docs/Screenshot_discovery.png) ![image](docs/Screenshot_demo01.png) ![image](docs/Screenshot_demo05.png)
+![uDisplay device discovery screen](docs/Screenshot_discovery.png) 
+
+> [!NOTE]
+> uDisplay is currently in active pre-1.0 development. The desktop and Android
+> clients, BLE and TCP transports, code generator, and ESP32 demos are functional,
+> but APIs and protocol details may still change before v1.0.
 
 ## Why uDisplay?
 
@@ -20,7 +25,9 @@ Many embedded projects end up reimplementing the same patterns:
 
 uDisplay aims to standardize this by introducing a **generic, reusable UI layer** between firmware and client.
 
-## Key Ideas
+![uDisplay desktop demo](docs/Screenshot_demo01.png) 
+
+## Features
  
  - Declarative UI definition  
    Define your device interface in a structured YAML format instead of hardcoding it.
@@ -34,6 +41,9 @@ uDisplay aims to standardize this by introducing a **generic, reusable UI layer*
  - Direct communication  
    No cloud required — devices are accessed locally via BLE or TCP.
    
+
+![uDisplay ESP32 BLE demo](docs/Screenshot_demo05.png)
+
 ## Use Cases
 
  - Hobby / DIY electronics projects
@@ -103,8 +113,6 @@ All code is reviewed, tested, and maintained by human author.
 
 
 ## Support & Work
-
-If you find this project useful, consider supporting it via GitHub Sponsors.
 
 I am also available for freelance / contractor work (C++, embedded, Qt, backend).
 Feel free to reach out via [LinkedIn](https://www.linkedin.com/in/attila-agas).
