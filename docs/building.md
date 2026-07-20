@@ -32,8 +32,8 @@ sudo apt install -y \
 Then build:
 
 ```bash
-git clone <repo-url> uDisplay
-cd uDisplay
+git clone https://github.com/agasattila/udisplay.git
+cd udisplay
 
 # codegen (needed by demos; run first)
 pip install ./udisplay-gen
