@@ -110,14 +110,20 @@ Rectangle {
          * regardless, so flex-bearing siblings must divide what's left
          * over after that, not the row's full width. Without this, a flex
          * child's own preferredWidth "ask" would exceed what's actually
-         * available once non-flex siblings are accounted for. */
+         * available once non-flex siblings are accounted for.
+         *
+         * d.item.implicitWidth, not d.implicitWidth: same Loader-mirroring
+         * gap as contentImplicitWidth above — d (a WidgetDelegate, itself a
+         * Loader) has its own .implicitWidth stuck at 0 for row/grid
+         * children; .item.implicitWidth drills into the loaded content and
+         * is reliable for both leaf and container children. */
         property real nonFlexWidth: {
             var items = props.items || []
             var sum = 0
             for (var i = 0; i < items.length; i++) {
                 if (!(items[i].flex > 0)) {
                     var d = repeater.itemAt(i)
-                    sum += d ? d.implicitWidth : 0
+                    sum += (d && d.item) ? d.item.implicitWidth : 0
                 }
             }
             return sum
@@ -138,8 +144,15 @@ Rectangle {
                 required property var modelData
                 compact: root.compact
                 Layout.fillWidth: modelData.flex > 0
-                Layout.minimumWidth: implicitWidth
-                Layout.preferredWidth: Math.max(implicitWidth,
+                /* item.implicitWidth, not bare implicitWidth: this binding
+                 * is set at the instantiation site, which overrides the
+                 * `Layout.preferredWidth: item ? item.implicitWidth : 0` fix
+                 * WidgetDelegate.qml applies to itself internally (see its
+                 * comment) — using bare implicitWidth here would silently
+                 * reintroduce the nested row/grid width-0 collapse that fix
+                 * exists to prevent. */
+                Layout.minimumWidth: item ? item.implicitWidth : 0
+                Layout.preferredWidth: Math.max(item ? item.implicitWidth : 0,
                     row.totalFlex > 0
                         ? Math.max(0, row.width - row.nonFlexWidth) * modelData.flex / row.totalFlex
                         : 0)

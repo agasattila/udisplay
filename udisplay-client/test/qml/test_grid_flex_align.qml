@@ -53,12 +53,15 @@ Item {
     }
 
     /* ── Grid 1: 2 columns x 2 rows, per-column flex ratio + align ───────
-     * GridLayout unifies width within a column (every cell in a column
-     * shares the same actual rendered width) — so the ratio can only be
-     * observed by comparing ACROSS columns, not within one. Column 0 (A,
-     * flex:3 + C, flex:0) should end up wider than column 1 (B, flex:0 +
-     * D, flex:0) because A's flex demand drives column 0's width; nothing
-     * in column 1 asks for more than its own content. */
+     * Layout.fillWidth is gated on modelData.flex > 0 (RowWidget.qml/
+     * GridWidget.qml's Repeater delegates) — a flex:0 cell never stretches,
+     * even when a flex>0 sibling shares its column and pulls that column
+     * wider. So within column 0, A (flex:3) stretches to its flex-driven
+     * width while C (flex:0) stays at its own natural content width —
+     * they do NOT share one rendered width, unlike a GridLayout with no
+     * fillWidth gating at all. Column 0 (driven by A's flex:3 demand)
+     * still ends up wider than column 1 (B, D both flex:0, nothing pulls
+     * it wider than its own content). */
     property var gridProps: {
         "columns": 2,
         "align": "center",
@@ -116,9 +119,16 @@ Item {
             var wA = delegates[0].width, wB = delegates[1].width
             var wC = delegates[2].width, wD = delegates[3].width
             if (wA <= 0 || wB <= 0 || wC <= 0 || wD <= 0) { fail("non-positive width: " + [wA, wB, wC, wD]); return }
-            /* Same column shares the same actual width (GridLayout invariant). */
-            if (wA !== wC) { fail("column 0 (A=" + wA + ", C=" + wC + ") should share one column width"); return }
-            if (wB !== wD) { fail("column 1 (B=" + wB + ", D=" + wD + ") should share one column width"); return }
+            /* A (flex:3) stretches into column 0's flex-driven width; C
+             * (flex:0) does not — flex:0 cells never fill their container
+             * or shared column, by design. */
+            if (!(wA > wC)) { fail("A (flex:3, width=" + wA + ") should be wider than C (flex:0, width=" + wC + ") in the same column"); return }
+            /* B and D are both flex:0 with identical single-letter content
+             * (same font/style) — approximately equal natural width, not
+             * because GridLayout unifies the column (a small delta is real:
+             * text layout metrics aren't pixel-identical across two
+             * separate Text elements even with matching content/font). */
+            if (Math.abs(wB - wD) > 2) { fail("column 1 (B=" + wB + ", D=" + wD + ") should have approximately equal natural width (same content)"); return }
             /* Column 0 has a flex:3 item (A) pulling extra width; column 1
              * has none (B, D both flex:0) — column 0 must end up wider. */
             if (!(wA > wB)) { fail("column 0 (flex:3 present, width=" + wA + ") should be wider than column 1 (all flex:0, width=" + wB + ")"); return }

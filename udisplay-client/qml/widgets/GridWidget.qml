@@ -106,8 +106,14 @@ Rectangle {
                 readonly property real colTotalFlex: grid.columnFlexTotals[col] || 0
                 compact: root.compact
                 Layout.fillWidth: modelData.flex > 0
-                Layout.minimumWidth: implicitWidth
-                Layout.preferredWidth: Math.max(implicitWidth,
+                /* item.implicitWidth, not bare implicitWidth — see
+                 * RowWidget.qml's identical delegate comment: this binding
+                 * overrides WidgetDelegate.qml's own internal
+                 * `Layout.preferredWidth: item ? item.implicitWidth : 0` fix,
+                 * so it must use the same drill-through or it silently
+                 * reintroduces the nested row/grid width-0 collapse. */
+                Layout.minimumWidth: item ? item.implicitWidth : 0
+                Layout.preferredWidth: Math.max(item ? item.implicitWidth : 0,
                     colTotalFlex > 0
                         ? (grid.width / grid.columns) * modelData.flex / colTotalFlex
                         : 0)

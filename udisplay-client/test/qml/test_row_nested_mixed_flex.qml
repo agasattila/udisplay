@@ -115,14 +115,18 @@ Item {
             if (nestedDelegate.width <= 0) { fail("nested row delegate has non-positive width: " + nestedDelegate.width); return }
             if (siblingDelegate.width <= 0) { fail("sibling label has non-positive width: " + siblingDelegate.width); return }
 
-            /* The core regression: widths must sum to the outer row's
-             * width, not exceed it (the historical bug had the nested
-             * row's inflated implicitWidth pulling more than its fair
-             * share, when it wasn't hanging outright). */
+            /* The core regression: the nested row's width must never exceed
+             * what's actually available in the outer row (the historical
+             * bug had its self-referential preferredWidth ask inflate
+             * without bound, or hang the layout engine outright in a
+             * polish() loop). Both outer children are flex:0, and flex:0
+             * cells never fill leftover row space, by design — so the sum
+             * legitimately falls short of outerRow.width; this only checks
+             * it never overshoots. */
             var sum = nestedDelegate.width + siblingDelegate.width
-            if (Math.abs(sum - outerRow.width) > 2) {
+            if (sum > outerRow.width + 2) {
                 fail("nested(" + nestedDelegate.width + ") + sibling(" + siblingDelegate.width +
-                     ") = " + sum + " does not match outerRow.width=" + outerRow.width)
+                     ") = " + sum + " exceeds outerRow.width=" + outerRow.width)
                 return
             }
 
@@ -151,14 +155,16 @@ Item {
                      " does not match nested row width=" + nestedRowWidget.width)
                 return
             }
-            /* button1 (flex:1) must be wider than the plain label — it's
-             * the only child claiming the flex pool, so it should absorb
-             * essentially all the remaining space after the label's own
-             * content width. */
-            if (!(buttonWidth > labelWidth)) {
-                fail("flex:1 button (" + buttonWidth + ") should be wider than the non-flex label (" + labelWidth + ")")
-                return
-            }
+            /* No "button must be wider than label" check here: the nested
+             * row itself is flex:0 (this fixture's whole point), so it
+             * never receives more width from the outer row than its own
+             * content sum (button.implicitWidth + label.implicitWidth) —
+             * there is no extra space left for the inner flex:1 button to
+             * absorb. Whichever child has more natural content width wins;
+             * that's fixture content, not something flex changes here. The
+             * innerSum check above is what actually matters: it confirms
+             * the flex computation still lands on a sane, non-inflated
+             * width instead of the historical polish()-loop blowup. */
 
             console.log("PASS: no polish() loop, nested=" + nestedDelegate.width + " sibling=" + siblingDelegate.width +
                         "; inner button=" + buttonWidth + " inner label=" + labelWidth)
