@@ -1081,8 +1081,11 @@ private slots:
 
     /* ── Alignment: label text align + row/grid content align ──────────── */
 
-    void data_propsRole_label_includesAlign()
+    void data_propsRole_label_includesLabelAlign()
     {
+        /* A label's own text alignment serializes under "labelAlign" —
+         * "align" is reserved for row/grid position (see eefe866's rename;
+         * WidgetModel.cpp only sets props["align"] for Row/Grid types). */
         WidgetDef w;
         w.keyPath    = QStringLiteral("caption");
         w.type       = WidgetType::Label;
@@ -1092,7 +1095,7 @@ private slots:
         WidgetModel m;
         m.setWidgets({ w });
         QVariantMap props = roleAt(m, 0, WidgetModel::PropsRole).toMap();
-        QCOMPARE(props[QStringLiteral("align")].toString(), QStringLiteral("center"));
+        QCOMPARE(props[QStringLiteral("labelAlign")].toString(), QStringLiteral("center"));
     }
 
     void data_propsRole_row_includesContainerAndChildAlign()

@@ -640,8 +640,11 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets[0].align, QStringLiteral("left"));
-        /* Child didn't declare its own align — empty means "inherit". */
-        QCOMPARE(widgets[0].children[0].align, QString());
+        /* Child didn't declare its own align — always resolves to "left"
+         * (its own default), never inherits the container's align. A
+         * child's align is independent of its container's; there is no
+         * tri-state "unspecified" sentinel. */
+        QCOMPARE(widgets[0].children[0].align, QStringLiteral("left"));
     }
 
     void row_align_containerAndChildOverride()
@@ -663,7 +666,10 @@ private slots:
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets[0].align, QStringLiteral("center"));
         QCOMPARE(widgets[0].children[0].align, QStringLiteral("right")); /* relay: own override */
-        QCOMPARE(widgets[0].children[1].align, QString());               /* fan: inherits */
+        /* fan didn't declare its own align — resolves to "left", NOT the
+         * container's "center". A child's align never inherits from its
+         * container. */
+        QCOMPARE(widgets[0].children[1].align, QStringLiteral("left"));
     }
 
     void row_align_invalidValue_warnsAndDefaultsToLeft()
@@ -689,12 +695,14 @@ private slots:
 
     void label_align_parsedAndDefaultsToLeft()
     {
+        /* A label's own text alignment is parsed from textAlign: (align: is
+         * reserved for row/grid position — see the eefe866 rename). */
         const char* yaml =
             "widgets:\n"
             "  a:\n"
             "    type: label\n"
             "    text: Hi\n"
-            "    align: justify\n"
+            "    textAlign: justify\n"
             "  b:\n"
             "    type: label\n"
             "    text: Bye\n";
@@ -708,11 +716,11 @@ private slots:
 
     void label_align_insideRow_doesNotWarnOnJustify()
     {
-        /* A label's align: key means text alignment (4-value enum incl.
-         * justify), not row-position (3-value). Using "justify" on a label
-         * that's also a row child must not trigger the row/grid align
-         * warning — see the child.type != WidgetType::Label guard in
-         * YamlParser.cpp. */
+        /* A label's own text alignment (4-value enum incl. justify) is
+         * parsed from textAlign:, a key entirely separate from a row/grid
+         * child's position align: (3-value, left/right/center) — so a
+         * label using "justify" for its own text as a row child cannot
+         * collide with the row-position align validation at all. */
         const char* yaml =
             "widgets:\n"
             "  ctrl_row:\n"
@@ -721,7 +729,7 @@ private slots:
             "      caption:\n"
             "        type: label\n"
             "        text: Hi\n"
-            "        align: justify\n";
+            "        textAlign: justify\n";
         YamlParser p;
         QList<WidgetDef> widgets;
         QString name, version;
@@ -729,7 +737,7 @@ private slots:
         QCOMPARE(widgets[0].children[0].labelAlign, QStringLiteral("justify"));
         for (const auto& d : p.diagnostics())
             QVERIFY2(!(d.field == "align" && d.severity == YamlParser::Severity::Warning),
-                     "label's own justify align must not warn as an invalid row-align value");
+                     "label's own justify textAlign must not warn as an invalid row-align value");
     }
 
     void row_childrenGetIds_transparentToContainer()

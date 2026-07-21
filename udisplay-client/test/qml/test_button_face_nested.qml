@@ -13,15 +13,22 @@ import "../../qml/widgets" as W
  * already use (see test_row_flex_align.qml / test_grid_flex_align.qml /
  * test_row_nested_mixed_flex.qml for that machinery's own regression
  * coverage; this file only covers what's NEW: reachability from inside a
- * button face, and the `compact` sizing contract every compact leaf
- * component must honor).
+ * button face, and the `compact` propagation contract every compact leaf
+ * component must honor.
+ *
+ * `compact` no longer means "smaller" for every leaf — only DisplayWidget
+ * still varies implicitWidth/implicitHeight by compact (see its own
+ * _boxHeight/_labelPixelSize etc.). Led/RgbLed/Label intentionally dropped
+ * compact-driven shrinking; `compact: true` only changes their label color
+ * (button_text vs text) now — see each widget's own header comment.
  *
  * Covers:
- *  - Every compact-capable leaf (Led/RgbLed/Display/Label) sets a real,
- *    smaller implicitWidth/implicitHeight when compact: true — not just
- *    "renders visibly" (this exact size-propagation mechanism has silently
- *    collapsed nested layouts to 0 twice before in this codebase's history;
- *    see WidgetDelegate.qml's Layout.preferredHeight/Width comments).
+ *  - `compact` still reaches every leaf and produces a sane, non-collapsed
+ *    implicitWidth/implicitHeight — not just "renders visibly" (this size-
+ *    propagation mechanism has silently collapsed nested layouts to 0 twice
+ *    before in this codebase's history; see WidgetDelegate.qml's
+ *    Layout.preferredHeight/Width comments). DisplayWidget additionally
+ *    still shrinks under compact; Led/RgbLed/Label do not (color-only).
  *  - A button face whose single item is a `grid` (columns: 1) renders both
  *    grandchildren and stacks them vertically — proving the button ->
  *    WidgetDelegate -> gridComp -> GridWidget chain actually works when
@@ -238,25 +245,37 @@ Item {
         running: true
         onTriggered: {
             /* ── Section A ────────────────────────────────────────── */
+            /* Led/RgbLed: compact no longer shrinks height (both floor to
+             * Math.max(label.implicitHeight, 48) regardless of compact) —
+             * only the label color differs. Still assert non-collapse and
+             * that the shared height floor actually held for both. */
             if (ledCompact.implicitWidth <= 0 || ledCompact.implicitHeight <= 0)
                 { fail("compact LedWidget collapsed: " + ledCompact.implicitWidth + "x" + ledCompact.implicitHeight); return }
-            if (!(ledCompact.implicitHeight < ledNormal.implicitHeight))
-                { fail("compact LedWidget (" + ledCompact.implicitHeight + ") should be shorter than normal (" + ledNormal.implicitHeight + ")"); return }
+            if (ledCompact.implicitHeight !== ledNormal.implicitHeight)
+                { fail("compact LedWidget height (" + ledCompact.implicitHeight + ") should equal normal (" + ledNormal.implicitHeight + ") - compact no longer shrinks height"); return }
 
             if (rgbCompact.implicitWidth <= 0 || rgbCompact.implicitHeight <= 0)
                 { fail("compact RgbLedWidget collapsed: " + rgbCompact.implicitWidth + "x" + rgbCompact.implicitHeight); return }
-            if (!(rgbCompact.implicitHeight < rgbNormal.implicitHeight))
-                { fail("compact RgbLedWidget (" + rgbCompact.implicitHeight + ") should be shorter than normal (" + rgbNormal.implicitHeight + ")"); return }
+            if (rgbCompact.implicitHeight !== rgbNormal.implicitHeight)
+                { fail("compact RgbLedWidget height (" + rgbCompact.implicitHeight + ") should equal normal (" + rgbNormal.implicitHeight + ") - compact no longer shrinks height"); return }
 
+            /* DisplayWidget is the one leaf that still varies size by
+             * compact (see its own _boxHeight/_labelPixelSize etc.) — this
+             * assertion is unchanged. */
             if (displayCompact.implicitWidth <= 0 || displayCompact.implicitHeight <= 0)
                 { fail("compact DisplayWidget collapsed: " + displayCompact.implicitWidth + "x" + displayCompact.implicitHeight); return }
             if (!(displayCompact.implicitHeight < displayNormal.implicitHeight))
                 { fail("compact DisplayWidget (" + displayCompact.implicitHeight + ") should be shorter than normal (" + displayNormal.implicitHeight + ")"); return }
 
+            /* LabelWidget: same text, same font size regardless of compact
+             * ("Now only color is changed" — LabelWidget.qml's own header
+             * comment) — width and height should match exactly. */
             if (labelCompact.implicitWidth <= 0 || labelCompact.implicitHeight <= 0)
                 { fail("compact LabelWidget collapsed: " + labelCompact.implicitWidth + "x" + labelCompact.implicitHeight); return }
-            if (!(labelCompact.implicitHeight < labelNormal.implicitHeight))
-                { fail("compact LabelWidget (" + labelCompact.implicitHeight + ") should be shorter than normal (" + labelNormal.implicitHeight + ")"); return }
+            if (labelCompact.implicitHeight !== labelNormal.implicitHeight || labelCompact.implicitWidth !== labelNormal.implicitWidth)
+                { fail("compact LabelWidget (" + labelCompact.implicitWidth + "x" + labelCompact.implicitHeight +
+                        ") should be identical to normal (" + labelNormal.implicitWidth + "x" + labelNormal.implicitHeight +
+                        ") - compact only changes color") ; return }
 
             /* ── Section C ────────────────────────────────────────── */
             if (nestedGridButton.implicitWidth <= 64)
@@ -332,8 +351,13 @@ Item {
             var deepLed = innerGridDelegates[0].item
             if (!deepLed) { fail("deeply-nested led did not load"); return }
             if (!deepLed.compact) { fail("compact did not propagate through 2 Loader{source:} hops"); return }
-            if (deepLed.implicitWidth !== 24 || deepLed.implicitHeight !== 24) {
-                fail("led 2 levels deep should be compact-sized (24x24), got " +
+            /* LedWidget no longer has a distinct compact size (see Section A
+             * above) - compact propagation itself is what this section
+             * covers, so just confirm it didn't collapse to 0 across 2
+             * dynamic Loader{source:} hops, matching ledCompact's height
+             * from Section A (Math.max(label.implicitHeight, 48)). */
+            if (deepLed.implicitWidth <= 0 || deepLed.implicitHeight !== 48) {
+                fail("led 2 levels deep has unexpected size, got " +
                      deepLed.implicitWidth + "x" + deepLed.implicitHeight)
                 return
             }

@@ -102,22 +102,22 @@ Item {
     W.LabelWidget {
         id: leftLabel
         y: 200
-        props: { "text": "left", "style": "body", "align": "left" }
+        props: { "text": "left", "style": "body", "labelAlign": "left" }
     }
     W.LabelWidget {
         id: rightLabel
         y: 230
-        props: { "text": "right", "style": "body", "align": "right" }
+        props: { "text": "right", "style": "body", "labelAlign": "right" }
     }
     W.LabelWidget {
         id: centerLabel
         y: 260
-        props: { "text": "center", "style": "body", "align": "center" }
+        props: { "text": "center", "style": "body", "labelAlign": "center" }
     }
     W.LabelWidget {
         id: justifyLabel
         y: 290
-        props: { "text": "justify", "style": "body", "align": "justify" }
+        props: { "text": "justify", "style": "body", "labelAlign": "justify" }
     }
     W.LabelWidget {
         id: defaultLabel
