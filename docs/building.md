@@ -360,6 +360,9 @@ up automatically.
 
 ### Required hardware
 
-- ESP32 development board (ESP32-DevKitC or compatible) — required for demo05 today
+- An ESP32-family devkit — 5 targets supported (`esp32`, `esp32c3`, `esp32s3`,
+  `esp32c6`, `esp32h2`); see [`demos/demo05/README.md`](../demos/demo05/README.md)
+  for the per-board LED GPIO/type/polarity table (only ESP32-C3 Super Mini is
+  hardware-verified today)
 - USB cable for flashing
 - A uDisplay client (desktop or Android) for BLE testing
