@@ -120,8 +120,10 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
           OUTPUT: uDisplay-${{ github.sha }}-x86_64.AppImage
         run: |
+          echo "Contents of package directory:"
+          find "${{ github.workspace }}/package" \( -type f -o -type l \) -print | sort
           tools/linuxdeploy-x86_64.AppImage \
-            --appdir package \
+            --appdir "${{ github.workspace }}/package/bin" \
             --plugin qt \
             --output appimage
 
