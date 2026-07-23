@@ -60,7 +60,7 @@ if(HAVE_MDNS)
             message(STATUS "QZeroConf: patched CMakeLists.txt to force Qt6")
         endif()
     endif()
-    add_subdirectory(${qzeroconf_SOURCE_DIR} ${qzeroconf_BINARY_DIR})
+    add_subdirectory(${qzeroconf_SOURCE_DIR} ${qzeroconf_BINARY_DIR} EXCLUDE_FROM_ALL)
     if(ANDROID)
         message(STATUS "mDNS: QZeroConf enabled (Android NSD/JNI)")
     elseif(APPLE)
@@ -285,6 +285,15 @@ if(ANDROID AND (HAVE_MDNS OR HAVE_BLE))
         QT_ANDROID_PACKAGE_SOURCE_DIR "${_QZC_PKG_DIR}"
         QT_ANDROID_APP_ICON "@mipmap/ic_launcher")
 endif()
+
+include(GNUInstallDirs)
+
+install(
+    TARGETS udisplay-client
+    BUNDLE DESTINATION .
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
 # Tests
 option(UDISPLAY_CLIENT_BUILD_TESTS "Build unit tests" ON)
