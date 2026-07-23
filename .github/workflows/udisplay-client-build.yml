@@ -113,6 +113,20 @@ jobs:
           chmod +x tools/*.AppImage
 
       # Build AppImage
+      - name: Keep only the SQLite Qt SQL driver
+        run: |
+          find "${QT_ROOT_DIR}/plugins/sqldrivers" \
+            -maxdepth 1 \
+            -type f \
+            -name 'libqsql*.so' \
+            ! -name 'libqsqlite.so' \
+            -delete
+
+          echo "Remaining SQL drivers:"
+          find "${QT_ROOT_DIR}/plugins/sqldrivers" \
+            -maxdepth 1 \
+            -type f \
+            -print      
       - name: Build AppImage
         env:
           QML_SOURCES_PATHS: ${{ github.workspace }}/udisplay-client/qml
@@ -120,10 +134,11 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
           OUTPUT: uDisplay-${{ github.sha }}-x86_64.AppImage
         run: |
+          rm -rf AppDir         
           echo "Contents of package directory:"
           find "${{ github.workspace }}/package" \( -type f -o -type l \) -print | sort
           tools/linuxdeploy-x86_64.AppImage \
-            --appdir "${{ github.workspace }}/package/bin/" \
+            --appdir AppDir \
             --executable "${{ github.workspace }}/package/bin/udisplay-client" \
             --desktop-file "${{ github.workspace }}/package/share/applications/udisplay-client.desktop" \
             --icon-file "${{ github.workspace }}/package/share/icons/hicolor/256x256/apps/udisplay-client.png" \
