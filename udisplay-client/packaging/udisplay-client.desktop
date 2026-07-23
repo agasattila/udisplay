@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=uDisplay
+Comment=Universal Remote UI for Embedded Devices
+Exec=udisplay-client
+Icon=udisplay-client
+Categories=Utility;
+Terminal=false

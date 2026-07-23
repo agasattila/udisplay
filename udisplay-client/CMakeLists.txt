@@ -292,38 +292,23 @@ include(GNUInstallDirs)
 
 install(
     TARGETS udisplay-client
-
-    RUNTIME_DEPENDENCY_SET udisplay_runtime_dependencies
-
-    BUNDLE DESTINATION "."
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    BUNDLE DESTINATION "."
 )
 
-install(
-    RUNTIME_DEPENDENCY_SET udisplay_runtime_dependencies
-    # 
-    # RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-    # LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-
-    POST_INCLUDE_REGEXES
-        ".*Qt6.*"
-        ".*QtZeroConf.*"
-        ".*udisplay.*"
-    
-    POST_EXCLUDE_REGEXES
-        "^/lib/"
-        "^/lib64/"
-        "^/usr/lib/"
-        "^/usr/lib64/"
-)
-
-if(NOT ANDROID)
+if(UNIX AND NOT APPLE AND NOT ANDROID)
     install(
         FILES "${UDISPLAY_DESKTOP_ICON_PNG}"
         DESTINATION
             "${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps"
         RENAME "udisplay-client.png"
+    )
+
+    install(
+        FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/packaging/udisplay-client.desktop"
+        DESTINATION
+            "${CMAKE_INSTALL_DATADIR}/applications"
     )
 endif()
 

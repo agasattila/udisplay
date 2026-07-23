@@ -63,6 +63,7 @@ jobs:
             -B build/udisplay-client \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/package"
+            -DUDISPLAY_CLIENT_BUILD_TESTS=ON
 
       # 5. Build
       - name: Build
@@ -70,6 +71,15 @@ jobs:
           cmake \
             --build build/udisplay-client \
             --parallel
+            
+      # 5.b Test      
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ctest \
+            --test-dir build/udisplay-client \
+            --output-on-failure
 
       # 6. Install
       - name: Install into staging directory
