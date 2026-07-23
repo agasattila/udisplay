@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Qml Quick QuickControls2 Network Sql Bluetooth)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Qml Quick QuickControls2 Network Sql)
 find_package(ZLIB REQUIRED)
 
 

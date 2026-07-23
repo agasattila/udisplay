@@ -35,6 +35,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: "6.11.0"
+          modules: "qtconnectivity qttasktree"
           cache: true
 
       # 3. Install build dependencies
