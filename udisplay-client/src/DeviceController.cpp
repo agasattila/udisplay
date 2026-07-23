@@ -188,8 +188,24 @@ void DeviceController::startConnection(Transport* t)
     m_bootstrap->start();
 }
 
+bool DeviceController::rejectConnectionInDesignMode()
+{
+    if (!m_designMode) return false;
+    /* Do NOT route through setError(): design mode's documented contract
+     * (DeviceController.h) is that state() stays "running" and parse
+     * problems surface only via designErrorString — never m_state/
+     * errorString. Nothing ever resets m_state back to "running" after
+     * setError(), so doing that here would be a permanent, undocumented
+     * state corruption for a path that isn't even reachable through the
+     * shipped QML today. A log line is enough for a guard whose job is
+     * purely defensive (found via adversarial review during /ship). */
+    qWarning("DeviceController: connection attempt refused — already in design mode");
+    return true;
+}
+
 void DeviceController::connectTcp(const QString& host, quint16 port)
 {
+    if (rejectConnectionInDesignMode()) return;
     teardown();
     setState(QStringLiteral("connecting"));
     auto* tcp = new TcpTransport(host, port, this);
@@ -199,6 +215,7 @@ void DeviceController::connectTcp(const QString& host, quint16 port)
 
 void DeviceController::connectDiscovered(const QVariant& info)
 {
+    if (rejectConnectionInDesignMode()) return;
     DeviceInfo di = info.value<DeviceInfo>();
     if (di.type == DeviceInfo::Ble) {
 #ifdef HAVE_BLE
@@ -220,6 +237,11 @@ void DeviceController::connectDevice(int transportType,
                                      const QString& address,
                                      quint16 port)
 {
+    /* Must run before the state guard below: design mode leaves state()
+     * == "running", which the state guard would otherwise treat as a
+     * silent no-op — inconsistent with connectTcp()/connectDiscovered(),
+     * which both surface a visible setError() for the same precondition. */
+    if (rejectConnectionInDesignMode()) return;
     if (m_state != QStringLiteral("disconnected") && m_state != QStringLiteral("error"))
         return;
     if (transportType == 1) {
@@ -293,7 +315,9 @@ void DeviceController::reloadDesignFile()
     const QByteArray raw = f.readAll();
     f.close();
 
-    if (!applyParsedYaml(raw))
+    /* Design mode never passes a capabilityGate, so the result can only be
+     * Success or ParseFailed — never Rejected. */
+    if (applyParsedYaml(raw, /*designMode=*/true) == ApplyResult::ParseFailed)
         setDesignError(m_yamlParser.errorString());
     else
         setDesignError(QString());
@@ -317,7 +341,9 @@ void DeviceController::setActiveStyle(const QString& name)
 
 /* ── Shared YAML → model helper ─────────────────────────────────────────── */
 
-bool DeviceController::applyParsedYaml(const QByteArray& raw)
+DeviceController::ApplyResult DeviceController::applyParsedYaml(
+        const QByteArray& raw, bool designMode,
+        const std::function<QString(const QStringList&)>& capabilityGate)
 {
     QList<WidgetDef> widgets;
     QString name, version;
@@ -325,12 +351,44 @@ bool DeviceController::applyParsedYaml(const QByteArray& raw)
     QMap<QString, StyleToken> styles;
     if (!m_yamlParser.parse(raw, widgets, name, version, caps, styles)) {
         printDebugFailure(m_yamlParser.errorString());
-        return false;
+        return ApplyResult::ParseFailed;
     }
 
+    /* Diagnostics emit right after parse, before any mutation — matches
+     * design mode's original ordering (TODO-034 D5). qWarning() logging is
+     * bootstrap-only (D4): design mode already surfaces problems via
+     * designErrorString/UI. This runs even when capabilityGate is about to
+     * reject the connection (D6) — the parser's findings are independent of
+     * protocol compatibility, so a rejected connection now surfaces YAML
+     * warnings it silently swallowed before. */
     const QList<YamlParser::ParseDiagnostic>& diags = m_yamlParser.diagnostics();
-    if (!diags.isEmpty())
+    if (!diags.isEmpty()) {
+        if (!designMode) {
+            for (const auto& d : diags) {
+                qWarning("[YamlParser %s] %s.%s: %s",
+                         d.severity == YamlParser::Severity::Warning ? "WARNING" : "ERROR",
+                         qPrintable(d.widgetKey),
+                         qPrintable(d.field),
+                         qPrintable(d.message));
+            }
+        }
         emit parseWarningsChanged(diags);
+    }
+
+    if (capabilityGate) {
+        const QString rejection = capabilityGate(caps);
+        if (!rejection.isEmpty()) {
+            /* Model is fully resolved at this point — only the compatibility
+             * check failed. Dump it (--debug) alongside the rejection reason.
+             * Uses the local widgets/name/version, not member state: nothing
+             * below this point has mutated m_deviceName/m_styles/m_model, so
+             * a rejected connection never clobbers whatever was previously
+             * loaded (matches historical bootstrap behavior). */
+            printDebugDump(widgets, name, version, QStringLiteral("default"));
+            printDebugFailure(rejection);
+            return ApplyResult::Rejected;
+        }
+    }
 
     if (m_deviceName != name) {
         m_deviceName = name;
@@ -342,21 +400,26 @@ bool DeviceController::applyParsedYaml(const QByteArray& raw)
     if (stylesChanged)
         emit availableStylesChanged();
 
-    /* Reset to "default" on each new YAML load; keep named style if still present. */
-    QString newActive = m_styles.contains(m_activeStyleName)
+    /* Active-style reset-vs-preserve divergence (TODO-034 D3): a fresh
+     * bootstrap connection may be a different device entirely, so reset to
+     * "default"; a design-mode reload is the same file being iterated on, so
+     * preserve the current style if the new YAML still defines it. */
+    QString newActive;
+    if (designMode) {
+        newActive = m_styles.contains(m_activeStyleName)
                         ? m_activeStyleName
                         : QStringLiteral("default");
+    } else {
+        newActive = QStringLiteral("default");
+    }
     m_activeStyleName = newActive;
     m_activeStyleMap  = buildStyleVariantMap(m_styles.value(newActive));
     emit activeStyleChanged();
 
     m_model.setWidgets(widgets);
 
-    /* Inject debug_state preview values in design mode only.
-     * applyParsedYaml is never called from onBootstrapSucceeded, so this
-     * block cannot execute when connected to a real device. The guard is
-     * explicit for safety in case of future refactors. */
-    if (m_designMode) {
+    /* Inject debug_state preview values in design mode only. */
+    if (designMode) {
         std::function<void(const QList<WidgetDef>&)> injectDebugValues =
             [&](const QList<WidgetDef>& list) {
                 for (const WidgetDef& w : list) {
@@ -370,7 +433,7 @@ bool DeviceController::applyParsedYaml(const QByteArray& raw)
     }
 
     printDebugDump(widgets, name, version, m_activeStyleName);
-    return true;
+    return ApplyResult::Success;
 }
 
 void DeviceController::printDebugDump(const QList<WidgetDef>& widgets, const QString& name,
@@ -405,60 +468,34 @@ void DeviceController::onBootstrapSucceeded(QByteArray merkleRoot,
         return;
     }
 
-    QList<WidgetDef> widgets;
-    QString name, version;
-    QStringList capabilities;
-    QMap<QString, StyleToken> styles;
-    if (!m_yamlParser.parse(yaml, widgets, name, version, capabilities, styles)) {
-        setError(QStringLiteral("YAML parse failed: %1")
-                 .arg(m_yamlParser.errorString()));
-        printDebugFailure(m_yamlParser.errorString());
-        return;
-    }
-
-    for (const QString& cap : capabilities) {
-        if (!kKnownCapabilities.contains(cap)) {
-            const QString reason = QStringLiteral(
-                "Device requires app update — unknown capability: %1").arg(cap);
-            setError(reason);
-            /* Model is fully resolved at this point — only the compatibility
-             * check failed. Dump it (--debug) alongside the rejection reason,
-             * since this is the one failure branch where the resolved tree
-             * is actually available and worth seeing. */
-            printDebugDump(widgets, name, version, QStringLiteral("default"));
-            printDebugFailure(reason);
-            teardown();
-            return;
+    /* Captured by reference so the wrapper has the rejection message ready
+     * for setError() without applyParsedYaml needing to return it directly. */
+    QString rejectionReason;
+    auto capabilityGate = [&rejectionReason](const QStringList& capabilities) -> QString {
+        for (const QString& cap : capabilities) {
+            if (!kKnownCapabilities.contains(cap)) {
+                rejectionReason = QStringLiteral(
+                    "Device requires app update — unknown capability: %1").arg(cap);
+                return rejectionReason;
+            }
         }
+        return QString();
+    };
+
+    switch (applyParsedYaml(yaml, /*designMode=*/false, capabilityGate)) {
+    case ApplyResult::ParseFailed:
+        /* No teardown() here — matches historical behavior. Whether that's
+         * actually the right recovery behavior is tracked separately
+         * (TODO-046); this refactor preserves it, not decides it fresh. */
+        setError(QStringLiteral("YAML parse failed: %1").arg(m_yamlParser.errorString()));
+        return;
+    case ApplyResult::Rejected:
+        setError(rejectionReason);
+        teardown();
+        return;
+    case ApplyResult::Success:
+        break;
     }
-
-    if (m_deviceName != name) {
-        m_deviceName = name;
-        emit deviceNameChanged();
-    }
-
-    bool stylesChanged = (m_styles.keys() != styles.keys());
-    m_styles = styles;
-    if (stylesChanged)
-        emit availableStylesChanged();
-
-    m_activeStyleName = QStringLiteral("default");
-    m_activeStyleMap  = buildStyleVariantMap(m_styles.value(m_activeStyleName));
-    emit activeStyleChanged();
-
-    m_model.setWidgets(widgets);
-    printDebugDump(widgets, name, version, m_activeStyleName);
-
-    const QList<YamlParser::ParseDiagnostic>& diags = m_yamlParser.diagnostics();
-    for (const auto& d : diags) {
-        qWarning("[YamlParser %s] %s.%s: %s",
-                 d.severity == YamlParser::Severity::Warning ? "WARNING" : "ERROR",
-                 qPrintable(d.widgetKey),
-                 qPrintable(d.field),
-                 qPrintable(d.message));
-    }
-    if (!diags.isEmpty())
-        emit parseWarningsChanged(diags);
 
     storeBlob(merkleRoot, compressedBlob);
     setState(QStringLiteral("running"));
