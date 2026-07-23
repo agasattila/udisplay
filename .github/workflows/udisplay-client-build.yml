@@ -1,0 +1,124 @@
+# .github/workflows/udisplay-client-build.yml
+
+name: Build uDisplay client
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - "udisplay-client/**"
+      - ".github/workflows/udisplay-client-build.yml"
+
+  pull_request:
+    paths:
+      - "udisplay-client/**"
+      - ".github/workflows/udisplay-client-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    name: Linux build
+    runs-on: ubuntu-24.04
+
+    steps:
+      # 1. Checkout source
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # 2. Install Qt
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.11.0"
+          cache: true
+
+      # 3. Install build dependencies
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt install -y \
+              build-essential \
+              cmake \
+              git \
+              pkg-config \
+              qt6-base-dev \
+              qt6-declarative-dev \
+              libqt6quickcontrols2-6 \
+              qml6-module-qtquick-controls \
+              zlib1g-dev \
+              libavahi-client-dev \
+              librsvg2-bin
+
+      # 4. CMake configuration
+      - name: Configure
+        run: |
+          cmake \
+            -S udisplay-client \
+            -B build/udisplay-client \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/package"
+
+      # 5. Build
+      - name: Build
+        run: |
+          cmake \
+            --build build/udisplay-client \
+            --parallel
+
+      # 6. Install
+      - name: Install into staging directory
+        run: |
+          cmake \
+            --install build/udisplay-client
+
+      # 7. Create archive
+      - name: Create archive
+        run: |
+          tar \
+            -C package \
+            -czf udisplay-client-linux-x86_64.tar.gz \
+            .
+
+      # 8. Upload workflow artifact
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: udisplay-client-linux-x86_64
+          path: udisplay-client-linux-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: build-linux
+
+    # Runs only on tag push
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      # Use previous artifact
+      - name: Download workflow artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: udisplay-client-linux-x86_64
+          path: release-files
+
+      # Create release
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            release-files/udisplay-client-linux-x86_64.tar.gz \
+            --title "uDisplay ${{ github.ref_name }}" \
+            --generate-notes
