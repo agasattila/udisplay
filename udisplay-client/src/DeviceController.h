@@ -27,12 +27,13 @@
  * Debug Dump:
  *   Activated via setDebugMode(true) (called from main.cpp when --debug is
  *   present). Prints the fully-resolved widget tree via qInfo() after every
- *   successful parse, in BOTH design mode (applyParsedYaml) and real mode
- *   (onBootstrapSucceeded) — these are two separate functions, not one shared
- *   choke point (see applyParsedYaml's doc comment below). On parse failure,
- *   prints the failure reason instead. On capability rejection specifically,
- *   prints both the full dump AND the rejection reason, since the model is
- *   fully resolved at that point — only the compatibility check failed.
+ *   successful parse, in BOTH design mode and real mode — both now go
+ *   through the single shared applyParsedYaml() (see its doc comment below;
+ *   TODO-034 collapsed the two independent implementations into one). On
+ *   parse failure, prints the failure reason instead. On capability
+ *   rejection specifically, prints both the full dump AND the rejection
+ *   reason, since the model is fully resolved at that point — only the
+ *   compatibility check failed.
  *
  * DESIGN MODE FLOW
  *
@@ -41,11 +42,13 @@
  *    dc.startDesignMode(path)
  *          │
  *          ├─ reads file (raw YAML bytes)
- *          ├─ applyParsedYaml(raw)
- *          │     ├─ success → m_designErrorString = ""
- *          │     │             (--debug: printDebugDump → qInfo)
- *          │     └─ failure → m_designErrorString = yamlParser.errorString()
- *          │                   (--debug: printDebugFailure → qInfo)
+ *          ├─ applyParsedYaml(raw, /*designMode=*\/true)
+ *          │     ├─ Success      → m_designErrorString = ""
+ *          │     │                 (--debug: printDebugDump → qInfo)
+ *          │     └─ ParseFailed  → m_designErrorString = yamlParser.errorString()
+ *          │                       (--debug: printDebugFailure → qInfo)
+ *          │                       (design mode never passes a capabilityGate,
+ *          │                        so Rejected can't happen on this path)
  *          ├─ setState("running")
  *          └─ m_watcher.addPath(path)
  *
@@ -56,7 +59,32 @@
  *                   │ (150ms later)
  *                   └─ reloadDesignFile()
  *                         ├─ reads file
- *                         └─ applyParsedYaml(raw)  (same --debug behavior as above)
+ *                         └─ applyParsedYaml(raw, /*designMode=*\/true)  (same as above)
+ *
+ * BOOTSTRAP FLOW (real device)
+ *
+ *  BootstrapManager::succeeded(merkleRoot, compressedBlob)
+ *          │
+ *          └─ onBootstrapSucceeded(merkleRoot, compressedBlob)
+ *                ├─ decompressBlob(compressedBlob)
+ *                │     └─ empty → setError("Failed to decompress...") + printDebugFailure, return
+ *                ├─ capabilityGate = lambda checking kKnownCapabilities,
+ *                │                   captures rejectionReason by reference
+ *                ├─ applyParsedYaml(yaml, /*designMode=*\/false, capabilityGate)
+ *                │     ├─ ParseFailed → setError("YAML parse failed: " + yamlParser.errorString())
+ *                │     │                 (no teardown() — matches historical behavior, see TODO-046)
+ *                │     ├─ Rejected    → setError(rejectionReason), teardown()
+ *                │     │                 (model/name/styles left untouched — gate ran
+ *                │     │                  before any mutation, see applyParsedYaml doc)
+ *                │     └─ Success     → (falls through below)
+ *                ├─ storeBlob(merkleRoot, compressedBlob)
+ *                ├─ setState("running")
+ *                └─ m_watchdog.start()
+ *
+ *  connectTcp()/connectDiscovered()/connectDevice() refuse to run
+ *  (qWarning + return, no state mutation — see rejectConnectionInDesignMode()
+ *  doc) while m_designMode is true — the two flows above never interleave on
+ *  one instance (TODO-034 D2: this used to be enforced by nothing).
  */
 #pragma once
 
@@ -70,6 +98,7 @@
 #include <QString>
 #include <QTimer>
 #include <QVariantMap>
+#include <functional>
 
 class Transport;
 
@@ -142,10 +171,25 @@ private slots:
     void reloadDesignFile();
 
 private:
+    /** Result of applyParsedYaml(). ParseFailed and Rejected are distinct
+     *  because callers react differently: a capability Rejected connection
+     *  calls teardown(), a ParseFailed one does not (TODO-046 tracks whether
+     *  that historical asymmetry should change — this refactor preserves it
+     *  exactly, not decide it fresh). */
+    enum class ApplyResult { Success, ParseFailed, Rejected };
+
     void setState(const QString& s);
     void setError(const QString& msg);
     void setDesignError(const QString& msg);
     void teardown();
+    /** True if a connection attempt should be refused because we're in
+     *  design mode. connectTcp()/connectDiscovered()/connectDevice() call
+     *  this first — design mode and a real bootstrap must never run
+     *  concurrently on one instance (TODO-034 D2). Logs via qWarning() only
+     *  — deliberately does NOT call setError(): design mode's contract is
+     *  that state() stays "running" and errorString()/state() are reserved
+     *  for the real-device lifecycle (see class doc above). */
+    bool rejectConnectionInDesignMode();
     /** Wire BootstrapManager signals and start the connection. Called by both
      *  connectTcp() and connectDiscovered() after transport creation. */
     void startConnection(Transport* t);
@@ -153,14 +197,31 @@ private:
     QByteArray cachedBlob(const QByteArray& root) const;
     void storeBlob(const QByteArray& root, const QByteArray& blob);
     QByteArray decompressBlob(const QByteArray& compressed);
-    /** Parse raw YAML bytes and populate the widget model.
-     *  Returns true on success. On failure, sets m_designErrorString.
-     *  Used by design mode (reloadDesignFile, direct file read) ONLY —
-     *  onBootstrapSucceeded (real mode) does NOT call this; it independently
-     *  re-implements parse + populate (pre-existing duplication, see
-     *  TODO-034). Both paths call printDebugDump()/printDebugFailure() when
-     *  --debug is set, so debug output covers both modes despite the split. */
-    bool applyParsedYaml(const QByteArray& raw);
+    /** Parse raw YAML bytes and populate the widget model. Shared by both
+     *  design mode (reloadDesignFile) and real-device bootstrap
+     *  (onBootstrapSucceeded) — see the DESIGN MODE FLOW / BOOTSTRAP FLOW
+     *  diagrams above (TODO-034 collapsed what used to be two independent
+     *  implementations).
+     *
+     *  designMode is passed explicitly by each caller rather than read from
+     *  m_designMode, so behavior is tied to which call path actually ran, not
+     *  a mutable flag — it gates debug_state injection, the active-style
+     *  reset-vs-preserve divergence, and qWarning() diagnostic logging
+     *  (bootstrap only).
+     *
+     *  capabilityGate, if provided, runs right after a successful parse but
+     *  BEFORE any member state (m_deviceName/m_styles/m_model) is mutated. A
+     *  non-empty return rejects the YAML (ApplyResult::Rejected) without
+     *  touching that state — a rejected connection never clobbers whatever
+     *  was previously loaded. Design mode never passes a gate, so it can
+     *  only return Success or ParseFailed.
+     *
+     *  Diagnostics (parseWarningsChanged, plus qWarning() in bootstrap mode)
+     *  emit right after parse, before mutation — even when a capabilityGate
+     *  subsequently rejects the connection, since the parser's findings are
+     *  independent of protocol compatibility. */
+    ApplyResult applyParsedYaml(const QByteArray& raw, bool designMode,
+                                const std::function<QString(const QStringList&)>& capabilityGate = nullptr);
 
     /** --debug: print the fully-resolved widget tree via qInfo(). No-op if
      *  m_debugMode is false. */
