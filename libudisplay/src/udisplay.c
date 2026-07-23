@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Attila Agas
 
-#include "../include/udisplay.h"
+#include "udisplay.h"
 #include "protocol.h"
 #include "chunk_server.h"
 #include "framing.h"
+#include "udisplay/version.h"
 #include <string.h>
+
+// Library version
+const char *udisplay_version(void)
+{
+    return UDISPLAY_VERSION_STRING;
+}
 
 /* ── Library state (single static instance) ─────────────────────────────── */
 

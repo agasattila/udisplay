@@ -61,6 +61,9 @@
 extern "C" {
 #endif
 
+// Query library version
+const char *udisplay_version(void);
+
 /* ── Constants ───────────────────────────────────────────────────────────── */
 
 #define UDISPLAY_PROTO_VERSION    0x04u

@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
-project(udisplay-client VERSION 0.2.1 LANGUAGES CXX)
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/uDisplayVersion.cmake")
+project(udisplay-client VERSION ${UDISPLAY_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

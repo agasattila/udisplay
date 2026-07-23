@@ -1,0 +1,28 @@
+#pragma once
+
+//
+// version.h was generated from version.h.in
+//
+//
+// Example version guard:
+//
+//  #if UDISPLAY_VERSION >= UDISPLAY_VERSION_ENCODE(1, 2, 0)
+//     /* API available since 1.2.0 */
+//  #endif
+//
+ 
+#define UDISPLAY_VERSION_MAJOR @UDISPLAY_VERSION_MAJOR@
+#define UDISPLAY_VERSION_MINOR @UDISPLAY_VERSION_MINOR@
+#define UDISPLAY_VERSION_PATCH @UDISPLAY_VERSION_PATCH@
+
+#define UDISPLAY_VERSION_STRING "@UDISPLAY_VERSION_FULL@"
+
+#define UDISPLAY_VERSION_ENCODE(major, minor, patch) \
+    (((major) * 10000) + ((minor) * 100) + (patch))
+
+#define UDISPLAY_VERSION \
+    UDISPLAY_VERSION_ENCODE( \
+        UDISPLAY_VERSION_MAJOR, \
+        UDISPLAY_VERSION_MINOR, \
+        UDISPLAY_VERSION_PATCH)
+
