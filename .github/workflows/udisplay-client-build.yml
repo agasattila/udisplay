@@ -123,7 +123,10 @@ jobs:
           echo "Contents of package directory:"
           find "${{ github.workspace }}/package" \( -type f -o -type l \) -print | sort
           tools/linuxdeploy-x86_64.AppImage \
-            --appdir "${{ github.workspace }}/package/bin" \
+            --appdir "${{ github.workspace }}/package/bin/" \
+            --executable "${{ github.workspace }}/package/bin/udisplay-client" \
+            --desktop-file "${{ github.workspace }}/package/share/applications/udisplay-client.desktop" \
+            --icon-file "${{ github.workspace }}/package/share/icons/hicolor/256x256/apps/udisplay-client.png" \
             --plugin qt \
             --output appimage
 
