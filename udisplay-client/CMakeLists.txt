@@ -286,16 +286,48 @@ if(ANDROID AND (HAVE_MDNS OR HAVE_BLE))
         QT_ANDROID_APP_ICON "@mipmap/ic_launcher")
 endif()
 
+# ── Installation ─────────────────────────────────────────────────────────
+
 include(GNUInstallDirs)
 
 install(
     TARGETS udisplay-client
-    BUNDLE DESTINATION .
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+
+    RUNTIME_DEPENDENCY_SET udisplay_runtime_dependencies
+
+    BUNDLE DESTINATION "."
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )
 
-# Tests
+install(
+    RUNTIME_DEPENDENCY_SET udisplay_runtime_dependencies
+    # 
+    # RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    # LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+
+    POST_INCLUDE_REGEXES
+        ".*Qt6.*"
+        ".*QtZeroConf.*"
+        ".*udisplay.*"
+    
+    POST_EXCLUDE_REGEXES
+        "^/lib/"
+        "^/lib64/"
+        "^/usr/lib/"
+        "^/usr/lib64/"
+)
+
+if(NOT ANDROID)
+    install(
+        FILES "${UDISPLAY_DESKTOP_ICON_PNG}"
+        DESTINATION
+            "${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps"
+        RENAME "udisplay-client.png"
+    )
+endif()
+
+# ── Tests ─────────────────────────────────────────────────────────────────
 option(UDISPLAY_CLIENT_BUILD_TESTS "Build unit tests" ON)
 if(UDISPLAY_CLIENT_BUILD_TESTS)
     enable_testing()
