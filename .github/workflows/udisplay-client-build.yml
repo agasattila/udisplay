@@ -62,7 +62,7 @@ jobs:
             -S udisplay-client \
             -B build/udisplay-client \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/package"
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/package" \
             -DUDISPLAY_CLIENT_BUILD_TESTS=ON
 
       # 5. Build
@@ -71,7 +71,7 @@ jobs:
           cmake \
             --build build/udisplay-client \
             --parallel
-            
+
       # 5.b Test      
       - name: Run tests
         env:
