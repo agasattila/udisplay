@@ -260,14 +260,17 @@ jobs:
               python3
 
       # 7. CMake configure against Qt's Android toolchain.
-      #    QT_HOST_DIR/QT_ANDROID_DIR follow aqtinstall's on-disk layout
-      #    (<dir>/<qt-version>/<arch-dir-name>), computed here from the single
+      #    QT_HOST_DIR/QT_ANDROID_DIR follow aqtinstall's actual on-disk layout
+      #    when given a custom --outputdir (verified against a real CI run's
+      #    logs): <dir>/Qt/<qt-version>/<arch-dir-name> — note the extra "Qt/"
+      #    segment aqt inserts, which isn't present when installing to the
+      #    default (unset dir:) location. Computed here from the single
       #    QT_VERSION source of truth via shell expansion rather than a
       #    self-referencing env: block (GitHub Actions doesn't support that).
       - name: Configure
         run: |
-          QT_HOST_DIR="${{ github.workspace }}/qt-host/${QT_VERSION}/gcc_64"
-          QT_ANDROID_DIR="${{ github.workspace }}/qt-android/${QT_VERSION}/android_arm64_v8a"
+          QT_HOST_DIR="${{ github.workspace }}/qt-host/Qt/${QT_VERSION}/gcc_64"
+          QT_ANDROID_DIR="${{ github.workspace }}/qt-android/Qt/${QT_VERSION}/android_arm64_v8a"
           cmake \
             -S udisplay-client \
             -B build/udisplay-client-android \
