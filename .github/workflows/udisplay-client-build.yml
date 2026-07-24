@@ -29,6 +29,10 @@ jobs:
       # 1. Checkout source
       - name: Checkout source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Default fetch-depth: 1 does not fetch tags — without this, exact-tag
+          # detection for the udisplay-client version label silently never works.
+          fetch-depth: 0
 
       # 2. Install Qt
       - name: Install Qt
@@ -185,6 +189,10 @@ jobs:
       # 1. Checkout source
       - name: Checkout source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Default fetch-depth: 1 does not fetch tags — without this, exact-tag
+          # detection for the udisplay-client version label silently never works.
+          fetch-depth: 0
 
       # 2. Install desktop Qt (host tools) — qmlcachegen/rcc run on the host
       #    even during an Android cross-build, so QT_HOST_PATH needs a

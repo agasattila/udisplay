@@ -46,4 +46,17 @@ ApplicationWindow {
                 stack.pop(null)  // pop to root
         }
     }
+
+    // Version label — declared after (and z-stacked above) the StackView so
+    // it's never obscured by DiscoveryScreen/DeviceScreen content.
+    Label {
+        text: Qt.application.version
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 8
+        font.pixelSize: 11
+        color: "#ffffff"
+        opacity: 0.5
+        z: 1
+    }
 }

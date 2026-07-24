@@ -4,6 +4,7 @@
 #include "DeviceController.h"
 #include "DiscoveryModel.h"
 #include "DeviceInfo.h"
+#include "client_version.h"
 #include <QCommandLineParser>
 #include <QGuiApplication>
 #include <QIcon>
@@ -27,7 +28,7 @@ int main(int argc, char* argv[])
     qRegisterMetaType<DeviceInfo>("DeviceInfo");
     app.setOrganizationName(QStringLiteral("uDisplay"));
     app.setApplicationName(QStringLiteral("uDisplay Client"));
-    app.setApplicationVersion(QStringLiteral("0.1.0"));
+    app.setApplicationVersion(QStringLiteral(UDISPLAY_CLIENT_DISPLAY_VERSION));
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/app.png")));
 
 #ifdef Q_OS_ANDROID
