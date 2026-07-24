@@ -74,19 +74,18 @@ else()
 endif()
 
 # ── Qt Bluetooth for BLE discovery + transport ────────────────────────────
-# Android: Qt6::Bluetooth always available in the Qt Android build.
-# Apple: Bluetooth framework always present (no extra packages needed).
-# Linux desktop: requires Qt6 Bluetooth module (qt6-connectivity-dev).
-# Gate pkg-config detection behind NOT ANDROID to avoid host library leaking
-# into cross-compile sysroot (same pattern as avahi-client above).
+# Available wherever the Qt kit ships the Bluetooth module: Apple bundles it
+# always, Android needs the qtconnectivity module installed alongside the Qt
+# kit (CI: install-qt-action modules: qtconnectivity), Linux desktop needs
+# qt6-connectivity-dev. find_package(Qt6 COMPONENTS Bluetooth) is CMake's own
+# package search — scoped correctly under CMAKE_TOOLCHAIN_FILE/QT_HOST_PATH
+# during an Android cross-compile, unlike raw pkg-config (see the mDNS/avahi
+# gating above), so it's safe to call unconditionally rather than assuming
+# the target exists on Android without ever creating it.
+find_package(Qt6 COMPONENTS Bluetooth QUIET)
 set(HAVE_BLE OFF)
-if(ANDROID)
+if(Qt6Bluetooth_FOUND)
     set(HAVE_BLE ON)
-else()
-    find_package(Qt6 COMPONENTS Bluetooth QUIET)
-    if(Qt6Bluetooth_FOUND)
-        set(HAVE_BLE ON)
-    endif()
 endif()
 
 if(HAVE_BLE)
@@ -293,6 +292,7 @@ include(GNUInstallDirs)
 install(
     TARGETS udisplay-client
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     BUNDLE DESTINATION "."
 )
 

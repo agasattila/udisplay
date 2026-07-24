@@ -50,8 +50,8 @@ The **v2.x** series is planned to introduce an MVVM architecture together with W
 - `udisplay-client`
   - TCP transport/mDNS discovery
   - BLE transport
-  - Linux x86_64 build (`.tar.gz`)
-  - Android build (manual ADB installation)
+  - Linux x86_64 build (`.tar.gz`, AppImage)
+  - Android build (manual ADB installation; CI-built arm64-v8a debug APK also available)
 
 ### Release v1.0
 
