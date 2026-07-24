@@ -293,6 +293,7 @@ include(GNUInstallDirs)
 install(
     TARGETS udisplay-client
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     BUNDLE DESTINATION "."
 )
 
