@@ -2,20 +2,22 @@
 
 ## Infrastructure
 
-### Verify Android APK on a real device after first CI run
+### Verify Android APK on a real device
 
-**What:** Sideload the `.apk` produced by the new `build-android` CI job onto a real
-Android device and confirm it launches, and that mDNS/BLE discovery finds a uDisplay
-device.
+**What:** Sideload the `.apk` produced by the `build-android` CI job onto a real Android
+device and confirm it launches, and that mDNS/BLE discovery finds a uDisplay device.
 
-**Why:** The design doc's Success Criteria requires real-device verification, but that's
-inherently impossible before this ships — no APK exists until CI actually runs once
-against real GitHub Actions infrastructure. Shipping now (with this follow-up tracked)
-was the explicit call over blocking the ship on a verification that can't happen yet.
+**Why:** The design doc's Success Criteria requires real-device verification. CI is now
+green ([run #30111643875](https://github.com/agasattila/udisplay/actions/runs/30111643875)
+produced a real 24.5 MB APK) — this is now the only remaining verification step before
+the Android CI job can be considered fully done. It genuinely couldn't happen earlier:
+no APK existed until CI ran for the first time, and getting to green took 4 iteration
+fixes (see PR #3 for the full list — a wrong Qt path, a missing CMake install rule, an
+unimported Qt6::Bluetooth target, and an unsigned release build type).
 
 **Effort:** S
 **Priority:** P1
-**Depends on:** `build-android` job landing and completing at least one successful run.
+**Depends on:** Nothing else — `build-android` is green, artifact is ready to download.
 
 ### Release signing + Play Store distribution for udisplay-client Android APK
 
