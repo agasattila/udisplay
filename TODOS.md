@@ -2,7 +2,7 @@
 
 ## Infrastructure
 
-### Verify Android APK on a real device
+### 1. Verify Android APK on a real device
 
 **What:** Sideload the `.apk` produced by the `build-android` CI job onto a real Android
 device and confirm it launches, and that mDNS/BLE discovery finds a uDisplay device.
@@ -19,7 +19,7 @@ unimported Qt6::Bluetooth target, and an unsigned release build type).
 **Priority:** P1
 **Depends on:** Nothing else — `build-android` is green, artifact is ready to download.
 
-### Release signing + Play Store distribution for udisplay-client Android APK
+### 2. Release signing + Play Store distribution for udisplay-client Android APK
 
 **What:** Add a GitHub Secrets-backed keystore, tag-derived version codes, and signed
 release APK builds for the Android CI job.
@@ -46,7 +46,7 @@ handled client-side (it talks to the user's own uDisplay device over local
 network/BLE), uploaded as a public 30-day CI artifact on this already-public repo.
 Revisit this specifically (not just signing) if the threat model ever changes.
 
-### Multi-ABI matrix build for udisplay-client Android APK
+### 3. Multi-ABI matrix build for udisplay-client Android APK
 
 **What:** Extend the `build-android` CI job to a matrix building `armeabi-v7a` and/or
 `x86_64` in addition to `arm64-v8a`.
@@ -63,7 +63,7 @@ testing becomes a priority.
 **Priority:** P4
 **Depends on:** The v1 Android CI job (build-android) landing and working first.
 
-### Prebuilt Docker image for the Qt-Android CI toolchain
+### 4. Prebuilt Docker image for the Qt-Android CI toolchain
 
 **What:** Bake the Qt 6.11 Android kit + NDK into a Docker image (published to GHCR) so CI
 runs pull the image instead of reinstalling the toolchain every time.
