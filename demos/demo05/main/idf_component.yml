@@ -1,0 +1,29 @@
+# Managed component dependency for WS2812-type boards (see Kconfig.projbuild
+# DEMO05_LED_IS_WS2812). led_strip is NOT bundled with ESP-IDF itself, so a
+# WS2812 board's build fetches it from the IDF Component Registry on first
+# configure - this gives those builds a network dependency they didn't have
+# before (accepted during /plan-eng-review rather than vendoring an in-tree
+# copy).
+#
+# The `rules: if: target in [...]` clause below is what actually keeps a
+# plain-GPIO board (esp32, esp32c3) from resolving/downloading this at all -
+# CMakeLists.txt's PRIV_REQUIRES conditional only controls linking, not
+# whether the component manager fetches the package during reconfigure.
+# Keep this list in sync with Kconfig.projbuild's DEMO05_LED_IS_WS2812
+# defaults (currently: ESP32-S3/C6/H2 boards are WS2812, ESP32/ESP32-C3 are not)
+# and with DEMO05_LED_IS_WS2812's own `depends on` restricting it to the same
+# three targets.
+#
+# dependencies.lock is intentionally NOT committed (gitignored) - its
+# `target:` field can only ever pin one of this project's 5 build targets, so
+# a lock generated against a non-WS2812 target (e.g. esp32c3) doesn't even
+# mention led_strip and would look like protection it isn't providing for
+# the three targets that actually fetch it. The `^3.0` constraint above is
+# the real (and only) version guarantee across all targets; this is the same
+# accepted-network-dependency tradeoff as the rest of this file, just made
+# explicit for the lock file too.
+dependencies:
+  espressif/led_strip:
+    version: "^3.0"
+    rules:
+      - if: "target in [esp32s3, esp32c6, esp32h2]"

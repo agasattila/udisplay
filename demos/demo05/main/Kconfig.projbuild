@@ -1,0 +1,133 @@
+menu "Demo05 Configuration"
+    # No DEMO05_BOARD entry exists for any target outside this set (see the
+    # choice below) - gating the whole menu means an unsupported target gets
+    # a normal Kconfig invisibility (no CONFIG_DEMO05_LED_GPIO define at all)
+    # instead of an empty/undefined value silently reaching main.cpp. See the
+    # matching #ifndef CONFIG_DEMO05_LED_GPIO guard in main.cpp.
+    depends on IDF_TARGET_ESP32 || IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32S3 || \
+               IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32H2
+
+choice DEMO05_BOARD
+    prompt "Target board"
+    default DEMO05_BOARD_ESP32C3_SUPERMINI if IDF_TARGET_ESP32C3
+    default DEMO05_BOARD_ESP32_DEVKITC if IDF_TARGET_ESP32
+    default DEMO05_BOARD_ESP32S3_DEVKITC1 if IDF_TARGET_ESP32S3
+    default DEMO05_BOARD_ESP32C6_DEVKITC1 if IDF_TARGET_ESP32C6
+    default DEMO05_BOARD_ESP32H2_DEVKITM1 if IDF_TARGET_ESP32H2
+    help
+        Selects which specific development board this build targets, not just
+        the chip family (idf.py set-target only fixes the toolchain/chip — a
+        single target like esp32 covers many differently-wired boards). Each
+        choice below sets the LED GPIO, LED type, polarity, and (for WS2812
+        boards) on-color defaults below.
+
+        Only ESP32-C3 Super Mini is physically hardware-verified. Every other
+        entry is desk-research against public pinout docs only — verify
+        against your actual board before trusting it (see README).
+
+    config DEMO05_BOARD_ESP32C3_SUPERMINI
+        bool "ESP32-C3 Super Mini (hardware-verified)"
+        depends on IDF_TARGET_ESP32C3
+        help
+            Onboard blue status LED on GPIO8, active-low (drive LOW to turn
+            on). GPIO8 is also a strapping pin — avoid pulling it low during
+            boot for reasons unrelated to this LED. Hardware-verified.
+
+            Note: some ESP32-C3 Super Mini clone boards use GPIO10 instead of
+            GPIO8 for the onboard LED — if the LED doesn't respond, try
+            switching DEMO05_LED_GPIO to 10 below.
+
+    config DEMO05_BOARD_ESP32_DEVKITC
+        bool "ESP32 DevKitC (UNVERIFIED - desk research only)"
+        depends on IDF_TARGET_ESP32
+        help
+            Onboard LED on GPIO2, active-high (drive HIGH to turn on). GPIO2
+            is a strapping pin. Per public pinout references, not physically
+            bench-tested against real hardware.
+
+    config DEMO05_BOARD_ESP32S3_DEVKITC1
+        bool "ESP32-S3-DevKitC-1 (UNVERIFIED - desk research only)"
+        depends on IDF_TARGET_ESP32S3
+        help
+            Onboard addressable WS2812 RGB LED. Wired to GPIO38 on the
+            current v1.1 board revision (this is the default below); older
+            v1.0 boards wire it to GPIO48 instead — check your board's
+            silkscreen/revision marking and override DEMO05_LED_GPIO if
+            needed. Per public pinout references, not physically
+            bench-tested against real hardware.
+
+    config DEMO05_BOARD_ESP32C6_DEVKITC1
+        bool "ESP32-C6-DevKitC-1 (UNVERIFIED - desk research only)"
+        depends on IDF_TARGET_ESP32C6
+        help
+            Onboard addressable WS2812 RGB LED on GPIO8. GPIO8 is a
+            strapping pin; the onboard circuit is already tuned for it. Per
+            public pinout references, not physically bench-tested against
+            real hardware.
+
+    config DEMO05_BOARD_ESP32H2_DEVKITM1
+        bool "ESP32-H2-DevKitM-1 (UNVERIFIED - desk research only)"
+        depends on IDF_TARGET_ESP32H2
+        help
+            Onboard addressable WS2812 RGB LED on GPIO8. Per public pinout
+            references, not physically bench-tested against real hardware.
+
+endchoice
+
+config DEMO05_LED_GPIO
+    int "LED GPIO number"
+    default 8 if DEMO05_BOARD_ESP32C3_SUPERMINI
+    default 2 if DEMO05_BOARD_ESP32_DEVKITC
+    default 38 if DEMO05_BOARD_ESP32S3_DEVKITC1
+    default 8 if DEMO05_BOARD_ESP32C6_DEVKITC1
+    default 8 if DEMO05_BOARD_ESP32H2_DEVKITM1
+    range 0 63
+    help
+        GPIO pin driving the onboard LED: a plain digital on/off line for
+        GPIO-type boards, or the single-wire data line for WS2812 boards.
+        Range matches the operand width of `1ULL << CONFIG_DEMO05_LED_GPIO`
+        in main.cpp — a manual override outside 0-63 would otherwise be a
+        shift by more than the operand's bit width (undefined behavior).
+
+config DEMO05_LED_IS_WS2812
+    bool "LED is an addressable WS2812 (not a plain GPIO)"
+    depends on IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32H2
+    default n if DEMO05_BOARD_ESP32C3_SUPERMINI
+    default n if DEMO05_BOARD_ESP32_DEVKITC
+    default y if DEMO05_BOARD_ESP32S3_DEVKITC1
+    default y if DEMO05_BOARD_ESP32C6_DEVKITC1
+    default y if DEMO05_BOARD_ESP32H2_DEVKITM1
+    help
+        Several ESP32-S3/C3/C6/H2 devkits wire their onboard LED as an
+        addressable WS2812 (RMT-driven), not a plain GPIO on/off line -
+        these need a completely different driver (espressif/led_strip), not
+        just a different pin number. When set, DEMO05_LED_ACTIVE_LOW is
+        ignored (polarity is a plain-GPIO-only concept) and
+        DEMO05_LED_WS2812_COLOR selects the "on" color.
+
+        Restricted to the three targets where main/idf_component.yml's
+        `rules: if: target in [...]` clause actually resolves led_strip -
+        setting this on an excluded target would make CMakeLists.txt request
+        a component the manager never fetched, failing the build.
+
+config DEMO05_LED_ACTIVE_LOW
+    bool "LED is active-low"
+    depends on !DEMO05_LED_IS_WS2812
+    default y if DEMO05_BOARD_ESP32C3_SUPERMINI
+    default n if DEMO05_BOARD_ESP32_DEVKITC
+    help
+        Plain-GPIO onboard LEDs vary in polarity across devkits (ESP32-C3
+        Super Mini is active-low; many ESP32 DevKitC boards are
+        active-high). Ignored entirely for WS2812 boards.
+
+config DEMO05_LED_WS2812_COLOR
+    hex "WS2812 'on' color (0xRRGGBB)"
+    depends on DEMO05_LED_IS_WS2812
+    default 0xFFFFFF
+    range 0x000000 0xFFFFFF
+    help
+        Color driven when the LED should be "on" (white by default,
+        override to any 24-bit RGB value). "Off" always drives (0,0,0)
+        regardless of this setting.
+
+endmenu
