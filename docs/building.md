@@ -279,6 +279,14 @@ enables `Qt6::Bluetooth` and mDNS via Android NSD/JNI automatically, and copies
 permissions Android requires for scanning) into the package source dir at configure
 time. You do not need to edit `CMakeLists.txt` or the manifest to build for Android.
 
+If you just want an APK to sideload instead of building locally, CI already builds one:
+the `build-android` job in
+[`udisplay-client-build.yml`](../.github/workflows/udisplay-client-build.yml) produces an
+arm64-v8a debug APK as a workflow artifact whenever `udisplay-client/**` changes on
+`main`, a `v*` tag, or a pull request (Actions tab, `uDisplay-<sha>-arm64-v8a-debug.apk`,
+retained 30 days). It's debug-signed for sideloading only — see `TODOS.md` for the
+signing/distribution tradeoff. The manual steps below are for local development.
+
 1. Install the Qt for Android toolchain from the Qt online installer (the apt packages do
    not include Android cross-compilation).
 2. Install Android SDK and NDK via Android Studio or `sdkmanager`.

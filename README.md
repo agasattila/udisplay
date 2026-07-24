@@ -76,6 +76,7 @@ A Python tool that converts YAML definitions into firmware-ready code.
 - [Building from source](docs/building.md) — all dependencies and build instructions for Ubuntu
 - [Protocol](docs/protocol.md) — binary wire format
 - [Widget reference](docs/widgets.md) — supported widget types and YAML schema
+- [TODOS](TODOS.md) — tracked follow-up work (deferred scope, known tradeoffs)
 
 ## Future improvements
 
