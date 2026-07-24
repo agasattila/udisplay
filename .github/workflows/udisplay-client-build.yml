@@ -28,11 +28,11 @@ jobs:
     steps:
       # 1. Checkout source
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # 2. Install Qt
       - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
         with:
           version: "6.11.0"
           modules: "qtconnectivity qttasktree"
@@ -150,7 +150,7 @@ jobs:
             
       # Upload workflow artifact
       - name: Upload tar.gz artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udisplay-client-linux-x86_64
           path: udisplay-client-linux-x86_64.tar.gz
@@ -158,12 +158,164 @@ jobs:
           retention-days: 30
       
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udisplay-client-linux-appimage-${{ github.sha }}
           path: uDisplay-${{ github.sha }}-x86_64.AppImage
           if-no-files-found: error
-          retention-days: 30         
+          retention-days: 30
+
+  build-android:
+    name: Android build (arm64-v8a)
+    runs-on: ubuntu-24.04
+
+    env:
+      # Single source of truth for the Qt version — referenced by both
+      # install-qt-action calls below and (via shell expansion, since GitHub
+      # Actions' env: block can't self-reference within the same block) the
+      # computed Qt directory paths in the Configure step.
+      QT_VERSION: "6.11.0"
+      # Pinned explicitly rather than relying on whatever NDK/SDK the runner
+      # image ships by default (ubuntu-24.04 ships a preinstalled Android SDK
+      # at $ANDROID_HOME) — avoids a silent version mismatch between that and
+      # the toolchain this job actually configures against.
+      ANDROID_NDK_VERSION: "27.2.12479018"
+
+    steps:
+      # 1. Checkout source
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # 2. Install desktop Qt (host tools) — qmlcachegen/rcc run on the host
+      #    even during an Android cross-build, so QT_HOST_PATH needs a
+      #    same-version desktop kit alongside the Android one.
+      - name: Install Qt (desktop host tools)
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        with:
+          version: "${{ env.QT_VERSION }}"
+          modules: "qtconnectivity qttasktree"
+          dir: "${{ github.workspace }}/qt-host"
+          set-env: false
+          cache: true
+
+      # 3. Install Qt for Android (arm64-v8a target)
+      #    modules: qtconnectivity is required here — CMakeLists.txt sets
+      #    HAVE_BLE unconditionally ON for Android with no find_package guard,
+      #    so Qt6::Bluetooth (shipped by qtconnectivity) must be present or
+      #    the CMake configure/link step fails deterministically.
+      - name: Install Qt for Android
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        with:
+          version: "${{ env.QT_VERSION }}"
+          target: "android"
+          arch: "android_arm64_v8a"
+          modules: "qtconnectivity qttasktree"
+          dir: "${{ github.workspace }}/qt-android"
+          set-env: false
+          cache: true
+
+      # 4. JDK (required by androiddeployqt's Gradle/AGP invocation)
+      - name: Install JDK
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      # 5. Android SDK cmdline-tools + pinned NDK.
+      #    Explicitly install and point at a specific NDK version rather than
+      #    trusting whatever the runner's preinstalled SDK/NDK resolves to.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Cache Android NDK
+        id: cache_ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.ANDROID_NDK_VERSION }}
+          key: android-ndk-${{ env.ANDROID_NDK_VERSION }}
+
+      - name: Install Android NDK
+        if: steps.cache_ndk.outputs.cache-hit != 'true'
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager --install "ndk;${ANDROID_NDK_VERSION}"
+
+      - name: Pin ANDROID_HOME/SDK/NDK env vars
+        run: |
+          echo "ANDROID_HOME=${ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      # 6. Host build tools needed by gen_app_icons / gen_schema_enums, which
+      #    run on the host even during cross-compilation.
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt install -y \
+              build-essential \
+              cmake \
+              git \
+              pkg-config \
+              librsvg2-bin \
+              python3
+
+      # 7. CMake configure against Qt's Android toolchain.
+      #    QT_HOST_DIR/QT_ANDROID_DIR follow aqtinstall's on-disk layout
+      #    (<dir>/<qt-version>/<arch-dir-name>), computed here from the single
+      #    QT_VERSION source of truth via shell expansion rather than a
+      #    self-referencing env: block (GitHub Actions doesn't support that).
+      - name: Configure
+        run: |
+          QT_HOST_DIR="${{ github.workspace }}/qt-host/${QT_VERSION}/gcc_64"
+          QT_ANDROID_DIR="${{ github.workspace }}/qt-android/${QT_VERSION}/android_arm64_v8a"
+          cmake \
+            -S udisplay-client \
+            -B build/udisplay-client-android \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="${QT_ANDROID_DIR}/lib/cmake/Qt6/qt.toolchain.cmake" \
+            -DQT_HOST_PATH="${QT_HOST_DIR}" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DUDISPLAY_CLIENT_BUILD_TESTS=OFF
+
+      # 8. Build the APK
+      - name: Build APK
+        run: |
+          cmake \
+            --build build/udisplay-client-android \
+            --parallel \
+            --target udisplay-client_make_apk
+
+      # 9. Sanity check + rename before upload — catches a corrupt/missing
+      #    APK in CI instead of at sideload time. Anchored to apk/debug (not
+      #    just a "*debug*" path match) and fails on ambiguity rather than
+      #    silently picking whichever match `find` surfaces first — the
+      #    standard AGP output layout also emits an androidTest debug APK
+      #    under apk/androidTest/debug/, which also matches "*debug*".
+      - name: Locate and verify APK
+        run: |
+          mapfile -t APK_MATCHES < <(find build/udisplay-client-android -path "*/outputs/apk/debug/*.apk")
+          if [ "${#APK_MATCHES[@]}" -eq 0 ]; then
+            echo "No .apk file found under build/udisplay-client-android/outputs/apk/debug/" >&2
+            exit 1
+          fi
+          if [ "${#APK_MATCHES[@]}" -gt 1 ]; then
+            echo "Ambiguous APK match — expected exactly 1 file, found ${#APK_MATCHES[@]}:" >&2
+            printf '%s\n' "${APK_MATCHES[@]}" >&2
+            exit 1
+          fi
+          APK_PATH="${APK_MATCHES[0]}"
+          test -s "$APK_PATH"
+          cp "$APK_PATH" "uDisplay-${{ github.sha }}-arm64-v8a-debug.apk"
+
+      # 10. Upload workflow artifact
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: udisplay-client-android-arm64-v8a-${{ github.sha }}
+          path: uDisplay-${{ github.sha }}-arm64-v8a-debug.apk
+          if-no-files-found: error
+          retention-days: 30
 
   release:
     name: Create GitHub Release
@@ -180,7 +332,7 @@ jobs:
     steps:
       # Use previous artifact
       - name: Download workflow artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: udisplay-client-linux-x86_64
           path: release-files
