@@ -5,8 +5,18 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Controls.Material
+import "./"
 
-/* Exclusive-select button group (grid and dpad layouts). */
+/* Exclusive-select button group (grid and dpad layouts).
+ *
+ * Item fill color, press-darken, shape/radius, and disabled opacity come
+ * from the shared ButtonFace.qml component (see its header comment) so
+ * items look and behave exactly like a standalone button. Selection is
+ * layered on top as a border + bold-label overlay — independent of
+ * ButtonFace's own fill/press styling — since `value` is currently
+ * unimplemented on the firmware side (see the design doc); the overlay
+ * stays inert until a real setter exists but the visuals are already
+ * correct for when it does. */
 Rectangle {
     id: root
     required property int    widgetId
@@ -57,37 +67,31 @@ Rectangle {
             Repeater {
                 model: props.layout !== "dpad" ? (props.items || []) : []
 
-                delegate: Rectangle {
+                delegate: ButtonFace {
                     required property var modelData
 
                     width:  110; height: 36
-                    radius: 6
-                    color:  root.value === modelData.widgetId
-                            ? controller.activeStyle.button : controller.activeStyle.surface
+                    enabled: root.enabled
+                    showLabel: false
+
                     border.color: root.value === modelData.widgetId
                                   ? controller.activeStyle.button : controller.activeStyle.border
                     border.width: 1
-                    opacity: root.enabled ? 1.0 : 0.35
+
+                    onButtonPressed:  controller.sendButtonPress(modelData.widgetId)
+                    onButtonReleased: controller.sendButtonRelease(modelData.widgetId)
+                    onButtonClicked:  controller.sendButtonClick(modelData.widgetId)
 
                     Label {
                         anchors.centerIn: parent
                         text: modelData.label
-                        color: root.value === modelData.widgetId
-                               ? controller.activeStyle.button_text : controller.activeStyle.text
+                        /* button_text unconditionally — fill is always
+                         * activeStyle.button (via ButtonFace) now regardless
+                         * of selection, so activeStyle.text (meant for the
+                         * old dark "surface" fill) would be unreadable here. */
+                        color: controller.activeStyle.button_text
                         font.pixelSize: 13
                         font.bold: root.value === modelData.widgetId
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: root.enabled
-                        onPressed: controller.sendButtonPress(modelData.widgetId)
-                        onReleased: {
-                            controller.sendButtonRelease(modelData.widgetId)
-                            if (containsMouse)
-                                controller.sendButtonClick(modelData.widgetId)
-                        }
-                        onCanceled: controller.sendButtonRelease(modelData.widgetId)
                     }
                 }
             }
@@ -117,38 +121,28 @@ Rectangle {
                     required property string modelData
                     property var btnItem: root.findDpadItem(modelData)
 
-                    Rectangle {
+                    ButtonFace {
                         anchors.fill: parent
                         visible: cell.btnItem !== null
-                        radius: 6
-                        color:  (cell.btnItem !== null && root.value === cell.btnItem.widgetId)
-                                ? controller.activeStyle.button : controller.activeStyle.surface
+                        enabled: root.enabled
+                        showLabel: false
+
                         border.color: (cell.btnItem !== null && root.value === cell.btnItem.widgetId)
                                       ? controller.activeStyle.button : controller.activeStyle.border
                         border.width: 1
-                        opacity: root.enabled ? 1.0 : 0.35
+
+                        onButtonPressed:  { if (cell.btnItem) controller.sendButtonPress(cell.btnItem.widgetId) }
+                        onButtonReleased: { if (cell.btnItem) controller.sendButtonRelease(cell.btnItem.widgetId) }
+                        onButtonClicked:  { if (cell.btnItem) controller.sendButtonClick(cell.btnItem.widgetId) }
 
                         Label {
                             anchors.centerIn: parent
                             text: cell.btnItem ? cell.btnItem.label : ""
-                            color: (cell.btnItem !== null && root.value === cell.btnItem.widgetId)
-                                   ? controller.activeStyle.button_text : controller.activeStyle.text
+                            /* button_text unconditionally — same reasoning
+                             * as the grid delegate's label above. */
+                            color: controller.activeStyle.button_text
                             font.pixelSize: 16
                             font.bold: cell.btnItem !== null && root.value === cell.btnItem.widgetId
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            enabled: root.enabled
-                            onPressed: { if (cell.btnItem) controller.sendButtonPress(cell.btnItem.widgetId) }
-                            onReleased: {
-                                if (cell.btnItem) {
-                                    controller.sendButtonRelease(cell.btnItem.widgetId)
-                                    if (containsMouse)
-                                        controller.sendButtonClick(cell.btnItem.widgetId)
-                                }
-                            }
-                            onCanceled: { if (cell.btnItem) controller.sendButtonRelease(cell.btnItem.widgetId) }
                         }
                     }
                 }
