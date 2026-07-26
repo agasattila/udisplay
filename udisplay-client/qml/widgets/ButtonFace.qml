@@ -31,7 +31,7 @@ Rectangle {
     signal buttonReleased()
     signal buttonClicked()
 
-    property color accentColor: controller.activeStyle.button
+    readonly property color accentColor: controller.activeStyle.button
 
     radius:  shape === "circle" ? Math.min(width, height) / 2 : shape === "square" ? 4 : 8
     color:   mouseArea.pressed ? Qt.darker(accentColor, 1.3) : accentColor
