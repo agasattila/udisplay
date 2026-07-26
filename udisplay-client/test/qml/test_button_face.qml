@@ -56,6 +56,13 @@ Item {
         return out
     }
 
+    function filterByType(items, needle) {
+        var out = []
+        for (var i = 0; i < items.length; i++)
+            if (items[i].toString().indexOf(needle) === 0) out.push(items[i])
+        return out
+    }
+
     /* Finds the MouseArea among a ButtonFace's children by duck-typing on
      * `pressed` — MouseArea is the only child type with that property. */
     function mouseAreaOf(face) {
@@ -117,6 +124,19 @@ Item {
         label: ""
     }
 
+    /* Plain-label ButtonWidget (props.items empty/absent) — exercises the
+     * hasChildren:false branch of ButtonWidget.qml's sizing calc and
+     * showLabel:!hasChildren routing, which every OTHER ButtonWidget test
+     * in this suite bypasses (they all pass non-empty props.items). */
+    W.ButtonWidget {
+        id: plainLabelButton
+        x: 350; y: 0
+        widgetId: 99
+        label: "Plain"
+        enabled: true
+        props: ({})
+    }
+
     Timer {
         interval: 300
         running: true
@@ -155,11 +175,16 @@ Item {
             if (noLabelText.visible !== false)
                 { fail("showLabel:false should hide the label, but it's visible"); return }
 
-            /* showLabel: true + non-empty label -> label Text visible. */
+            /* showLabel: true + non-empty label -> label Text visible, and
+             * colored button_text (the exact class of stale-color-reference
+             * bug d4fa3b5 fixed for button-group's overlay Label -- assert
+             * it here too for ButtonFace's own internal label). */
             var rectLabelText = labelTextOf(rectFace)
             if (!rectLabelText) { fail("could not find rectFace's label Text"); return }
             if (rectLabelText.visible !== true)
                 { fail("showLabel:true with a non-empty label should show the label, but it's hidden"); return }
+            if (rectLabelText.color.toString() !== controller.activeStyle.button_text)
+                { fail("label color should be button_text, got " + rectLabelText.color); return }
 
             /* showLabel: true + empty label -> label Text still hidden. */
             var emptyLabelText = labelTextOf(emptyLabelFace)
@@ -175,7 +200,22 @@ Item {
             if (rectFace.labelImplicitHeight !== rectLabelText.implicitHeight)
                 { fail("labelImplicitHeight alias mismatch: face=" + rectFace.labelImplicitHeight + " text=" + rectLabelText.implicitHeight); return }
 
-            console.log("PASS: shape radius formula, disabled/enabled opacity+MouseArea, unpressed fill, showLabel (hidden/visible/empty), label size aliases all correct")
+            /* Plain-label ButtonWidget (hasChildren:false branch) — sizing
+             * doesn't collapse to the empty floor, and its ButtonFace shows
+             * the label (showLabel:!hasChildren -> true here). */
+            if (plainLabelButton.implicitWidth <= 0 || plainLabelButton.implicitHeight <= 0)
+                { fail("plain-label ButtonWidget collapsed: " + plainLabelButton.implicitWidth + "x" + plainLabelButton.implicitHeight); return }
+            var plainFace = filterByType(toArray(plainLabelButton.children), "ButtonFace_QML")[0]
+            if (!plainFace) { fail("could not find plainLabelButton's ButtonFace"); return }
+            if (plainFace.showLabel !== true)
+                { fail("ButtonWidget with no props.items should set showLabel:true on its ButtonFace"); return }
+            var plainLabelText = labelTextOf(plainFace)
+            if (!plainLabelText || plainLabelText.visible !== true)
+                { fail("plain-label ButtonWidget's label should be visible"); return }
+            if (plainLabelText.text !== "Plain")
+                { fail("plain-label ButtonWidget's label text mismatch, got " + plainLabelText.text); return }
+
+            console.log("PASS: shape radius formula, disabled/enabled opacity+MouseArea, unpressed fill, showLabel (hidden/visible/empty), label size aliases, label color, plain-label ButtonWidget all correct")
             Qt.exit(0)
         }
     }
