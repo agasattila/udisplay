@@ -46,4 +46,21 @@ ApplicationWindow {
                 stack.pop(null)  // pop to root
         }
     }
+
+    // Version label — declared after (and z-stacked above) the StackView so
+    // it's never obscured by DiscoveryScreen content. Hidden once connected:
+    // DeviceScreen's header puts its "connected" status dot in the same
+    // top-right corner, and the two would overlap.
+    Label {
+        objectName: "versionLabel"
+        text: Qt.application.version
+        visible: controller.state !== "running"
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 8
+        font.pixelSize: 11
+        color: "#ffffff"
+        opacity: 0.5
+        z: 1
+    }
 }

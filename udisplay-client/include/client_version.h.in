@@ -1,0 +1,9 @@
+#pragma once
+
+//
+// client_version.h was generated from client_version.h.in
+// Git-derived display version for udisplay-client's UI/CLI, distinct from
+// UDISPLAY_VERSION_FULL (the firmware-facing numeric triple).
+//
+
+#define UDISPLAY_CLIENT_DISPLAY_VERSION "@UDISPLAY_CLIENT_DISPLAY_VERSION@"

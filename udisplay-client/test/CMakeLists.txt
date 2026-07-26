@@ -79,6 +79,13 @@ if(QML_EXECUTABLE)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         TIMEOUT 10
         FAIL_REGULAR_EXPRESSION "Unable to assign .* to QQuickAnchorLine")
+
+    add_test(NAME test_qml_version_label_visibility
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_version_label_visibility.qml")
+    set_tests_properties(test_qml_version_label_visibility PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10)
 else()
     message(STATUS "qml executable not found — skipping QML layout regression tests")
 endif()

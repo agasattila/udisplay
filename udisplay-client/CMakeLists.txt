@@ -9,6 +9,17 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Qml Quick QuickControls2 Network Sql)
 find_package(ZLIB REQUIRED)
 
+# ── Generated client version header ─────────────────────────────────────
+# UDISPLAY_CLIENT_DISPLAY_VERSION is computed in cmake/uDisplayVersion.cmake
+# (included above). Generated into the build dir (never the source tree),
+# mirroring libudisplay's version.h.in/generated convention exactly.
+set(UDISPLAY_CLIENT_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/client_version.h.in"
+    "${UDISPLAY_CLIENT_GENERATED_DIR}/client_version.h"
+    @ONLY
+)
+
 
 # ── QZeroConf for mDNS discovery ─────────────────────────────────────────
 # Linux: requires libavahi-client-dev (apt install libavahi-client-dev)
@@ -205,7 +216,7 @@ qt_add_qml_module(udisplay-client
         qml/widgets/WidgetDelegate.qml
 )
 
-target_include_directories(udisplay-client PRIVATE src)
+target_include_directories(udisplay-client PRIVATE src "${UDISPLAY_CLIENT_GENERATED_DIR}")
 
 target_link_libraries(udisplay-client PRIVATE
     Qt6::Core

@@ -125,6 +125,17 @@ Design mode (preview a YAML file without a device):
 ./build/udisplay-client --design path/to/device.yaml
 ```
 
+Check what you built:
+
+```bash
+./build/udisplay-client --version
+```
+
+The version is computed from git at configure time and also shown in a small label in
+the app's top-right corner: an exact tag if `HEAD` is tagged (e.g. `v0.9.2`), otherwise
+`v0.0.0-<short-hash>`. Building from a source tarball with no `.git` directory shows
+`v0.0.0-unknown`, since there's no repository to query.
+
 ### Unit tests
 
 ```bash
