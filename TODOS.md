@@ -81,4 +81,68 @@ Android CI job and explicitly not chosen for v1 — building this before the bas
 **Depends on:** The v1 Android CI job (build-android) landing, running successfully for a
 while, and CI time/reliability becoming a real friction point.
 
+## Widgets
+
+### 5. Real device-authoritative setter for `button-group`
+
+**What:** Give `button-group` a real setter for its exclusive-select state, mirroring
+`dropdown`'s existing `OutputWidget<uint8_t>` + `.set()` pattern
+(`udisplay-gen/udisplay_gen/backends/cpp_backend.py:214-235`), and a round-trip contract
+test (firmware `.set()` → STATE_UPDATE → QML `value` → visibly-selected item).
+
+**Why:** Investigated during the `/office-hours` + `/plan-eng-review` session that split
+`dpad` out of `button-group` (see
+`~/.gstack/projects/agasattila-udisplay/prog-main-design-20260726-204340.md`).
+`button-group`'s only reason to exist as a distinct widget type — versus just placing
+several `button`s in a grid — is exclusive-select semantics. That's currently
+unimplemented: `cpp_backend.py:196-212` generates a bare `Widget` with no `.set()` (unlike
+`dropdown`), `docs/widgets.md:484-573` documents "no setter for the group," and none of
+demo01/02/03 (the only real usages) ever report a selected value back from firmware. In
+every real deployment today, every `button-group` item is permanently stuck
+"unselected" — the selection highlight the QML styling is built around never fires. This
+is exactly how it shipped unnoticed across three demos: no round-trip test exists for
+any stateful widget today, so nothing would have caught it.
+
+**Context:** The dpad-split design deliberately deferred this — same reasoning as the
+Play Store signing precedent (#2 above): don't build speculative protocol surface
+without a concrete firmware consumer asking for it. **Note the tension explicitly**
+(flagged by `/plan-eng-review`'s outside voice, Codex): the design argues
+exclusive-select is `button-group`'s only reason to exist, then ships the taxonomy split
+while leaving exactly that nonfunctional. Deliberately accepted, not silently dropped —
+this TODO is how it stays tracked. Smallest correct implementation (per Codex's
+cold-read in the design session): start with a failing round-trip test, then copy the
+`dropdown` pattern almost literally — `OutputWidget<uint8_t>` instead of bare `Widget`,
+generate `.set(itemId)` pushing STATE_UPDATE, generate symbolic item-value constants
+(e.g. `mode.fast`) so firmware code doesn't hardcode numeric IDs, stay
+device-authoritative (no optimistic flip — selection only changes after the
+STATE_UPDATE round-trips back).
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** The `dpad` split (PR2, see the design doc above) landing first, so
+`button-group` is grid-only before its setter semantics are locked in. No concrete
+firmware consumer requesting this yet — revisit when one exists.
+
+### 6. Dedupe `CONTAINER_TYPES`/`DECORATION_TYPES` between `widget_ids.py` and `validate.py`
+
+**What:** `udisplay-gen/udisplay_gen/widget_ids.py` and
+`udisplay-gen/udisplay_gen/validate.py` each independently define their own copies of
+`CONTAINER_TYPES` (`{"section", "row", "grid"}`) and a "no ID"/"decoration" types set.
+Share one definition instead of two.
+
+**Why:** Noticed during the dpad-split `/plan-eng-review` (Code Quality section, see
+`~/.gstack/projects/agasattila-udisplay/prog-main-design-20260726-204340.md`) — two
+independently-maintained copies of the same constant can silently drift, which is
+exactly the class of bug (a hardcoded gate quietly going stale) that motivated the whole
+dpad-split session in the first place (see TODO #5 above and the design doc's
+Problem Statement).
+
+**Context:** Not an active bug today — both copies are currently in sync. Preventive
+cleanup: move both sets into one shared module both `widget_ids.py` and `validate.py`
+import from.
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None.
+
 ## Completed
