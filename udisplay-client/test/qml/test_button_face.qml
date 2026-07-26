@@ -26,6 +26,12 @@ Item {
     width: 500
     height: 300
 
+    /* Records the last widgetId passed to each controller call, so signal
+     * wiring (ButtonFace.buttonPressed/Released/Clicked -> onButtonPressed:
+     * controller.sendButtonPress(...)) can be verified without live mouse
+     * simulation -- QML signals can be invoked directly as functions
+     * (face.buttonPressed()), which runs the connected handler exactly as
+     * a real press would. */
     QtObject {
         id: controller
         property var activeStyle: QtObject {
@@ -40,9 +46,12 @@ Item {
             property string button:       "#00d4aa"
             property string button_text:  "#0d0d1a"
         }
-        function sendButtonPress(id) {}
-        function sendButtonRelease(id) {}
-        function sendButtonClick(id) {}
+        property int lastPressId: -1
+        property int lastReleaseId: -1
+        property int lastClickId: -1
+        function sendButtonPress(id) { lastPressId = id }
+        function sendButtonRelease(id) { lastReleaseId = id }
+        function sendButtonClick(id) { lastClickId = id }
     }
 
     function fail(msg) {
@@ -215,7 +224,22 @@ Item {
             if (plainLabelText.text !== "Plain")
                 { fail("plain-label ButtonWidget's label text mismatch, got " + plainLabelText.text); return }
 
-            console.log("PASS: shape radius formula, disabled/enabled opacity+MouseArea, unpressed fill, showLabel (hidden/visible/empty), label size aliases, label color, plain-label ButtonWidget all correct")
+            /* Signal wiring: invoking ButtonFace's signals as functions runs
+             * the connected onButtonPressed/Released/Clicked handlers, same
+             * as a real press would -- verifies ButtonWidget forwards
+             * root.widgetId (99) to the right controller method, not just
+             * that "some" argument arrives. */
+            plainFace.buttonPressed()
+            if (controller.lastPressId !== 99)
+                { fail("ButtonWidget's onButtonPressed should call sendButtonPress(99), got " + controller.lastPressId); return }
+            plainFace.buttonReleased()
+            if (controller.lastReleaseId !== 99)
+                { fail("ButtonWidget's onButtonReleased should call sendButtonRelease(99), got " + controller.lastReleaseId); return }
+            plainFace.buttonClicked()
+            if (controller.lastClickId !== 99)
+                { fail("ButtonWidget's onButtonClicked should call sendButtonClick(99), got " + controller.lastClickId); return }
+
+            console.log("PASS: shape radius formula, disabled/enabled opacity+MouseArea, unpressed fill, showLabel (hidden/visible/empty), label size aliases, label color, plain-label ButtonWidget, signal wiring all correct")
             Qt.exit(0)
         }
     }

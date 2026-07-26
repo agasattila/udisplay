@@ -19,6 +19,9 @@ Item {
     width: 500
     height: 200
 
+    /* Records the last widgetId passed to each controller call -- lets
+     * signal wiring be verified by invoking ButtonFace's signals directly
+     * as functions (no live mouse simulation needed). */
     QtObject {
         id: controller
         property var activeStyle: QtObject {
@@ -33,9 +36,12 @@ Item {
             property string button:       "#00d4aa"
             property string button_text:  "#0d0d1a"
         }
-        function sendButtonPress(id) {}
-        function sendButtonRelease(id) {}
-        function sendButtonClick(id) {}
+        property int lastPressId: -1
+        property int lastReleaseId: -1
+        property int lastClickId: -1
+        function sendButtonPress(id) { lastPressId = id }
+        function sendButtonRelease(id) { lastReleaseId = id }
+        function sendButtonClick(id) { lastClickId = id }
     }
 
     function fail(msg) {
@@ -279,7 +285,41 @@ Item {
             if (Math.abs(disabledTopFace.opacity - 0.3) > 0.001)
                 { fail("disabled dpad cell opacity: expected 0.3, got " + disabledTopFace.opacity); return }
 
-            console.log("PASS: button-group grid+dpad items share button's fill/opacity; selection is border-only; null-guarded gaps render invisible")
+            /* Signal wiring: invoking ButtonFace's signals as functions runs
+             * the connected onButtonPressed/Released/Clicked handlers, same
+             * as a real press would -- verifies each delegate forwards the
+             * RIGHT widgetId (modelData.widgetId for grid, cell.btnItem.
+             * widgetId for dpad), not just "some" id. */
+            selected.buttonPressed()
+            if (controller.lastPressId !== 0x10)
+                { fail("grid selected item press should forward widgetId 0x10, got " + controller.lastPressId); return }
+            unselected.buttonPressed()
+            if (controller.lastPressId !== 0x11)
+                { fail("grid unselected item press should forward widgetId 0x11, got " + controller.lastPressId); return }
+            unselected.buttonReleased()
+            if (controller.lastReleaseId !== 0x11)
+                { fail("grid item release should forward widgetId 0x11, got " + controller.lastReleaseId); return }
+            unselected.buttonClicked()
+            if (controller.lastClickId !== 0x11)
+                { fail("grid item click should forward widgetId 0x11, got " + controller.lastClickId); return }
+
+            topFace.buttonPressed()
+            if (controller.lastPressId !== 0x20)
+                { fail("dpad 'top' cell press should forward widgetId 0x20, got " + controller.lastPressId); return }
+            bottomFace.buttonReleased()
+            if (controller.lastReleaseId !== 0x21)
+                { fail("dpad 'bottom' cell release should forward widgetId 0x21, got " + controller.lastReleaseId); return }
+
+            /* Null-guard: a corner spacer (btnItem===null) must NOT reach
+             * the controller at all when its (invisible, but still
+             * instantiated) ButtonFace signal fires -- this is exactly the
+             * regression a dropped `if (cell.btnItem)` guard would cause. */
+            var pressBefore = controller.lastPressId
+            cornerFace.buttonPressed()
+            if (controller.lastPressId !== pressBefore)
+                { fail("corner spacer cell must not forward any press (null-guard) - lastPressId changed from " + pressBefore + " to " + controller.lastPressId); return }
+
+            console.log("PASS: button-group grid+dpad items share button's fill/opacity; selection is border-only; null-guarded gaps render invisible; signal wiring forwards correct widgetIds and respects the null-guard")
             Qt.exit(0)
         }
     }
