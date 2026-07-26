@@ -65,6 +65,15 @@ Item {
         return null
     }
 
+    /* Finds the label Text among a ButtonFace's children by duck-typing on
+     * `text` — Text is the only child type with that property. */
+    function labelTextOf(face) {
+        var kids = toArray(face.children)
+        for (var i = 0; i < kids.length; i++)
+            if (kids[i].text !== undefined) return kids[i]
+        return null
+    }
+
     W.ButtonFace {
         id: rectFace
         x: 0; y: 0
@@ -100,6 +109,13 @@ Item {
         showLabel: false
         label: "Hidden"
     }
+    W.ButtonFace {
+        id: emptyLabelFace
+        x: 200; y: 120
+        width: 100; height: 40
+        showLabel: true
+        label: ""
+    }
 
     Timer {
         interval: 300
@@ -125,20 +141,41 @@ Item {
             if (disabledMouseArea.enabled !== false)
                 { fail("disabled ButtonFace's MouseArea should be disabled, got enabled=" + disabledMouseArea.enabled); return }
 
-            /* Enabled (default): full opacity. */
+            /* Enabled (default): full opacity, MouseArea itself enabled. */
             if (Math.abs(rectFace.opacity - 1.0) > 0.001)
                 { fail("enabled opacity: expected 1.0, got " + rectFace.opacity); return }
+            var rectMouseArea = mouseAreaOf(rectFace)
+            if (!rectMouseArea) { fail("could not find rectFace's MouseArea"); return }
+            if (rectMouseArea.enabled !== true)
+                { fail("enabled ButtonFace's MouseArea should be enabled, got enabled=" + rectMouseArea.enabled); return }
 
             /* showLabel: false hides the label even when text is set. */
-            var noLabelText = null
-            var kids = toArray(noLabelFace.children)
-            for (var i = 0; i < kids.length; i++)
-                if (kids[i].text !== undefined) noLabelText = kids[i]
+            var noLabelText = labelTextOf(noLabelFace)
             if (!noLabelText) { fail("could not find noLabelFace's label Text"); return }
             if (noLabelText.visible !== false)
                 { fail("showLabel:false should hide the label, but it's visible"); return }
 
-            console.log("PASS: shape radius formula, disabled opacity/MouseArea, unpressed fill, showLabel all correct")
+            /* showLabel: true + non-empty label -> label Text visible. */
+            var rectLabelText = labelTextOf(rectFace)
+            if (!rectLabelText) { fail("could not find rectFace's label Text"); return }
+            if (rectLabelText.visible !== true)
+                { fail("showLabel:true with a non-empty label should show the label, but it's hidden"); return }
+
+            /* showLabel: true + empty label -> label Text still hidden. */
+            var emptyLabelText = labelTextOf(emptyLabelFace)
+            if (!emptyLabelText) { fail("could not find emptyLabelFace's label Text"); return }
+            if (emptyLabelText.visible !== false)
+                { fail("showLabel:true with an empty label should still hide the label, but it's visible"); return }
+
+            /* labelImplicitWidth/Height aliases mirror the internal Text's
+             * own implicit size — ButtonWidget.qml's sizing calc depends on
+             * these being accurate, not just non-zero. */
+            if (rectFace.labelImplicitWidth !== rectLabelText.implicitWidth)
+                { fail("labelImplicitWidth alias mismatch: face=" + rectFace.labelImplicitWidth + " text=" + rectLabelText.implicitWidth); return }
+            if (rectFace.labelImplicitHeight !== rectLabelText.implicitHeight)
+                { fail("labelImplicitHeight alias mismatch: face=" + rectFace.labelImplicitHeight + " text=" + rectLabelText.implicitHeight); return }
+
+            console.log("PASS: shape radius formula, disabled/enabled opacity+MouseArea, unpressed fill, showLabel (hidden/visible/empty), label size aliases all correct")
             Qt.exit(0)
         }
     }
