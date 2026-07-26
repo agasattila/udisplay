@@ -309,15 +309,30 @@ Item {
             bottomFace.buttonReleased()
             if (controller.lastReleaseId !== 0x21)
                 { fail("dpad 'bottom' cell release should forward widgetId 0x21, got " + controller.lastReleaseId); return }
+            topFace.buttonClicked()
+            if (controller.lastClickId !== 0x20)
+                { fail("dpad 'top' cell click should forward widgetId 0x20, got " + controller.lastClickId); return }
 
             /* Null-guard: a corner spacer (btnItem===null) must NOT reach
              * the controller at all when its (invisible, but still
              * instantiated) ButtonFace signal fires -- this is exactly the
-             * regression a dropped `if (cell.btnItem)` guard would cause. */
+             * regression a dropped `if (cell.btnItem)` guard would cause.
+             * Each of press/release/click has its OWN independent
+             * `if (cell.btnItem)` guard in ButtonGroupWidget.qml, so all
+             * three need checking -- a guard dropped from just one handler
+             * would otherwise slip through untested. */
             var pressBefore = controller.lastPressId
             cornerFace.buttonPressed()
             if (controller.lastPressId !== pressBefore)
                 { fail("corner spacer cell must not forward any press (null-guard) - lastPressId changed from " + pressBefore + " to " + controller.lastPressId); return }
+            var releaseBefore = controller.lastReleaseId
+            cornerFace.buttonReleased()
+            if (controller.lastReleaseId !== releaseBefore)
+                { fail("corner spacer cell must not forward any release (null-guard) - lastReleaseId changed from " + releaseBefore + " to " + controller.lastReleaseId); return }
+            var clickBefore = controller.lastClickId
+            cornerFace.buttonClicked()
+            if (controller.lastClickId !== clickBefore)
+                { fail("corner spacer cell must not forward any click (null-guard) - lastClickId changed from " + clickBefore + " to " + controller.lastClickId); return }
 
             console.log("PASS: button-group grid+dpad items share button's fill/opacity; selection is border-only; null-guarded gaps render invisible; signal wiring forwards correct widgetIds and respects the null-guard")
             Qt.exit(0)
