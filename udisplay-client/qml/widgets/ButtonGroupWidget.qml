@@ -85,8 +85,11 @@ Rectangle {
                     Label {
                         anchors.centerIn: parent
                         text: modelData.label
-                        color: root.value === modelData.widgetId
-                               ? controller.activeStyle.button_text : controller.activeStyle.text
+                        /* button_text unconditionally — fill is always
+                         * activeStyle.button (via ButtonFace) now regardless
+                         * of selection, so activeStyle.text (meant for the
+                         * old dark "surface" fill) would be unreadable here. */
+                        color: controller.activeStyle.button_text
                         font.pixelSize: 13
                         font.bold: root.value === modelData.widgetId
                     }
@@ -135,8 +138,9 @@ Rectangle {
                         Label {
                             anchors.centerIn: parent
                             text: cell.btnItem ? cell.btnItem.label : ""
-                            color: (cell.btnItem !== null && root.value === cell.btnItem.widgetId)
-                                   ? controller.activeStyle.button_text : controller.activeStyle.text
+                            /* button_text unconditionally — same reasoning
+                             * as the grid delegate's label above. */
+                            color: controller.activeStyle.button_text
                             font.pixelSize: 16
                             font.bold: cell.btnItem !== null && root.value === cell.btnItem.widgetId
                         }

@@ -56,6 +56,18 @@ Item {
         return out
     }
 
+    /* Finds the delegate's own overlay Label among a ButtonFace's children,
+     * by TYPE NAME (not duck-typing on `.text`) — ButtonFace's own internal
+     * label is a plain QtQuick `Text` (toString "QQuickText"), which also
+     * has a `.text` property and would be indistinguishable from the
+     * delegate's `QtQuick.Controls.Label` (toString "Label_QMLTYPE_N") if
+     * matched by property presence alone. showLabel:false only hides
+     * ButtonFace's internal Text, it doesn't remove it as a child. */
+    function labelOf(face) {
+        var labels = filterByType(toArray(face.children), "Label_QMLTYPE")
+        return labels.length > 0 ? labels[0] : null
+    }
+
     property var groupProps: ({
         layout: "grid",
         items: [
@@ -169,6 +181,28 @@ Item {
             if (unselected.border.color.toString() !== controller.activeStyle.border)
                 { fail("unselected item border should be activeStyle.border, got " + unselected.border.color); return }
 
+            /* Radius matches ButtonFace's default "rect" formula (8) — same
+             * shared shape/radius model as button, replacing the old
+             * hardcoded 6. */
+            if (selected.radius !== 8)
+                { fail("grid item radius: expected 8 (ButtonFace default), got " + selected.radius); return }
+
+            /* Label color is button_text UNCONDITIONALLY now — fill is
+             * always activeStyle.button (via ButtonFace) regardless of
+             * selection, so activeStyle.text (meant for the old dark
+             * "surface" fill) would be unreadable against it. Bold stays
+             * the selection signal. */
+            var selectedLabel = labelOf(selected), unselectedLabel = labelOf(unselected)
+            if (!selectedLabel || !unselectedLabel) { fail("could not find grid item labels"); return }
+            if (selectedLabel.color.toString() !== controller.activeStyle.button_text)
+                { fail("selected label color should be button_text, got " + selectedLabel.color); return }
+            if (unselectedLabel.color.toString() !== controller.activeStyle.button_text)
+                { fail("unselected label color should be button_text (not activeStyle.text, unreadable on the accent fill), got " + unselectedLabel.color); return }
+            if (selectedLabel.font.bold !== true)
+                { fail("selected label should be bold"); return }
+            if (unselectedLabel.font.bold !== false)
+                { fail("unselected label should not be bold"); return }
+
             /* Disabled group: opacity 0.3 (unified with button), not the old 0.35. */
             var dCol = disabledGroup.children[0]
             var dFlow = null
@@ -204,6 +238,24 @@ Item {
             /* Fill matches top's regardless of selection — same unification as grid. */
             if (bottomFace.color.toString() !== topFace.color.toString())
                 { fail("dpad selected/unselected fill should match, got " + topFace.color + " vs " + bottomFace.color); return }
+
+            /* Radius matches ButtonFace's default "rect" formula (8), same
+             * as the grid delegate — replacing the old hardcoded 6. */
+            if (topFace.radius !== 8)
+                { fail("dpad item radius: expected 8 (ButtonFace default), got " + topFace.radius); return }
+
+            /* Label color is button_text unconditionally, same reasoning as
+             * the grid delegate. */
+            var topLabel = labelOf(topFace), bottomLabel = labelOf(bottomFace)
+            if (!topLabel || !bottomLabel) { fail("could not find dpad cell labels"); return }
+            if (topLabel.color.toString() !== controller.activeStyle.button_text)
+                { fail("selected dpad label color should be button_text, got " + topLabel.color); return }
+            if (bottomLabel.color.toString() !== controller.activeStyle.button_text)
+                { fail("unselected dpad label color should be button_text (not activeStyle.text), got " + bottomLabel.color); return }
+            if (topLabel.font.bold !== true)
+                { fail("selected dpad label should be bold"); return }
+            if (bottomLabel.font.bold !== false)
+                { fail("unselected dpad label should not be bold"); return }
 
             /* Corner spacer (index 0) and a sparse non-corner gap (index 3,
              * "left", not in dpadProps.items) both hit the null-guard path
