@@ -34,6 +34,7 @@ enum class WidgetType {
     Section,
     Row,
     Grid,
+    Dpad,
     Unknown,
 };
 
@@ -149,6 +150,11 @@ struct WidgetDef {
      * behavior. */
     QString align;
 
+    /* Position within a `dpad` container's cross layout
+     * ("top"|"right"|"bottom"|"left"|"center"). Only meaningful for a button
+     * widget that is a direct child of a dpad container; empty otherwise. */
+    QString position;
+
     /* section collapse */
     bool collapsible    = false; /* section only: can the user collapse it */
     int  sectionOwnerRow = -1;   /* flat-model row of parent collapsible section, or -1 */
@@ -177,6 +183,7 @@ inline QString widgetTypeName(WidgetType t)
     case WidgetType::Section:     return QStringLiteral("section");
     case WidgetType::Row:         return QStringLiteral("row");
     case WidgetType::Grid:        return QStringLiteral("grid");
+    case WidgetType::Dpad:        return QStringLiteral("dpad");
     default:                      return QStringLiteral("unknown");
     }
 }
@@ -197,5 +204,6 @@ inline WidgetType widgetTypeFromString(const QString& s)
     if (s == QLatin1String("section"))      return WidgetType::Section;
     if (s == QLatin1String("row"))          return WidgetType::Row;
     if (s == QLatin1String("grid"))         return WidgetType::Grid;
+    if (s == QLatin1String("dpad"))         return WidgetType::Dpad;
     return WidgetType::Unknown;
 }
