@@ -78,6 +78,7 @@ Loader {
                    : _type === "separator"    ? separatorComp
                    : _type === "row"          ? rowComp
                    : _type === "grid"         ? gridComp
+                   : _type === "dpad"         ? dpadComp
                    : null
 
     /* Leaf widget components — no cycle: none of these files reference WidgetDelegate */
@@ -127,6 +128,17 @@ Loader {
              * width 0 — same class of bug Layout.fillWidth above already
              * fixes for nested rows (see the long implicitWidth-propagation
              * comment on this file's Layout.preferredWidth above). */
+            Layout.fillWidth: true
+        }
+    }
+    Component {
+        id: dpadComp
+        Loader {
+            anchors { left: parent.left; right: parent.right }
+            source: Qt.resolvedUrl("DpadWidget.qml")
+            onLoaded: {
+                item.props = Qt.binding(function() { return root._props })
+            }
             Layout.fillWidth: true
         }
     }
