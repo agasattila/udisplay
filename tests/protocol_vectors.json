@@ -91,6 +91,25 @@
       }
     }
   },
+  "widget_id_fixtures": {
+    "nesting_and_dpad": {
+      "description": "Golden fixture for the widget-ID cross-check between udisplay-gen's widget_ids.assign() and udisplay-client's YamlParser collectPaths()/ID assignment: multi-level container nesting (section > row > grid, section > dpad), no-ID decoration types (label, separator), a button-group with items, a dpad with button children, and a dropdown (whose items are excluded from ID assignment). Both implementations MUST assign identical IDs to identical paths \u2014 any divergence is a protocol-routing bug (see the dpad-split design doc's golden-fixture cross-check task).",
+      "yaml": "device:\n  name: dpad and nesting fixture\nwidgets:\n  sensors:\n    type: section\n    label: Sensors\n    widgets:\n      temp:\n        type: display\n        label: Temp\n      ctrl_row:\n        type: row\n        widgets:\n          relay:\n            type: toggle\n          note:\n            type: label\n            text: hi\n          inner_grid:\n            type: grid\n            columns: 2\n            widgets:\n              led1:\n                type: led\n              led2:\n                type: led\n      dir_pad:\n        type: dpad\n        widgets:\n          up_btn:\n            type: button\n            label: Up\n            position: top\n          down_btn:\n            type: button\n            label: Down\n            position: bottom\n          left_btn:\n            type: button\n            label: Left\n            position: left\n  mode_sel:\n    type: button-group\n    items:\n      dc:\n        label: DCV\n      ac:\n        label: ACV\n  divider:\n    type: separator\n  net_dropdown:\n    type: dropdown\n    items:\n      sta: Station\n      ap: Access Point\n",
+      "widget_ids": {
+        "down_btn": "0x10",
+        "led1": "0x11",
+        "led2": "0x12",
+        "left_btn": "0x13",
+        "mode_sel": "0x14",
+        "mode_sel.ac": "0x15",
+        "mode_sel.dc": "0x16",
+        "net_dropdown": "0x17",
+        "relay": "0x18",
+        "temp": "0x19",
+        "up_btn": "0x1A"
+      }
+    }
+  },
   "messages": {
     "HANDSHAKE": {
       "description": "Device\u2192client on connect. proto_version=4, flags=0x00 (no auth), uses V1 merkle root, chunk_count=1, chunk_size=256. flags byte inserted at offset 2; merkle_root shifted to offset 3.",
