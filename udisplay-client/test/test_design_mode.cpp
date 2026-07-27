@@ -18,6 +18,7 @@
 #include <QTemporaryFile>
 #include <zlib.h>
 #include "DeviceController.h"
+#include "DeviceInfo.h"
 #include "WidgetModel.h"
 
 /* Helper: compress raw bytes with zlib (RFC 1950 deflate format).
@@ -342,6 +343,154 @@ private slots:
         QCOMPARE(dc.state(), QStringLiteral("disconnected"));
     }
 
+    /* connectTcp() must refuse to run while in design mode (TODO-034 D2) —
+     * a real bootstrap and a design-mode instance must never interleave, or
+     * the mode-gated behavior in applyParsedYaml (style reset, qWarning
+     * scope) would read the wrong side of the divergence.
+     *
+     * The guard must NOT mutate state()/errorString(): DeviceController.h
+     * documents design mode's contract as "state stays running" — routing
+     * this through setError() would silently and permanently corrupt that
+     * (nothing ever resets state() back to "running" afterward). Caught by
+     * adversarial review during /ship; the guard logs via qWarning() only. */
+    void connectTcp_refusedWhileInDesignMode()
+    {
+        const char* yaml =
+            "device:\n"
+            "  name: testdev\n"
+            "widgets:\n"
+            "  a:\n"
+            "    type: toggle\n";
+        QTemporaryFile f;
+        const QString path = writeTempYaml(f, yaml);
+        QVERIFY(!path.isEmpty());
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+
+        const QString captured = captureDebugOutput([&]() {
+            dc.connectTcp(QStringLiteral("127.0.0.1"), 5555);
+        });
+
+        /* state()/errorString() are reserved for the real-device lifecycle —
+         * a refused design-mode connection attempt must leave both alone. */
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+        QVERIFY(dc.errorString().isEmpty());
+        QVERIFY(captured.contains(QStringLiteral("design mode")));
+        /* The design-mode model must survive the refused connection attempt. */
+        QVERIFY(dc.designErrorString().isEmpty());
+        QCOMPARE(dc.widgetModel()->rowCount(), 1);
+    }
+
+    /* connectDiscovered() must refuse to run while in design mode too — same
+     * guard, different Q_INVOKABLE entry point. Uses a non-BLE DeviceInfo so
+     * the test doesn't depend on HAVE_BLE being compiled in. */
+    void connectDiscovered_refusedWhileInDesignMode()
+    {
+        const char* yaml =
+            "device:\n"
+            "  name: testdev\n"
+            "widgets:\n"
+            "  a:\n"
+            "    type: toggle\n";
+        QTemporaryFile f;
+        const QString path = writeTempYaml(f, yaml);
+        QVERIFY(!path.isEmpty());
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+
+        DeviceInfo di = DeviceInfo::makeTcp(
+            QStringLiteral("192.168.1.42"), QStringLiteral("Some Device"),
+            QStringLiteral("192.168.1.42"), 5555);
+        const QString captured = captureDebugOutput([&]() {
+            dc.connectDiscovered(QVariant::fromValue(di));
+        });
+
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+        QVERIFY(dc.errorString().isEmpty());
+        QVERIFY(captured.contains(QStringLiteral("design mode")));
+        QVERIFY(dc.designErrorString().isEmpty());
+        QCOMPARE(dc.widgetModel()->rowCount(), 1);
+    }
+
+    /* connectDevice() is a third Q_INVOKABLE entry point onto the same
+     * connection path. Its pre-existing state guard (`state != disconnected
+     * && state != error`) would otherwise swallow a design-mode call
+     * silently — since design mode leaves state() == "running" — with no
+     * signal at all, inconsistent with connectTcp()/connectDiscovered().
+     * Found by the API-contract specialist during /ship. */
+    void connectDevice_refusedWhileInDesignMode()
+    {
+        const char* yaml =
+            "device:\n"
+            "  name: testdev\n"
+            "widgets:\n"
+            "  a:\n"
+            "    type: toggle\n";
+        QTemporaryFile f;
+        const QString path = writeTempYaml(f, yaml);
+        QVERIFY(!path.isEmpty());
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+
+        const QString captured = captureDebugOutput([&]() {
+            dc.connectDevice(0, QStringLiteral("127.0.0.1"), 5555);
+        });
+
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+        QVERIFY(dc.errorString().isEmpty());
+        QVERIFY(captured.contains(QStringLiteral("design mode")));
+        QVERIFY(dc.designErrorString().isEmpty());
+        QCOMPARE(dc.widgetModel()->rowCount(), 1);
+    }
+
+    /* D3's false branch: reloading after the previously-active style is
+     * removed from the new YAML must fall back to "default", not keep
+     * pointing at a style that no longer exists. */
+    void reload_fallsBackToDefault_whenSelectedStyleRemoved()
+    {
+        const char* yamlWithWarning =
+            "device:\n"
+            "  name: testdev\n"
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  warning:\n"
+            "    accent: \"#f5a623\"\n"
+            "widgets:\n"
+            "  a:\n"
+            "    type: toggle\n";
+        QTemporaryFile f;
+        const QString path = writeTempYaml(f, yamlWithWarning);
+        QVERIFY(!path.isEmpty());
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+        dc.setActiveStyle(QStringLiteral("warning"));
+        QCOMPARE(dc.activeStyle().value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#f5a623"));
+
+        const char* yamlWithoutWarning =
+            "device:\n"
+            "  name: testdev\n"
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "widgets:\n"
+            "  a:\n"
+            "    type: toggle\n";
+        writeTempYaml(f, yamlWithoutWarning);
+        triggerReload(dc);
+
+        QCOMPARE(dc.activeStyle().value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#00d4aa"));
+    }
+
     /* ── debug_state: design-mode preview injection ──────────────── */
 
     void debugState_appliedOnLoad()
@@ -444,7 +593,9 @@ private slots:
     }
 
     /* CRITICAL: debug_state must NOT be injected when YAML comes from a real
-     * device via onBootstrapSucceeded — that path never calls applyParsedYaml. */
+     * device via onBootstrapSucceeded. Both paths now share applyParsedYaml()
+     * (TODO-034), so the guard is the explicit designMode parameter passed by
+     * each caller, not separate implementations. */
     void debugState_deviceMode_ignored()
     {
         const char* yaml =
@@ -548,6 +699,68 @@ private slots:
 
         QVERIFY(captured.contains(QStringLiteral("led")));
         QVERIFY(captured.contains(QStringLiteral("(2 top-level)")));
+    }
+
+    /* ── TODO-034 regression tests: merged applyParsedYaml behavior ─── */
+
+    /* Design-mode reload preserves the currently-selected style if the new
+     * YAML still defines it (D3) — the opposite of a fresh bootstrap
+     * connection, which always resets to "default". No prior test exercised
+     * style selection across a design-mode reload at all. */
+    void reload_preserves_selected_style_if_still_valid()
+    {
+        const char* yaml =
+            "device:\n"
+            "  name: testdev\n"
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  warning:\n"
+            "    accent: \"#f5a623\"\n"
+            "widgets:\n"
+            "  a:\n"
+            "    type: toggle\n";
+        QTemporaryFile f;
+        const QString path = writeTempYaml(f, yaml);
+        QVERIFY(!path.isEmpty());
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+        QVERIFY(dc.availableStyles().contains(QStringLiteral("warning")));
+
+        dc.setActiveStyle(QStringLiteral("warning"));
+        QCOMPARE(dc.activeStyle().value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#f5a623"));
+
+        /* Reload the same file (e.g. an unrelated edit) — the custom style
+         * survives since it's still defined in the new YAML. */
+        triggerReload(dc);
+        QCOMPARE(dc.activeStyle().value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#f5a623"));
+    }
+
+    /* Design mode must NOT log parse diagnostics via qWarning() (D4) —
+     * designErrorString/UI already surfaces problems during hot-reload
+     * iteration. Only the negative (bootstrap does, design mode doesn't) was
+     * ever implicit; nothing asserted it directly. */
+    void reload_warningYaml_producesNoQWarning()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  led:\n"
+            "    type: led\n"
+            "    color: not_a_hex_color\n";
+        QTemporaryFile f;
+        const QString path = writeTempYaml(f, yaml);
+        QVERIFY(!path.isEmpty());
+
+        DeviceController dc;
+        const QString captured = captureDebugOutput([&]() { dc.startDesignMode(path); });
+
+        QVERIFY(dc.designErrorString().isEmpty());
+        QVERIFY2(!captured.contains(QStringLiteral("[YamlParser WARNING]")),
+                  "design mode must not log parse diagnostics via qWarning() "
+                  "(TODO-034 D4)");
     }
 };
 

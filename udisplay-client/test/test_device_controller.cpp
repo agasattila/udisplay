@@ -348,6 +348,147 @@ private slots:
         QVERIFY(captured.contains(QStringLiteral("[debug] parse failed:")));
         QVERIFY(captured.contains(QStringLiteral("unknown capability")));
     }
+
+    /* ── TODO-034 regression tests: merged applyParsedYaml behavior ─── */
+
+    /* The capability gate runs BEFORE any member state mutates (D1) — a
+     * rejected reconnection attempt must not clobber an already-connected
+     * device's model/name. This is existing pre-refactor behavior with no
+     * prior test pinning it; the merge's restructuring is exactly what could
+     * silently invert it. */
+    void capability_rejection_preserves_existing_model()
+    {
+        const char* validYaml =
+            "device:\n"
+            "  name: devA\n"
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  warning:\n"
+            "    accent: \"#f5a623\"\n"
+            "widgets:\n"
+            "  a:\n"
+            "    type: display\n"
+            "    label: FromDeviceA\n";
+
+        DeviceController dc;
+        injectBootstrap(dc, validYaml);
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+        QCOMPARE(dc.deviceName(), QStringLiteral("devA"));
+        QCOMPARE(dc.widgetModel()->rowCount(), 1);
+
+        /* A non-default style selection must ALSO survive a rejected
+         * reconnect — the capability gate runs before m_activeStyleName
+         * mutates, same as m_deviceName/m_model (D1). */
+        dc.setActiveStyle(QStringLiteral("warning"));
+        QCOMPARE(dc.activeStyle().value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#f5a623"));
+
+        const char* rejectedYaml =
+            "device:\n"
+            "  name: devB\n"
+            "  capabilities:\n"
+            "    - some_unknown_cap\n"
+            "widgets:\n"
+            "  b:\n"
+            "    type: display\n"
+            "    label: FromDeviceB\n";
+        injectBootstrap(dc, rejectedYaml);
+
+        QCOMPARE(dc.state(), QStringLiteral("error"));
+        QCOMPARE(dc.deviceName(), QStringLiteral("devA"));
+        QCOMPARE(dc.widgetModel()->rowCount(), 1);
+        const QModelIndex idx = dc.widgetModel()->index(0);
+        QCOMPARE(dc.widgetModel()->data(idx, WidgetModel::LabelRole).toString(),
+                  QStringLiteral("FromDeviceA"));
+        QCOMPARE(dc.activeStyle().value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#f5a623"));
+    }
+
+    /* A fresh bootstrap connection always resets the active style to
+     * "default" (D3) — even if a previous connection had a named style
+     * selected. Design mode's reload does the opposite (preserve-if-valid);
+     * no prior test pinned the bootstrap side of this divergence. */
+    void bootstrap_reconnect_resets_style_to_default()
+    {
+        const char* yaml =
+            "device:\n"
+            "  name: testdev\n"
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  warning:\n"
+            "    accent: \"#f5a623\"\n"
+            "widgets:\n"
+            "  a:\n"
+            "    type: toggle\n";
+
+        DeviceController dc;
+        injectBootstrap(dc, yaml);
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+
+        dc.setActiveStyle(QStringLiteral("warning"));
+        QCOMPARE(dc.activeStyle().value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#f5a623"));
+
+        /* Reconnect (fresh bootstrap) — must reset to "default", not carry
+         * over the previously-selected "warning" style. */
+        injectBootstrap(dc, yaml);
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+        QCOMPARE(dc.activeStyle().value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#00d4aa"));
+    }
+
+    /* Bootstrap-mode diagnostics log via qWarning() in addition to the
+     * parseWarningsChanged signal (D4) — only the signal was tested before,
+     * not the qWarning() text itself. */
+    void bootstrap_warningYaml_logsQWarning()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  led:\n"
+            "    type: led\n"
+            "    color: not_a_hex_color\n";
+
+        DeviceController dc;
+        const QString captured = captureDebugOutput([&]() { injectBootstrap(dc, yaml); });
+
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+        QVERIFY(captured.contains(QStringLiteral("[YamlParser WARNING]")));
+        QVERIFY(captured.contains(QStringLiteral("led.color")));
+    }
+
+    /* D6: diagnostics now emit right after parse, before the capability gate
+     * runs — so a rejected connection still surfaces the parse warnings it
+     * found, a deliberate behavior improvement over the pre-refactor code
+     * (which short-circuited before the diagnostics step ever ran). */
+    void capability_rejection_stillEmitsDiagnostics()
+    {
+        const char* yaml =
+            "device:\n"
+            "  name: testdev\n"
+            "  capabilities:\n"
+            "    - some_unknown_cap\n"
+            "widgets:\n"
+            "  led:\n"
+            "    type: led\n"
+            "    color: not_a_hex_color\n";
+
+        DeviceController dc;
+        bool signalReceived = false;
+        connect(&dc, &DeviceController::parseWarningsChanged,
+                [&](const QList<YamlParser::ParseDiagnostic>&) { signalReceived = true; });
+
+        const QString captured = captureDebugOutput([&]() { injectBootstrap(dc, yaml); });
+
+        QCOMPARE(dc.state(), QStringLiteral("error"));
+        QVERIFY(dc.errorString().contains(QStringLiteral("unknown capability")));
+        QVERIFY(captured.contains(QStringLiteral("[YamlParser WARNING]")));
+        QVERIFY(captured.contains(QStringLiteral("led.color")));
+        QVERIFY2(signalReceived,
+                  "parseWarningsChanged must fire even though the connection "
+                  "was ultimately rejected (TODO-034 D6)");
+    }
 };
 
 QTEST_MAIN(TestDeviceController)
