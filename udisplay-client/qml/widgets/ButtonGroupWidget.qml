@@ -7,7 +7,10 @@ import QtQuick.Layouts
 import QtQuick.Controls.Material
 import "./"
 
-/* Exclusive-select button group (grid and dpad layouts).
+/* Exclusive-select button group (grid layout). For a directional pad, use
+ * the `dpad` container type (DpadWidget.qml) instead — dpad has no
+ * selection/setter, so it doesn't belong here (see the dpad-split design
+ * doc's Architecture Issue #2).
  *
  * Item fill color, press-darken, shape/radius, and disabled opacity come
  * from the shared ButtonFace.qml component (see its header comment) so
@@ -25,23 +28,12 @@ Rectangle {
     required property var    value    /* active item widgetId or null */
     required property var    props
 
-    /* dpad: fixed 3x3 grid of 64px cells. grid (Flow): items wrap, so there's
-     * no single "natural" width for an arbitrary item count — use up to 3
-     * columns worth (Flow's typical wrap point) as a reasonable estimate. */
-    implicitWidth: (props.layout === "dpad")
-        ? (64 * 3 + 8 * 2 + 32)
-        : (Math.min((props.items || []).length, 3) * (110 + 8) + 32)
+    /* Flow: items wrap, so there's no single "natural" width for an
+     * arbitrary item count — use up to 3 columns worth (Flow's typical wrap
+     * point) as a reasonable estimate. */
+    implicitWidth: Math.min((props.items || []).length, 3) * (110 + 8) + 32
     implicitHeight: col.implicitHeight + 24
     color: "transparent"
-
-    function findDpadItem(position) {
-        if (!position) return null;
-        var items = props.items || [];
-        for (var i = 0; i < items.length; i++) {
-            if (items[i].position === position) return items[i];
-        }
-        return null;
-    }
 
     Column {
         id: col
@@ -62,10 +54,9 @@ Rectangle {
         Flow {
             width: parent.width
             spacing: 8
-            visible: props.layout !== "dpad"
 
             Repeater {
-                model: props.layout !== "dpad" ? (props.items || []) : []
+                model: props.items || []
 
                 delegate: ButtonFace {
                     required property var modelData
@@ -92,58 +83,6 @@ Rectangle {
                         color: controller.activeStyle.button_text
                         font.pixelSize: 13
                         font.bold: root.value === modelData.widgetId
-                    }
-                }
-            }
-        }
-
-        /* ── DPad layout ────────────────────────────────────────────────
-         *  3×3 grid; corners are transparent spacers.
-         *  Each cell looks up its item by position string.
-         *  Layout:  [ ]   [top]    [ ]
-         *           [left] [center] [right]
-         *           [ ]   [bottom] [ ]
-         * ─────────────────────────────────────────────────────────────── */
-        Grid {
-            columns: 3
-            spacing: 8
-            visible: props.layout === "dpad"
-            anchors.horizontalCenter: parent.horizontalCenter
-
-            Repeater {
-                /* 9 cells: empty string = invisible corner spacer */
-                model: ["", "top", "", "left", "center", "right", "", "bottom", ""]
-
-                delegate: Item {
-                    id: cell
-                    width: 64; height: 64
-
-                    required property string modelData
-                    property var btnItem: root.findDpadItem(modelData)
-
-                    ButtonFace {
-                        anchors.fill: parent
-                        visible: cell.btnItem !== null
-                        enabled: root.enabled
-                        showLabel: false
-
-                        border.color: (cell.btnItem !== null && root.value === cell.btnItem.widgetId)
-                                      ? controller.activeStyle.button : controller.activeStyle.border
-                        border.width: 1
-
-                        onButtonPressed:  { if (cell.btnItem) controller.sendButtonPress(cell.btnItem.widgetId) }
-                        onButtonReleased: { if (cell.btnItem) controller.sendButtonRelease(cell.btnItem.widgetId) }
-                        onButtonClicked:  { if (cell.btnItem) controller.sendButtonClick(cell.btnItem.widgetId) }
-
-                        Label {
-                            anchors.centerIn: parent
-                            text: cell.btnItem ? cell.btnItem.label : ""
-                            /* button_text unconditionally — same reasoning
-                             * as the grid delegate's label above. */
-                            color: controller.activeStyle.button_text
-                            font.pixelSize: 16
-                            font.bold: cell.btnItem !== null && root.value === cell.btnItem.widgetId
-                        }
                     }
                 }
             }
