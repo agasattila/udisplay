@@ -767,6 +767,98 @@ private slots:
         QVERIFY(hasRelay);
     }
 
+    /* ── dpad: container type (not a button-group items-group) ────── */
+
+    void dpad_children_embedded()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  dir_pad:\n"
+            "    type: dpad\n"
+            "    widgets:\n"
+            "      up_btn:\n"
+            "        type: button\n"
+            "        label: Up\n"
+            "        position: top\n"
+            "      down_btn:\n"
+            "        type: button\n"
+            "        label: Down\n"
+            "        position: bottom\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(p.parse(yaml, widgets, name, version));
+        /* dpad appears as a single top-level entry (children NOT in flat list),
+         * same shape as row/grid. */
+        QCOMPARE(widgets.size(), 1);
+        QCOMPARE(widgets[0].type,     WidgetType::Dpad);
+        QCOMPARE(widgets[0].widgetId, uint8_t(0));
+        QCOMPARE(widgets[0].children.size(), 2);
+
+        const WidgetDef& up = widgets[0].children[0];
+        QCOMPARE(up.keyPath,  QStringLiteral("up_btn"));
+        QCOMPARE(up.type,     WidgetType::Button);
+        QCOMPARE(up.position, QStringLiteral("top"));
+
+        const WidgetDef& down = widgets[0].children[1];
+        QCOMPARE(down.keyPath,  QStringLiteral("down_btn"));
+        QCOMPARE(down.position, QStringLiteral("bottom"));
+    }
+
+    void dpad_childrenGetIds_transparentToContainer()
+    {
+        /* down_btn (0x10), up_btn (0x11) — sorted alphabetically, same
+         * transparent-container behavior as row/grid/section. */
+        const char* yaml =
+            "widgets:\n"
+            "  d:\n"
+            "    type: dpad\n"
+            "    widgets:\n"
+            "      up_btn:\n"
+            "        type: button\n"
+            "        position: top\n"
+            "      down_btn:\n"
+            "        type: button\n"
+            "        position: bottom\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(p.parse(yaml, widgets, name, version));
+        QCOMPARE(widgets.size(), 1);
+        bool hasUp = false, hasDown = false;
+        for (const auto& child : widgets[0].children) {
+            if (child.keyPath == "up_btn")   { QCOMPARE(child.widgetId, uint8_t(0x11)); hasUp = true; }
+            if (child.keyPath == "down_btn") { QCOMPARE(child.widgetId, uint8_t(0x10)); hasDown = true; }
+        }
+        QVERIFY(hasUp);
+        QVERIFY(hasDown);
+    }
+
+    void buttonGroupLayout_dpad_noLongerValid_failsParse()
+    {
+        /* layout: dpad no longer exists on button-group — it's the separate
+         * `dpad` container type now (see the dpad-split design doc). */
+        const char* yaml =
+            "widgets:\n"
+            "  bg:\n"
+            "    type: button-group\n"
+            "    layout: dpad\n"
+            "    items:\n"
+            "      a:\n"
+            "        label: A\n"
+            "      b:\n"
+            "        label: B\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(yaml, widgets, name, version));
+        bool hasError = false;
+        for (const auto& d : p.diagnostics())
+            if (d.field == QStringLiteral("layout") &&
+                d.severity == YamlParser::Severity::Error) hasError = true;
+        QVERIFY(hasError);
+    }
+
     void grid_columns_and_children()
     {
         const char* yaml =

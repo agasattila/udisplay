@@ -152,12 +152,11 @@ def test_dpad_missing_position():
     doc = {
         "device": {"name": "x"},
         "widgets": {
-            "g": {
-                "type": "button-group",
-                "layout": "dpad",
-                "items": {
-                    "up": {"label": "Up", "position": "top"},
-                    "dn": {"label": "Down"},  # missing position
+            "pad": {
+                "type": "dpad",
+                "widgets": {
+                    "up": {"type": "button", "label": "Up", "position": "top"},
+                    "dn": {"type": "button", "label": "Down"},  # missing position
                 },
             }
         },
@@ -166,6 +165,37 @@ def test_dpad_missing_position():
     assert errors
     assert "dpad" in errors[0]
     assert "dn" in errors[0]
+
+
+def test_dpad_zero_items_rejected():
+    """Schema-level: dpadWidgetMap requires minProperties: 1 (mirrors
+    button-group's own 2-item minimum discipline)."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {"pad": {"type": "dpad", "widgets": {}}},
+    }
+    errors = schema_errors(doc, SCHEMA)
+    assert errors
+
+
+def test_button_group_layout_dpad_rejected():
+    """layout: dpad no longer exists on button-group — it's a separate
+    `dpad` container type now (see the dpad-split design doc)."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "g": {
+                "type": "button-group",
+                "layout": "dpad",
+                "items": {
+                    "up": {"label": "Up"},
+                    "dn": {"label": "Down"},
+                },
+            }
+        },
+    }
+    errors = schema_errors(doc, SCHEMA)
+    assert errors
 
 
 def test_button_widgets_key_led_accepted():
