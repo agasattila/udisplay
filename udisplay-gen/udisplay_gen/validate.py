@@ -22,11 +22,11 @@ _BUNDLED_SCHEMA = pathlib.Path(__file__).parent / "schema" / "udisplay.schema.js
 SUPPORTED_TYPES = [
     "display", "led", "rgbled", "button", "button-group", "slider", "toggle", "text",
     "dropdown", "label", "separator",
-    "section", "row", "grid",
+    "section", "row", "grid", "dpad",
 ]
 
 # Container types — have a `widgets:` sub-map, excluded from widget ID assignment
-CONTAINER_TYPES = {"section", "row", "grid"}
+CONTAINER_TYPES = {"section", "row", "grid", "dpad"}
 
 # Decoration types — no widget ID, no protocol exchange
 DECORATION_TYPES = {"label", "separator"}
@@ -147,7 +147,7 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
     """
     Recursive semantic check for a widget map.
     - slider min < max
-    - button-group dpad items must all have position
+    - dpad's button children must all have position
     - leaf widget names globally unique across all container scopes
     """
     errors: list[str] = []
@@ -160,6 +160,16 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
 
         if wtype in CONTAINER_TYPES:
             sub_widgets = widget.get("widgets", {})
+            if wtype == "dpad":
+                missing = [
+                    k for k, v in sub_widgets.items()
+                    if isinstance(v, dict) and "position" not in v
+                ]
+                if missing:
+                    errors.append(
+                        f"  {widget_path}: dpad requires `position` on every child "
+                        f"button; missing: {', '.join(missing)}"
+                    )
             errors.extend(_semantic_errors_in_map(sub_widgets, widget_path, seen_names))
             continue
 
@@ -171,15 +181,6 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
             if mn is not None and mx is not None and mn >= mx:
                 errors.append(
                     f"  {widget_path}: slider `min` ({mn}) must be less than `max` ({mx})"
-                )
-
-        if wtype == "button-group" and widget.get("layout") == "dpad":
-            items = widget.get("items", {})
-            missing = [k for k, v in items.items() if "position" not in v]
-            if missing:
-                errors.append(
-                    f"  {widget_path}: dpad layout requires `position` on every item; "
-                    f"missing: {', '.join(missing)}"
                 )
 
         if key in seen_names:
@@ -197,7 +198,7 @@ def semantic_errors(doc: dict) -> list[str]:
     """
     Semantic checks not expressible in JSON Schema:
     - slider min < max
-    - button-group dpad items must all have position
+    - dpad's button children must all have position
     - leaf names globally unique across all container scopes
     """
     seen: set[str] = set()

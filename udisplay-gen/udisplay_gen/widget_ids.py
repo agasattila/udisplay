@@ -5,9 +5,9 @@
 Widget ID assignment for uDisplay.
 
 IDs are assigned alphabetically by leaf key name (not full path), starting at 0x10.
-Container types (section, row, grid) are transparent — their names are excluded from
-the ID path. Decoration types (label, separator) and dropdown items are excluded from
-ID assignment entirely.
+Container types (section, row, grid, dpad) are transparent — their names are excluded
+from the ID path. Decoration types (label, separator) and dropdown items are excluded
+from ID assignment entirely.
 
 See docs/merkle.md § Widget ID assignment.
 """
@@ -18,7 +18,7 @@ ID_MAX = 0xFF
 MAX_WIDGETS = ID_MAX - ID_START + 1  # 240
 
 # Container types — transparent to ID assignment (children get IDs, not the container)
-CONTAINER_TYPES = {"section", "row", "grid"}
+CONTAINER_TYPES = {"section", "row", "grid", "dpad"}
 
 # Types that never receive a widget ID
 NO_ID_TYPES = {"label", "separator"}
@@ -28,7 +28,7 @@ def _collect(widgets: dict, prefix: str = "") -> list[str]:
     """
     Recursively collect all ID-bearing leaf paths in alphabetical order per level.
 
-    - Containers (section/row/grid) are transparent: their children get IDs as if
+    - Containers (section/row/grid/dpad) are transparent: their children get IDs as if
       the container name were absent from the path.
     - Decoration types (label, separator) are skipped.
     - dropdown items are NOT collected (only the dropdown itself gets an ID).
