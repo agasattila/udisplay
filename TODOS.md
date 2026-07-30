@@ -148,6 +148,32 @@ error states.
 
 ---
 
+### TODO-053: Reduce `udisplay_t` buffer sizes to shrink per-instance RAM footprint
+**What:** Investigate whether `msg_buf` (1024B) and `tx_buf` (1026B union) can be
+sized down, possibly configurable via a build-time define like the existing
+`UDISPLAY_RX_BUF_SIZE` override.
+**Why:** At ~2-2.5KB per `udisplay_t`, two concurrent instances (the multi-instance
+refactor's whole point) cost ~4-5KB static RAM — negligible on most ESP32 variants
+but real on RAM-constrained ones (ESP32-C2 at 272KB total, shared with the
+WiFi/BLE stacks themselves).
+**Pros:** Recovers meaningful RAM for constrained builds without changing the
+protocol; follows the existing precedent of `UDISPLAY_RX_BUF_SIZE` being
+override-able.
+**Cons:** Sizes are currently fixed to `UDISPLAY_MAX_MSG_SIZE` (1024, the largest
+possible message) for simplicity; most real messages are far smaller, but a
+configurable cap adds a build-time knob to reason about and test.
+**Context:** Raised during `/plan-eng-review` of the multi-instance `libudisplay`
+refactor (see design doc `prog-main-design-20260730-192038.md`) — not blocking that
+refactor, since today's footprint is negligible on most targets, but worth
+revisiting once real firmware on constrained variants surfaces actual RAM
+pressure.
+**Effort:** M
+**Priority:** P3
+**Depends on:** The multi-instance `libudisplay` refactor landing first (buffer
+sizing matters more once N instances actually exist).
+
+---
+
 ### TODO-010: DeviceController integration test (`test_device_controller.cpp`)
 **What:** A test that exercises the full connection path end-to-end without real hardware: mock TCP server injects a valid Merkle handshake + hash batch + compressed YAML chunk, verifies that `DeviceController` reaches `state == "running"` and `widgetModel.rowCount() > 0` after connecting. Also verifies the heartbeat watchdog fires an error after 15s of silence (using a QSignalSpy + QTest::qWait).
 **Why:** Unit tests cover BootstrapManager, YamlParser, and WidgetModel individually, but the wiring between them (signal connections, argument order, callback registration) is currently only tested on real hardware. A bug in that wiring would not be caught by the existing test suite.
