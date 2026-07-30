@@ -118,7 +118,7 @@ struct PathEntry {
 /* Container types: transparent to ID assignment (children inherit prefix). */
 static bool isContainer(const std::string& type)
 {
-    return type == "section" || type == "row" || type == "grid";
+    return type == "section" || type == "row" || type == "grid" || type == "dpad";
 }
 
 /* Decoration types: no widget ID, no protocol exchange. */
@@ -345,7 +345,7 @@ static WidgetDef buildTopLevelWidget(const std::string& key,
         w.groupLayout = nodeStr(node, "layout", QStringLiteral("grid"));
         if (!inEnum(w.groupLayout, UDisplaySchema::kButtonGroupLayouts)) {
             diag(diags, Severity::Error, key, "layout",
-                 QStringLiteral("unknown button-group layout '%1'; valid values: grid, dpad")
+                 QStringLiteral("unknown button-group layout '%1'; valid values: grid")
                      .arg(w.groupLayout));
         }
         if (node["items"] && node["items"].IsMap()) {
@@ -524,6 +524,7 @@ static void appendRowGridChild(WidgetDef& parent, const std::string& key,
     WidgetDef child = buildTopLevelWidget(key, node, widgetId, idPrefix, idMap, diags);
     child.flex = parseFlex(node, key, diags);
     child.align = parseAlign(node, key, "align", kRowGridAligns, diags);
+    child.position = nodeStr(node, "position");
     parent.children.append(child);
 }
 
@@ -577,6 +578,21 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
             if (type == "grid")
                 w.gridColumns = parseGridColumns(node, key, diags);
             w.align = parseAlign(node, key, "align", kRowGridAligns, diags);
+            if (node["widgets"] && node["widgets"].IsMap()) {
+                for (auto ci = node["widgets"].begin();
+                     ci != node["widgets"].end(); ++ci) {
+                    std::string ck = ci->first.as<std::string>();
+                    uint8_t cid = idMap.count(ck) ? idMap.at(ck) : 0;
+                    appendRowGridChild(w, ck, ci->second, cid, /*idPrefix=*/{}, idMap, diags);
+                }
+            }
+            out.append(w);
+
+        } else if (type == "dpad") {
+            WidgetDef w;
+            w.keyPath  = qs(key);
+            w.widgetId = 0;
+            w.type     = WidgetType::Dpad;
             if (node["widgets"] && node["widgets"].IsMap()) {
                 for (auto ci = node["widgets"].begin();
                      ci != node["widgets"].end(); ++ci) {

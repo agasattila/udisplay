@@ -96,6 +96,14 @@ if(QML_EXECUTABLE)
         TIMEOUT 10
         FAIL_REGULAR_EXPRESSION "Unable to assign .* to QQuickAnchorLine")
 
+    add_test(NAME test_qml_dpad_widget
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_dpad_widget.qml")
+    set_tests_properties(test_qml_dpad_widget PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10
+        FAIL_REGULAR_EXPRESSION "Unable to assign .* to QQuickAnchorLine")
+
     add_test(NAME test_qml_version_label_visibility
              COMMAND ${QML_EXECUTABLE} -platform offscreen
                      "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_version_label_visibility.qml")
@@ -135,6 +143,21 @@ add_executable(test_yaml_parser
 target_include_directories(test_yaml_parser PRIVATE ../src)
 target_link_libraries(test_yaml_parser PRIVATE Qt6::Core Qt6::Test yaml-cpp)
 add_test(NAME test_yaml_parser COMMAND test_yaml_parser -v2)
+
+# ── test_widget_id_golden_fixtures ──────────────────────────────────────────
+# Cross-checks YamlParser's widget-ID assignment against udisplay-gen's
+# widget_ids.assign() via the SAME fixtures in tests/protocol_vectors.json
+# (repo root) — see that file's widget_id_fixtures and
+# udisplay-gen/tests/test_vectors.py's TestWidgetIdGoldenFixtures.
+add_executable(test_widget_id_golden_fixtures
+    test_widget_id_golden_fixtures.cpp
+    ../src/YamlParser.cpp
+)
+target_include_directories(test_widget_id_golden_fixtures PRIVATE ../src)
+target_link_libraries(test_widget_id_golden_fixtures PRIVATE Qt6::Core Qt6::Test yaml-cpp)
+target_compile_definitions(test_widget_id_golden_fixtures PRIVATE
+    UDISPLAY_PROTOCOL_VECTORS_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../../tests/protocol_vectors.json")
+add_test(NAME test_widget_id_golden_fixtures COMMAND test_widget_id_golden_fixtures -v2)
 
 # ── test_widget_model ──────────────────────────────────────────────────────
 add_executable(test_widget_model
