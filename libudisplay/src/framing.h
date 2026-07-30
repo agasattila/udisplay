@@ -23,17 +23,9 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#include "../include/udisplay.h"
-
-typedef struct {
-    uint8_t  buf[UDISPLAY_MAX_MSG_SIZE]; /**< Reassembly buffer */
-    uint16_t len;             /**< Bytes accumulated so far */
-    uint16_t msg_len;         /**< Total message length declared in first-fragment header */
-    uint16_t expected_offset; /**< Next expected fragment byte offset */
-    uint8_t  packet_id;       /**< packet_id from first fragment; expected on continuations */
-    int      in_progress;     /**< 1 while reassembling; 0 when idle */
-    int      overflow;        /**< Set on over-completion (cleared by ble_rx_reset) */
-} ble_rx_t;
+#include "../include/udisplay.h" /* ble_rx_t / tcp_rx_t are defined there — see the
+                                     "Internal state layout" comment in udisplay.h
+                                     for why they live in the public header. */
 
 /** Reset reassembly state. Call on connect, disconnect, or after consuming a message. */
 void ble_rx_reset(ble_rx_t* rx);
@@ -64,11 +56,6 @@ ble_rx_status_t ble_rx_feed(ble_rx_t* rx,
                              const uint8_t* att_payload, uint16_t att_len);
 
 /* ── TCP inbound reassembly ──────────────────────────────────────────────── */
-
-typedef struct {
-    uint8_t  buf[UDISPLAY_RX_BUF_SIZE]; /**< Reassembly buffer (partial + in-flight bytes) */
-    uint16_t used;                      /**< Bytes currently buffered */
-} tcp_rx_t;
 
 /** Reset reassembly state. Call on connect or disconnect. */
 void tcp_rx_reset(tcp_rx_t* rx);

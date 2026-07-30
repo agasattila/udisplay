@@ -31,6 +31,8 @@
 
 /* ── Simulation state — accessed under demo_tcp mutex ────────────────────── */
 
+static udisplay_t g_ctx; /* single instance — this demo has one TCP connection */
+
 static float  g_base_rate_hz = 1.0f;
 static float  g_multiplier   = 1.0f;
 static int    g_enabled      = 1;
@@ -51,8 +53,8 @@ static void temp_display()
     /* temp_display: 20 + 5·sin(t) °C */
     if (g_enabled) {
         float temp = 20.0f + 5.0f * (float)sin(g_sim_time);
-        set_temp_display(temp);
-    }   
+        set_temp_display(&g_ctx, temp);
+    }
 }
 
 
@@ -61,17 +63,17 @@ static void temp_display()
 static void handle_client_ready(void)
 {
     printf("[EVENT] client_ready\n");
-    set_enable_toggle((uint8_t)g_enabled);
+    set_enable_toggle(&g_ctx, (uint8_t)g_enabled);
     temp_display();
-    set_power_btn_power_led((uint8_t)g_power_on);
-    set_rate_slider(g_base_rate_hz);
-    set_text_input("",0);   
+    set_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
+    set_rate_slider(&g_ctx, g_base_rate_hz);
+    set_text_input(&g_ctx, "", 0);
 }
 
 static void handle_power_btn(void)
 {
     g_power_on = !g_power_on;
-    set_power_btn_power_led((uint8_t)g_power_on);
+    set_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
     printf("[EVENT] power_btn  → power_led %s\n", g_power_on ? "ON" : "OFF");
 }
 
@@ -84,14 +86,14 @@ static void handle_rate_slider(float v)
     if (v < 0.1f)  v = 0.1f;
     if (v > 10.0f) v = 10.0f;
     g_base_rate_hz = v;
-    set_rate_slider(g_base_rate_hz);
+    set_rate_slider(&g_ctx, g_base_rate_hz);
     printf("[EVENT] rate_slider→ %.2f Hz\n", g_base_rate_hz);
 }
 
 static void handle_enable_toggle(uint8_t state)
 {
     g_enabled = state ? 1 : 0;
-    set_enable_toggle((uint8_t)g_enabled);
+    set_enable_toggle(&g_ctx, (uint8_t)g_enabled);
     printf("[EVENT] enable     → %s\n", g_enabled ? "ON" : "OFF");
 }
 
@@ -119,7 +121,7 @@ static const udisplay_ui_handlers_t g_handlers = {
 
 static void on_rx(const uint8_t* data, uint16_t len)
 {
-    udisplay_ui_feed(data, len);
+    udisplay_feed(&g_ctx, data, len);
 }
 
 static void on_tick(double dt_sec)
@@ -128,7 +130,7 @@ static void on_tick(double dt_sec)
     g_hb_acc += dt_sec;
     if (g_hb_acc >= 5.0) {
         g_hb_acc = 0.0;
-        udisplay_heartbeat();
+        udisplay_heartbeat(&g_ctx);
     }
 
     /* Data update at (base_rate × multiplier) Hz */
@@ -145,30 +147,30 @@ static void on_tick(double dt_sec)
     /* First tick after bootstrap: push initial state for interactive widgets */
     if (!g_initial_sent) {
         g_initial_sent = 1;
-        set_rate_slider(g_base_rate_hz);
-        set_enable_toggle((uint8_t)g_enabled);
-        set_power_btn_power_led((uint8_t)g_power_on);
+        set_rate_slider(&g_ctx, g_base_rate_hz);
+        set_enable_toggle(&g_ctx, (uint8_t)g_enabled);
+        set_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
     }
-    
+
     /* temp_display */
     temp_display();
 
     /* status_led: toggle every 3 ticks */
     if (g_tick % 3 == 0) {
         uint8_t led = (uint8_t)((g_tick / 3) % 2);
-        set_status_led(led);
+        set_status_led(&g_ctx, led);
     }
 }
 
 static void on_connect(void)
 {
     g_initial_sent = 0;
-    udisplay_on_connect();
+    udisplay_on_connect(&g_ctx);
 }
 
 static void on_disconnect(void)
 {
-    udisplay_on_disconnect();
+    udisplay_on_disconnect(&g_ctx);
     g_initial_sent = 0;
 }
 
@@ -185,7 +187,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    udisplay_ui_init(demo_tcp_send, UDISPLAY_TRANSPORT_TCP);
+    udisplay_ui_init(&g_ctx, demo_tcp_send, UDISPLAY_TRANSPORT_TCP);
     udisplay_ui_set_handlers(&g_handlers);
 
     demo_tcp_hooks_t hooks = {

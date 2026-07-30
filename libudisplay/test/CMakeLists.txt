@@ -15,6 +15,7 @@ add_executable(udisplay_test
     test_chunk_server.cpp
     test_framing.cpp
     test_udisplay.cpp
+    test_udisplay_multi_instance.cpp
 )
 
 target_link_libraries(udisplay_test

@@ -148,7 +148,11 @@ int main(/* ... */) {
 
     // 3. Tell the library a client has connected — this sends the HANDSHAKE
     //    that kicks off bootstrap. Call this from your accept()/on-connect path.
-    udisplay_on_connect();
+    //    ui.ctx() returns this instance's own udisplay_t* handle -- pass it to
+    //    any core function the UDisplay class doesn't wrap directly (heartbeat,
+    //    on_connect/on_disconnect, ...). The library is multi-instance: each
+    //    live connection/session is a separate handle.
+    udisplay_on_connect(ui.ctx());
 
     for (;;) {
         // 4. Feed inbound bytes as they arrive. ui.feed() reassembles TCP frames
@@ -162,10 +166,10 @@ int main(/* ... */) {
 
         // 5. Call periodically — recommended every 5s, not every loop iteration.
         //    Keeps the client's connection-alive watchdog satisfied.
-        udisplay_heartbeat();
+        udisplay_heartbeat(ui.ctx());
 
         // 6. On disconnect, reset bootstrap state so a reconnect starts clean:
-        //    udisplay_on_disconnect();
+        //    udisplay_on_disconnect(ui.ctx());
     }
 }
 ```

@@ -228,7 +228,7 @@ static void register_ui_handlers(void)
 
 static void heartbeat_timer_cb(TimerHandle_t t)
 {
-    udisplay_heartbeat();
+    udisplay_heartbeat(ui.ctx());
 
     if (g_conn_handle != BLE_HS_CONN_HANDLE_NONE && !g_handshake_sent) {
         if (++g_subscribe_wait_ticks >= SUBSCRIBE_WAIT_TICKS_MAX) {
@@ -354,7 +354,7 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
         g_conn_handle          = BLE_HS_CONN_HANDLE_NONE;
         g_handshake_sent       = false;
         g_subscribe_wait_ticks = 0;
-        udisplay_on_disconnect();
+        udisplay_on_disconnect(ui.ctx());
         start_adv();
         break;
 
@@ -369,7 +369,7 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
             ev->subscribe.cur_notify && !g_handshake_sent) {
             g_handshake_sent = true;
             ESP_LOGI(TAG, "client subscribed — sending HANDSHAKE");
-            udisplay_on_connect();
+            udisplay_on_connect(ui.ctx());
         }
         break;
 

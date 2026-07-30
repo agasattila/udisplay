@@ -12,13 +12,9 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-
-typedef struct {
-    const uint8_t* const* chunks;
-    const uint8_t* const* chunk_hashes;
-    const uint16_t*       chunk_lens;
-    uint16_t              chunk_count;
-} chunk_server_t;
+#include "../include/udisplay.h" /* chunk_server_t is defined there — see the
+                                     "Internal state layout" comment in udisplay.h
+                                     for why it lives in the public header. */
 
 void chunk_server_init(chunk_server_t* cs,
                        const uint8_t* const* chunks,
