@@ -583,9 +583,11 @@ def test_source_no_rx_buffer(full_vocab_yaml):
 
 
 def test_source_contains_ui_init(full_vocab_yaml):
+    """udisplay_ui_init is the one bind/init helper (multi-instance refactor:
+    takes udisplay_t* ctx and forwards to the handle-taking core)."""
     source = _make_source(full_vocab_yaml)
-    assert "udisplay_ui_init(udisplay_send_fn send, udisplay_transport_t transport)" in source
-    assert "udisplay_init(&cfg)" in source
+    assert "udisplay_ui_init(udisplay_t* ctx, udisplay_send_fn send, udisplay_transport_t transport)" in source
+    assert "udisplay_init(ctx, &cfg)" in source
     assert ".transport = transport," in source
 
 
@@ -595,18 +597,88 @@ def test_source_contains_ui_set_handlers(full_vocab_yaml):
     assert "_ui_handlers = h" in source
 
 
-def test_source_contains_ui_feed(full_vocab_yaml):
-    """udisplay_ui_feed is a thin forward to the transport-aware core udisplay_feed()."""
+def test_source_no_ui_feed_wrapper(full_vocab_yaml):
+    """udisplay_ui_feed was cut (multi-instance refactor, Design Decision #4):
+    it was a redundant 1:1 forward to the handle-taking core udisplay_feed()
+    with zero added value. Firmware calls udisplay_feed(ctx, data, len)
+    directly instead."""
     source = _make_source(full_vocab_yaml)
-    assert "udisplay_ui_feed" in source
-    assert "udisplay_feed(data, len);" in source
+    assert "udisplay_ui_feed" not in source
     assert "udisplay_tcp_unframe" not in source
 
 
-def test_source_contains_ui_ble_set_mtu(full_vocab_yaml):
+def test_source_no_ui_ble_set_mtu_wrapper(full_vocab_yaml):
+    """udisplay_ui_ble_set_mtu was cut for the same reason as udisplay_ui_feed
+    -- firmware calls udisplay_ble_set_mtu(ctx, mtu) directly."""
     source = _make_source(full_vocab_yaml)
-    assert "int udisplay_ui_ble_set_mtu(uint16_t mtu_payload)" in source
-    assert "return udisplay_ble_set_mtu(mtu_payload);" in source
+    assert "udisplay_ui_ble_set_mtu" not in source
+
+
+# ── Category 5b: --namespace flag (multi-instance refactor) ──────────────────
+
+def test_c_namespace_default_stays_unprefixed(full_vocab_yaml):
+    """No-flag (namespace=None) output must stay byte-identical to the
+    pre-multi-instance shape -- existing firmware/tests must not break."""
+    header = _make_header(full_vocab_yaml)
+    source = _make_source(full_vocab_yaml)
+    assert "WIDGET_ID_FIRE_BTN" in header
+    assert "extern const uint8_t UDISPLAY_MERKLE_ROOT[32];" in header
+    assert "const uint8_t UDISPLAY_MERKLE_ROOT[32] = {" in source
+    assert "void udisplay_ui_init(udisplay_t* ctx" in header
+    assert "udisplay_ui_handlers_t" in header
+
+
+def test_c_namespace_prefixes_data_assets_and_widget_ids(full_vocab_yaml):
+    header = _make_header(full_vocab_yaml, namespace="ble")
+    source = _make_source(full_vocab_yaml, namespace="ble")
+    assert "#define WIDGET_ID_FIRE_BTN " not in header  # unprefixed form absent
+    assert "BLE_WIDGET_ID_FIRE_BTN" in header
+    assert "extern const uint8_t BLE_UDISPLAY_MERKLE_ROOT[32];" in header
+    assert "const uint8_t BLE_UDISPLAY_MERKLE_ROOT[32] = {" in source
+    assert "extern const uint8_t BLE_UDISPLAY_CHUNK_0" in header
+    assert "extern const uint8_t* const BLE_UDISPLAY_CHUNKS" in header
+    assert "extern const uint8_t* const BLE_UDISPLAY_CHUNK_HASHES" in header
+
+
+def test_c_namespace_prefixes_bind_init_helper(full_vocab_yaml):
+    """One bind/init helper per namespace (Design Decision #4) -- not a full
+    parallel API. Handlers struct/registration are namespaced too (part of
+    the binding surface); feed/ble_set_mtu are NOT generated at all (call the
+    handle-taking core directly with the same ctx)."""
+    header = _make_header(full_vocab_yaml, namespace="ble")
+    source = _make_source(full_vocab_yaml, namespace="ble")
+    assert "void udisplay_ble_ui_init(udisplay_t* ctx, udisplay_send_fn send, udisplay_transport_t transport)" in header
+    assert "udisplay_ble_ui_handlers_t" in header
+    assert "void udisplay_ble_ui_set_handlers(const udisplay_ble_ui_handlers_t* h)" in header
+    assert "udisplay_ui_init(udisplay_t*" not in header  # unprefixed name absent
+    assert "udisplay_ui_feed" not in source
+    assert "udisplay_ui_ble_set_mtu" not in source
+    assert "udisplay_init(ctx, &cfg)" in source
+
+
+def test_c_invalid_namespace_rejected(full_vocab_yaml):
+    with pytest.raises(ValueError, match="Invalid --namespace"):
+        _make_header(full_vocab_yaml, namespace="not valid!")
+    with pytest.raises(ValueError, match="Invalid --namespace"):
+        _make_header(full_vocab_yaml, namespace="1starts_with_digit")
+
+
+def test_cli_namespace_flag_prefixes_output(full_vocab_yaml, tmp_path):
+    runner = CliRunner()
+    result = runner.invoke(cli, ["build", str(full_vocab_yaml), "-o", str(tmp_path),
+                                  "--namespace", "wifi"])
+    assert result.exit_code == 0, result.output
+    header = (tmp_path / "udisplay_ui.h").read_text()
+    assert "WIFI_WIDGET_ID_FIRE_BTN" in header
+    assert "udisplay_wifi_ui_init" in header
+
+
+def test_cli_namespace_flag_rejects_invalid(full_vocab_yaml, tmp_path):
+    runner = CliRunner()
+    result = runner.invoke(cli, ["build", str(full_vocab_yaml), "-o", str(tmp_path),
+                                  "--namespace", "bad namespace"])
+    assert result.exit_code != 0
+    assert "Invalid --namespace" in result.output
 
 
 def test_source_dispatch_switch(full_vocab_yaml):
@@ -674,7 +746,7 @@ def test_cli_build_full_vocab_with_api(full_vocab_yaml, tmp_path):
     source = (tmp_path / "udisplay_ui.c").read_text()
     assert "udisplay_ui_handlers_t" in header
     assert "udisplay_ui_init" in source
-    assert "udisplay_ui_feed" in source
+    assert "udisplay_ui_feed" not in source  # cut -- see test_source_no_ui_feed_wrapper
 
 
 # ── Eng-review gap tests ───────────────────────────────────────────────────────
@@ -1046,18 +1118,25 @@ def test_cpp_init_method_present(full_vocab_yaml):
 def test_cpp_feed_method_present(full_vocab_yaml):
     """A single feed() dispatches on the transport internally via the core
     udisplay_feed() -- no separate tcp_feed()/ble_feed() (collapsed per
-    plan-eng-review 2026-07-07, Outside Voice Tension 1)."""
+    plan-eng-review 2026-07-07, Outside Voice Tension 1). Multi-instance
+    refactor: forwards &_ctx (the instance's own embedded udisplay_t), not a
+    bare singleton call."""
     hpp = _make_cpp(full_vocab_yaml)
     assert "void feed(const uint8_t* data, uint16_t len)" in hpp
-    assert "udisplay_feed(data, len);" in hpp
+    assert "udisplay_feed(&_ctx, data, len);" in hpp
     assert "void tcp_feed(" not in hpp
     assert "void ble_feed(" not in hpp
 
 
 def test_cpp_ble_set_mtu_method_present(full_vocab_yaml):
+    """Multi-instance refactor: ble_set_mtu is no longer static -- the old
+    static method called the bare singleton API with no instance reference
+    at all, which was only correct because there was exactly one global
+    instance. Now it forwards this instance's own &_ctx."""
     hpp = _make_cpp(full_vocab_yaml)
-    assert "static int ble_set_mtu(uint16_t mtu_payload)" in hpp
-    assert "return udisplay_ble_set_mtu(mtu_payload);" in hpp
+    assert "int ble_set_mtu(uint16_t mtu_payload)" in hpp
+    assert "static int ble_set_mtu(uint16_t mtu_payload)" not in hpp
+    assert "return udisplay_ble_set_mtu(&_ctx, mtu_payload);" in hpp
 
 
 def test_cpp_tcp_frame_method_present(full_vocab_yaml):
@@ -1166,6 +1245,37 @@ def test_cpp_namespace_wraps_all(full_vocab_yaml):
     ns_close = hpp.rindex("} // namespace udisplay_ui")
     udisplay_class = hpp.index("class UDisplay {")
     assert ns_open < udisplay_class < ns_close
+
+
+# ── --namespace flag (multi-instance refactor, C++ backend) ──────────────────
+
+def test_cpp_namespace_parameterizes_outer_namespace(full_vocab_yaml):
+    """C++ namespacing is simpler than the C backend's manual symbol
+    prefixing: parameterizing the ONE outer namespace automatically scopes
+    every data asset, dispatch function, and the UDisplay class itself --
+    no per-symbol renaming needed (real C++ namespaces, unlike C macros)."""
+    hpp = _make_cpp(full_vocab_yaml, namespace="ble")
+    assert "namespace udisplay_ble_ui {" in hpp
+    assert "} // namespace udisplay_ble_ui" in hpp
+    assert "namespace udisplay_ui {" not in hpp
+    ns_open = hpp.index("namespace udisplay_ble_ui {")
+    ns_close = hpp.rindex("} // namespace udisplay_ble_ui")
+    udisplay_class = hpp.index("class UDisplay {")
+    assert ns_open < udisplay_class < ns_close
+
+
+def test_cpp_invalid_namespace_rejected(full_vocab_yaml):
+    with pytest.raises(ValueError, match="Invalid --namespace"):
+        _make_cpp(full_vocab_yaml, namespace="not valid!")
+
+
+def test_cli_cpp_namespace_flag(full_vocab_yaml, tmp_path):
+    runner = CliRunner()
+    result = runner.invoke(cli, ["build", str(full_vocab_yaml), "-o", str(tmp_path),
+                                  "--lang", "cpp", "--namespace", "wifi"])
+    assert result.exit_code == 0, result.output
+    hpp = (tmp_path / "udisplay_ui.hpp").read_text()
+    assert "namespace udisplay_wifi_ui {" in hpp
 
 
 # ── Backend contract tests (6) ────────────────────────────────────────────────

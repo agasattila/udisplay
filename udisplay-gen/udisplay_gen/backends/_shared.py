@@ -24,6 +24,41 @@ def validate_blob_size(blob: bytes) -> None:
         )
 
 
+def _ns_validate(namespace: Optional[str]) -> None:
+    """Raise ValueError if namespace is not a valid C identifier fragment."""
+    if namespace is not None and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", namespace):
+        raise ValueError(
+            f"Invalid --namespace {namespace!r}: must be a valid C identifier "
+            f"(letters, digits, underscore; cannot start with a digit)."
+        )
+
+
+def _ns_macro(namespace: Optional[str], name: str) -> str:
+    """
+    Namespace-prefix an externally-linked macro/data-array name (e.g.
+    WIDGET_ID_*, UDISPLAY_MERKLE_ROOT, UDISPLAY_CHUNK_*). No-flag (namespace
+    is None) returns `name` unchanged -- this is what keeps default codegen
+    output byte-identical to pre-multi-instance behavior.
+    """
+    if not namespace:
+        return name
+    return f"{namespace.upper()}_{name}"
+
+
+def _ns_fn(namespace: Optional[str], name: str) -> str:
+    """
+    Namespace-prefix a generated bind/init-surface function or type name
+    (udisplay_ui_init, udisplay_ui_handlers_t, udisplay_ui_set_handlers).
+    Inserts the namespace right after the `udisplay_` prefix so the result
+    reads naturally, e.g. udisplay_ui_init -> udisplay_ble_ui_init.
+    """
+    if not namespace:
+        return name
+    if name.startswith("udisplay_"):
+        return f"udisplay_{namespace}_{name[len('udisplay_'):]}"
+    return f"{namespace}_{name}"
+
+
 def _macro_name(key_path: str) -> str:
     """
     'fire_btn.status_led' -> 'FIRE_BTN_STATUS_LED'
