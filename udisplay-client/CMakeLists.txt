@@ -204,6 +204,7 @@ qt_add_qml_module(udisplay-client
         qml/widgets/RgbLedWidget.qml
         qml/widgets/ButtonWidget.qml
         qml/widgets/ButtonGroupWidget.qml
+        qml/widgets/ButtonFace.qml
         qml/widgets/SliderWidget.qml
         qml/widgets/ToggleWidget.qml
         qml/widgets/TextWidget.qml
