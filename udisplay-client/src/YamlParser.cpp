@@ -371,6 +371,31 @@ static WidgetDef buildTopLevelWidget(const std::string& key,
         break;
     }
 
+    case WidgetType::Dpad: {
+        if (node["widgets"] && node["widgets"].IsMap()) {
+            int itemCount = 0;
+            for (auto ii = node["widgets"].begin();
+                 ii != node["widgets"].end(); ++ii) {
+                ++itemCount;
+                std::string ik = ii->first.as<std::string>();
+                std::string ip = key + "." + ik;
+                DpadItem item;
+                item.keyPath  = qs(ip);
+                item.widgetId = idMap.count(ip) ? idMap.at(ip) : 0;
+                item.label    = nodeStr(ii->second, "label");
+                item.position = nodeStr(ii->second, "position");
+                w.dpadItems.append(item);
+            }
+            if (itemCount < 1) {
+                diag(diags, Severity::Warning, key, "widgets",
+                     QStringLiteral("dpad requires at least 1 item; found %1")
+                         .arg(itemCount));
+            }
+        }
+        break;
+    }
+
+
     case WidgetType::Slider: {
         if (node["min"] && node["min"].IsScalar())
             w.sliderMin  = node["min"].as<double>();
@@ -578,21 +603,6 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
             if (type == "grid")
                 w.gridColumns = parseGridColumns(node, key, diags);
             w.align = parseAlign(node, key, "align", kRowGridAligns, diags);
-            if (node["widgets"] && node["widgets"].IsMap()) {
-                for (auto ci = node["widgets"].begin();
-                     ci != node["widgets"].end(); ++ci) {
-                    std::string ck = ci->first.as<std::string>();
-                    uint8_t cid = idMap.count(ck) ? idMap.at(ck) : 0;
-                    appendRowGridChild(w, ck, ci->second, cid, /*idPrefix=*/{}, idMap, diags);
-                }
-            }
-            out.append(w);
-
-        } else if (type == "dpad") {
-            WidgetDef w;
-            w.keyPath  = qs(key);
-            w.widgetId = 0;
-            w.type     = WidgetType::Dpad;
             if (node["widgets"] && node["widgets"].IsMap()) {
                 for (auto ci = node["widgets"].begin();
                      ci != node["widgets"].end(); ++ci) {

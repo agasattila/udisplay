@@ -92,6 +92,7 @@ Loader {
     Component { id: textComp;        TextWidget        { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
     Component { id: dropdownComp;    DropdownWidget    { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
     Component { id: labelComp;       LabelWidget       { props: _props; compact: root.compact } }
+    Component { id: dpadComp;        DpadWidget        { label: _label; props: _props } }
     Component { id: separatorComp;   SeparatorWidget   {} }
 
     /* Container components — dynamic URL loading breaks the bilateral cycle.
@@ -128,17 +129,6 @@ Loader {
              * width 0 — same class of bug Layout.fillWidth above already
              * fixes for nested rows (see the long implicitWidth-propagation
              * comment on this file's Layout.preferredWidth above). */
-            Layout.fillWidth: true
-        }
-    }
-    Component {
-        id: dpadComp
-        Loader {
-            anchors { left: parent.left; right: parent.right }
-            source: Qt.resolvedUrl("DpadWidget.qml")
-            onLoaded: {
-                item.props = Qt.binding(function() { return root._props })
-            }
             Layout.fillWidth: true
         }
     }

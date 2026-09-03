@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Attila Agas
 
 import QtQuick
+import QtQuick.Layouts
 import "./"
 
 /* Directional pad container. Places its `button` children into a 3x3 cross
@@ -22,6 +23,7 @@ import "./"
  */
 Rectangle {
     id: root
+    property string label: ""   /* optional; not rendered */
     property var props: ({})  /* { items: [...] } — non-required so Loader.source can bind it, matching RowWidget/GridWidget */
 
     function findByPosition(position) {
@@ -32,9 +34,11 @@ Rectangle {
         return null
     }
 
+    color: "transparent"
     implicitWidth: grid.implicitWidth
     implicitHeight: grid.implicitHeight
-    color: "transparent"
+    Layout.fillWidth: true
+
 
     Grid {
         id: grid
@@ -53,8 +57,8 @@ Rectangle {
             var size = 44
             for (var i = 0; i < repeater.count; i++) {
                 var d = repeater.itemAt(i)
-                if (d && d.btnItem)
-                    size = Math.max(size, d.buttonImplicitWidth, d.buttonImplicitHeight)
+                if (d && d.btnItem !== null)
+                    size = Math.max(size, d.naturalSize)
             }
             return size
         }
@@ -69,11 +73,10 @@ Rectangle {
                 required property string modelData
                 property var btnItem: root.findByPosition(modelData)
 
-                readonly property real buttonImplicitWidth:  btn.implicitWidth
-                readonly property real buttonImplicitHeight: btn.implicitHeight
+                readonly property real naturalSize: Math.max(btn.implicitWidth, btn.implicitHeight)
 
-                width:  grid.cellSize
-                height: grid.cellSize
+                implicitWidth:  grid.cellSize
+                implicitHeight: grid.cellSize
 
                 ButtonWidget {
                     id: btn

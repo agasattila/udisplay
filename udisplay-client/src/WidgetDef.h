@@ -79,6 +79,15 @@ struct ButtonGroupItem {
     QString  position;  /* "top"|"right"|"bottom"|"left"|"center" — dpad only */
 };
 
+/* ── Dpad item ────────────────────────────────────────────────────── */
+struct DpadItem {
+    QString  keyPath;   /* e.g. "mode_sel.ac" */
+    uint8_t  widgetId;
+    QString  label;
+    QString  position;  /* "top"|"right"|"bottom"|"left"|"center" */
+};
+
+
 /* ── Main widget definition ─────────────────────────────────────────────── */
 struct WidgetDef {
     /* Common */
@@ -112,6 +121,10 @@ struct WidgetDef {
     /* button-group */
     QString               groupLayout; /* "grid" | "dpad" */
     QList<ButtonGroupItem> groupItems;
+
+    /* dpad */
+    QList<DpadItem> dpadItems;
+
 
     /* slider */
     double  sliderMin  = 0.0;
