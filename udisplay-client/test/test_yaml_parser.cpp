@@ -767,6 +767,109 @@ private slots:
         QVERIFY(hasRelay);
     }
 
+    /* ── dpad: container type, flat dpadItems (not a button-group
+     * items-group, and NOT embedded as generic WidgetDef children the way
+     * row/grid are — see WidgetModel.cpp's Dpad case, which serializes
+     * dpadItems directly instead of recursing into children). ────── */
+
+    void dpad_itemsParsed_notEmbeddedAsChildren()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  dir_pad:\n"
+            "    type: dpad\n"
+            "    widgets:\n"
+            "      up_btn:\n"
+            "        type: button\n"
+            "        label: Up\n"
+            "        position: top\n"
+            "      down_btn:\n"
+            "        type: button\n"
+            "        label: Down\n"
+            "        position: bottom\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(p.parse(yaml, widgets, name, version));
+        /* dpad appears as a single top-level entry. Its items land in
+         * dpadItems, not children — dpad is not a transparent generic
+         * container like row/grid, it's a flat button-position list. */
+        QCOMPARE(widgets.size(), 1);
+        QCOMPARE(widgets[0].type,     WidgetType::Dpad);
+        QCOMPARE(widgets[0].widgetId, uint8_t(0));
+        QCOMPARE(widgets[0].children.size(), 0);
+        QCOMPARE(widgets[0].dpadItems.size(), 2);
+
+        const DpadItem& up = widgets[0].dpadItems[0];
+        QCOMPARE(up.keyPath,  QStringLiteral("up_btn"));
+        QCOMPARE(up.label,    QStringLiteral("Up"));
+        QCOMPARE(up.position, QStringLiteral("top"));
+
+        const DpadItem& down = widgets[0].dpadItems[1];
+        QCOMPARE(down.keyPath,  QStringLiteral("down_btn"));
+        QCOMPARE(down.label,    QStringLiteral("Down"));
+        QCOMPARE(down.position, QStringLiteral("bottom"));
+    }
+
+    void dpad_itemsGetIds_transparentToContainer()
+    {
+        /* down_btn (0x10), up_btn (0x11) — sorted alphabetically. dpad is
+         * in isContainer()/widget_ids.py's CONTAINER_TYPES, so its own key
+         * is never a path segment: item IDs are looked up bare, same
+         * transparent-container behavior as row/grid/section (NOT prefixed
+         * like button-group items). See tests/protocol_vectors.json's
+         * "nesting_and_dpad" golden fixture for the cross-checked version
+         * of this same rule. */
+        const char* yaml =
+            "widgets:\n"
+            "  d:\n"
+            "    type: dpad\n"
+            "    widgets:\n"
+            "      up_btn:\n"
+            "        type: button\n"
+            "        position: top\n"
+            "      down_btn:\n"
+            "        type: button\n"
+            "        position: bottom\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(p.parse(yaml, widgets, name, version));
+        QCOMPARE(widgets.size(), 1);
+        bool hasUp = false, hasDown = false;
+        for (const auto& item : widgets[0].dpadItems) {
+            if (item.keyPath == "up_btn")   { QCOMPARE(item.widgetId, uint8_t(0x11)); hasUp = true; }
+            if (item.keyPath == "down_btn") { QCOMPARE(item.widgetId, uint8_t(0x10)); hasDown = true; }
+        }
+        QVERIFY(hasUp);
+        QVERIFY(hasDown);
+    }
+
+    void buttonGroupLayout_dpad_noLongerValid_failsParse()
+    {
+        /* layout: dpad no longer exists on button-group — it's the separate
+         * `dpad` container type now (see the dpad-split design doc). */
+        const char* yaml =
+            "widgets:\n"
+            "  bg:\n"
+            "    type: button-group\n"
+            "    layout: dpad\n"
+            "    items:\n"
+            "      a:\n"
+            "        label: A\n"
+            "      b:\n"
+            "        label: B\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(yaml, widgets, name, version));
+        bool hasError = false;
+        for (const auto& d : p.diagnostics())
+            if (d.field == QStringLiteral("layout") &&
+                d.severity == YamlParser::Severity::Error) hasError = true;
+        QVERIFY(hasError);
+    }
+
     void grid_columns_and_children()
     {
         const char* yaml =

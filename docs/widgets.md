@@ -119,6 +119,7 @@ udisplay-gen validate my_device.yaml   # exits 0 on success, non-zero with error
 | `section` | no (container) | — | — | — | — |
 | `row` | no (container) | — | — | — | — |
 | `grid` | no (container) | — | — | — | — |
+| `dpad` | no (container) | — | — | — | — |
 
 ---
 
@@ -485,6 +486,11 @@ int main(/* ... */) {
 
 Exclusive-select button group. Exactly one item is active at a time. Sends a
 BUTTON_PRESS event with the **item's** widget ID when the selection changes.
+Renders as a wrapping grid. For a directional pad, use the [`dpad`](#dpad)
+container type instead — dpad has no selection/setter, so it doesn't belong
+here (a `button-group`'s only reason to exist as a distinct widget type,
+versus placing several `button`s in a grid, is its exclusive-select
+semantics).
 
 The group itself has no setter and no handler — events come from the items.
 
@@ -498,7 +504,7 @@ Client selects item ──BUTTON_PRESS(item_id)──► Device
 |---|---|---|---|---|
 | `type` | `"button-group"` | yes | — | |
 | `label` | string | no | — | Optional group label shown above the group. Max 32 chars. |
-| `layout` | `"grid"` \| `"dpad"` | no | `"grid"` | `"grid"` = wrapping grid; `"dpad"` = 5-position directional pad (items must specify `position`). |
+| `layout` | `"grid"` | no | `"grid"` | Items laid out in a wrapping grid. Only `"grid"` is supported. |
 | `items` | object | yes | — | Named items; minimum 2. Each item gets its own widget ID. |
 
 **`button-group-item` sub-attributes:**
@@ -506,9 +512,8 @@ Client selects item ──BUTTON_PRESS(item_id)──► Device
 | Attribute | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `label` | string | yes | — | Text on the item button. Max 32 chars. |
-| `position` | `"top"` \| `"right"` \| `"bottom"` \| `"left"` \| `"center"` | no | — | Required for `dpad` layout; ignored for `grid`. |
 
-**Example (grid layout):**
+**Example:**
 
 ```yaml
 mode_sel:
@@ -522,30 +527,6 @@ mode_sel:
       label: "Slow"
     turbo:
       label: "Turbo"
-```
-
-**Example (dpad layout):**
-
-```yaml
-direction:
-  type: button-group
-  layout: dpad
-  items:
-    up:
-      label: "▲"
-      position: top
-    down:
-      label: "▼"
-      position: bottom
-    left:
-      label: "◄"
-      position: left
-    right:
-      label: "►"
-      position: right
-    ok:
-      label: "OK"
-      position: center
 ```
 
 **Generated C API:**
@@ -1177,6 +1158,73 @@ button_grid:
 
 **Generated C++ API:** None for the grid itself. Children still become normal members
 of the generated `udisplay_ui::UDisplay` class, not nested under a `grid` member.
+
+---
+
+### `dpad`
+
+Directional pad container. Classic 5-position directional pad (cross shape). Gets no
+widget ID. The dpad name is excluded from child ID paths — same transparent-container
+behavior as `section`/`row`/`grid`.
+
+Unlike `button-group`, a dpad has no group-level state, selection, or setter — it's
+structurally a container, not a stateful items-group (see
+[`button-group`](#button-group)'s note on the distinction). Each child is an ordinary
+[`button`](#button) widget carrying its own `position`, and sends its own independent
+BUTTON_PRESS/BUTTON_RELEASE/BUTTON_CLICK events, exactly as if it were a standalone
+button. All 5 cells render identically regardless of position — there's no special
+styling for `center`.
+
+**Capability token:** `layout-v2` — reserved for future use, see
+[capabilities field](#capabilities-field). Omit `capabilities:` for now; the widget
+works without it.
+
+**Attributes:**
+
+| Attribute | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `type` | `"dpad"` | yes | — | |
+| `widgets` | object | yes | — | Named `button` children; minimum 1. Each must declare a `position`. |
+
+**Child `button` attributes (in addition to [`button`](#button)'s own):**
+
+| Attribute | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `position` | `"top"` \| `"right"` \| `"bottom"` \| `"left"` \| `"center"` | yes | — | Placement within the dpad's cross layout. |
+
+**Example:**
+
+```yaml
+direction:
+  type: dpad
+  widgets:
+    up:
+      type: button
+      label: "▲"
+      position: top
+    down:
+      type: button
+      label: "▼"
+      position: bottom
+    left:
+      type: button
+      label: "◄"
+      position: left
+    right:
+      type: button
+      label: "►"
+      position: right
+    ok:
+      type: button
+      label: "OK"
+      position: center
+```
+
+**Generated C API:** None for the dpad itself. Each child button gets its own API
+entries, same as a standalone [`button`](#button).
+
+**Generated C++ API:** None for the dpad itself. Children still become normal members
+of the generated `udisplay_ui::UDisplay` class, not nested under a `dpad` member.
 
 ---
 

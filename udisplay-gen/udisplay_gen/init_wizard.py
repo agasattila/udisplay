@@ -65,8 +65,6 @@ def _collect_widget(name: str) -> dict:
     widget: dict = {"type": wtype}
 
     if wtype == "button-group":
-        layout = click.prompt("  Layout", type=click.Choice(["grid", "dpad"]), default="grid")
-        widget["layout"] = layout
         items: dict = {}
         click.echo("  Add items (leave name blank to finish, minimum 2):")
         while True:
@@ -77,13 +75,30 @@ def _collect_widget(name: str) -> dict:
                     continue
                 break
             item: dict = {"label": click.prompt(f"    Label for '{item_name}'").strip()}
-            if layout == "dpad":
-                item["position"] = click.prompt(
-                    f"    Position for '{item_name}'",
-                    type=click.Choice(["top", "right", "bottom", "left", "center"]),
-                )
             items[item_name] = item
         widget["items"] = items
+        return widget
+
+    if wtype == "dpad":
+        dpad_widgets: dict = {}
+        click.echo("  Add buttons (leave name blank to finish, minimum 1):")
+        while True:
+            btn_name = click.prompt("    Button name (snake_case)", default="").strip()
+            if not btn_name:
+                if len(dpad_widgets) < 1:
+                    click.echo("    At least 1 button required.")
+                    continue
+                break
+            btn: dict = {"type": "button"}
+            label = click.prompt(f"    Label for '{btn_name}'", default="").strip()
+            if label:
+                btn["label"] = label
+            btn["position"] = click.prompt(
+                f"    Position for '{btn_name}'",
+                type=click.Choice(["top", "right", "bottom", "left", "center"]),
+            )
+            dpad_widgets[btn_name] = btn
+        widget["widgets"] = dpad_widgets
         return widget
 
     for prompt_text, key, default in _WIDGET_PROMPTS[wtype]:

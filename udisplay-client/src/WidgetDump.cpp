@@ -46,6 +46,7 @@ void dumpWidget(QTextStream& out, const WidgetDef& w, int depth)
     case WidgetType::Button:
         out << pad << QStringLiteral("  shape: %1\n").arg(formatValue(w.shape));
         out << pad << QStringLiteral("  color: %1\n").arg(formatValue(w.color));
+        out << pad << QStringLiteral("  position: %1\n").arg(formatValue(w.position));
         break;
     case WidgetType::ButtonGroup:
         out << pad << QStringLiteral("  layout: %1\n").arg(formatValue(w.groupLayout));
@@ -95,6 +96,10 @@ void dumpWidget(QTextStream& out, const WidgetDef& w, int depth)
         out << pad << QStringLiteral("  columns: %1\n").arg(w.gridColumns);
         out << pad << QStringLiteral("  align: %1\n").arg(formatValue(w.align));
         break;
+    case WidgetType::Dpad:
+        out << pad << QStringLiteral("  flex: %1\n").arg(w.flex);
+        out << pad << QStringLiteral("  align: %1\n").arg(formatValue(w.align));
+        break;
     case WidgetType::Unknown:
         break;
     }
@@ -106,7 +111,7 @@ void dumpWidget(QTextStream& out, const WidgetDef& w, int depth)
      * doesn't override its container's default — formatValue already
      * renders a null QVariant as "(null)", the same placeholder used for
      * value/debugValue above when absent. */
-    if (w.type != WidgetType::Row && w.type != WidgetType::Grid) {
+    if (w.type != WidgetType::Row && w.type != WidgetType::Grid && w.type != WidgetType::Dpad) {
         out << pad << QStringLiteral("  flex: %1\n").arg(w.flex);
         out << pad << QStringLiteral("  align: %1\n").arg(formatValue(w.align));
     }

@@ -67,10 +67,16 @@ Item {
         running: true
         onTriggered: {
             /* btn's structure (ButtonWidget.qml): Rectangle "root" ->
-             * Rectangle "btn" (children[0]) -> [Text faceText, Loader
-             * facesRowLoader, MouseArea] (children[1] is the Loader). */
+             * ButtonFace "face" (children[0]) -> [Text, MouseArea, Loader
+             * facesRowLoader]. Search by the Loader's distinguishing
+             * `source` property rather than a fixed index — ButtonFace.qml's
+             * own internal children come before facesRowLoader, and their
+             * count/order is an implementation detail, not a contract. */
             var innerBtn = btn.children[0]
-            var loader = innerBtn.children[1]
+            var loader = null
+            for (var i = 0; i < innerBtn.children.length; i++) {
+                if (innerBtn.children[i].source !== undefined) { loader = innerBtn.children[i]; break }
+            }
             if (!loader || !loader.item) { fail("facesRowLoader not loaded"); return }
 
             var rowWidget = loader.item       // the loaded RowWidget instance

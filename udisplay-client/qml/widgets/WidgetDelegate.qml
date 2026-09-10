@@ -78,6 +78,7 @@ Loader {
                    : _type === "separator"    ? separatorComp
                    : _type === "row"          ? rowComp
                    : _type === "grid"         ? gridComp
+                   : _type === "dpad"         ? dpadComp
                    : null
 
     /* Leaf widget components — no cycle: none of these files reference WidgetDelegate */
@@ -91,6 +92,7 @@ Loader {
     Component { id: textComp;        TextWidget        { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
     Component { id: dropdownComp;    DropdownWidget    { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
     Component { id: labelComp;       LabelWidget       { props: _props; compact: root.compact } }
+    Component { id: dpadComp;        DpadWidget        { label: _label; props: _props } }
     Component { id: separatorComp;   SeparatorWidget   {} }
 
     /* Container components — dynamic URL loading breaks the bilateral cycle.
