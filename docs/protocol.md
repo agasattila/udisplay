@@ -640,7 +640,8 @@ the order they are declared in the YAML definition.
 - YAML declaration order = render order. The codegen does NOT sort top-level widgets
   for rendering (only for widget ID assignment).
 - Each top-level widget is full-width within the scroll area.
-- `button-group` is the only interactive widget with an internal layout (`layout: grid|dpad`).
+- `button-group` is the only interactive widget with an internal layout (`layout: grid`
+  — the only supported value; a directional pad is the separate `dpad` container type).
 - `button` with `widgets:` face children (`led`, `rgbled`, `display`, `label`, or a
   nested `row`/`grid` of those) renders them inline, at normal size, within the
   button — not as a separate row. `label`/`led`/`rgbled` faces use the button's
@@ -650,7 +651,7 @@ the order they are declared in the YAML definition.
 - The `VISIBLE` property (set via `SET_PROPERTY`) hides a widget and
   **collapses its space** — it does not leave a gap.
 
-**v1 layout containers** — `section`, `row`, and `grid` — are available as of
+**v1 layout containers** — `section`, `row`, `grid`, and `dpad` — are available as of
 v1 widget expansion. They carry no widget IDs and send no protocol messages.
 Their children are regular widgets with IDs:
 
@@ -662,8 +663,12 @@ Their children are regular widgets with IDs:
   non-stretching children.
 - `grid` — renders children in a multi-column grid. `columns` controls the column count.
   Same `flex`/`align` semantics as `row`, but `flex` ratios only compete within a column.
+- `dpad` — renders `button` children into a 5-position directional pad (cross shape),
+  placed by each child's `position` (`"top"`\|`"right"`\|`"bottom"`\|`"left"`\|`"center"`).
+  Unlike `button-group`, it has no group-level state or selection — each child button
+  sends its own independent BUTTON_PRESS/BUTTON_RELEASE/BUTTON_CLICK events.
 
-All three declare `layout-v2` as their capability token — currently reserved for
+All four declare `layout-v2` as their capability token — currently reserved for
 future use and not yet enforced by the client (see `docs/widgets.md` § capabilities
 field). Omit `capabilities:` in the `device:` block for now.
 
@@ -786,3 +791,4 @@ are the real-hardware showpieces.
 | v1.7 | 2026-05-08 | Added `button_press` (0x06) and `button_release` (0x07) event types for `button` and `button-group` items. Renamed existing 0x01 constant to `button_click` (wire code unchanged; backward compatible). No protocol version bump — EVENT message format is unchanged; new event_type values are additive. |
 | v2.1 | 2026-05-09 | Optional HMAC-SHA256 challenge-response authentication. PROTO_VERSION bumped to 0x04 (breaking). HANDSHAKE(flags=0x00) now 39 bytes — flags byte inserted at offset 2, merkle_root shifts to offset 3. New HANDSHAKE(flags=0x01) auth-challenge (36 bytes: msg_type + proto_version + flags + algo + salt[32]). HANDSHAKE_ACK(flags=0x00) now 3 bytes; HANDSHAKE_ACK(flags=0x01) 35 bytes (adds 32-byte credential). Connection States updated with AWAITING_AUTH_ACK sub-state. Clients with proto_version < 0x04 continue to receive the legacy 38-byte no-auth HANDSHAKE. |
 | v2.2 | 2026-05-17 | BLE GATT framing redesign. Replaced 1-byte `frag_flags` scheme with offset+packet_id framing: first fragment carries `[u16 offset=0][u8 packet_id][u16 length][u8 flags]`; continuations carry `[u16 offset][u8 packet_id]`. Completion detected by `offset + frag_payload_size == length`. `control` characteristic upgraded from WRITE_NO_RESPONSE to WRITE_WITH_RESPONSE (ATT-level delivery confirmation). Both characteristics use BLE framing (not data-only as previously stated — `HANDSHAKE_ACK(auth)` is 35 bytes and requires fragmentation at min MTU). `packet_id` counters are independent per transmitter and reset to 0 on reconnect. Explicit error rules added for flags, length cap (1024 bytes), offset gaps, wrong offsets, unexpected packet_id, and over-completion. No PROTO_VERSION bump — BLE framing is implemented in the client's BleTransport, not yet deployed as of this changelog entry. |
+| v2.3 | 2026-07-27 | `dpad` split out of `button-group` into its own v1 layout container (`section`/`row`/`grid`/`dpad`) — `button-group`'s `layout: dpad` removed (grid-only now); a dpad's children are ordinary `button` widgets carrying a `position` (`"top"`\|`"right"`\|`"bottom"`\|`"left"`\|`"center"`). No wire-format change — dpad carries no widget ID and sends no protocol messages of its own; each child button sends its own independent `button_press`/`button_release`/`button_click` events, same as any standalone button. No PROTO_VERSION bump. |

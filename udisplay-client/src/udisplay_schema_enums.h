@@ -9,7 +9,7 @@
 namespace UDisplaySchema {
 
 constexpr std::array<std::string_view, 3> kButtonShapes = {"rect", "circle", "square"};
-constexpr std::array<std::string_view, 2> kButtonGroupLayouts = {"grid", "dpad"};
+constexpr std::array<std::string_view, 1> kButtonGroupLayouts = {"grid"};
 constexpr std::array<std::string_view, 2> kTextModes = {"ro", "rw"};
 constexpr std::array<std::string_view, 2> kDisplayStyles = {"default", "large"};
 constexpr std::array<std::string_view, 3> kLabelStyles = {"heading", "body", "caption"};

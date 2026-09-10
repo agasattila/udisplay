@@ -73,6 +73,27 @@ class TestMerkleVectors:
         assert ids == expected
 
 
+# ── Widget-ID golden-fixture cross-check ────────────────────────────────────
+#
+# widget_ids.py (this file) and YamlParser.cpp (udisplay-client, see
+# test_widget_id_golden_fixtures.cpp) are two fully independent
+# re-derivations of the same ID-assignment algorithm. Both are checked here
+# against the SAME fixtures in tests/protocol_vectors.json's
+# widget_id_fixtures — an actual automated cross-check, not just matching
+# code comments (see the dpad-split design doc's golden-fixture task).
+
+class TestWidgetIdGoldenFixtures:
+    def test_fixtures_match_golden_ids(self, vectors):
+        import yaml as pyyaml
+        fixtures = vectors["widget_id_fixtures"]
+        assert fixtures, "widget_id_fixtures must not be empty"
+        for name, fixture in fixtures.items():
+            doc = pyyaml.safe_load(fixture["yaml"])
+            ids = assign(doc["widgets"])
+            expected = {k: int(vid, 16) for k, vid in fixture["widget_ids"].items()}
+            assert ids == expected, f"widget_id_fixtures.{name}"
+
+
 # ── Message encoding vectors ──────────────────────────────────────────────────
 
 def _bytes(vec: dict) -> bytes:

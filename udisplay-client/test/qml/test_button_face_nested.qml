@@ -86,16 +86,21 @@ Item {
             if (items[i].toString().indexOf(needle) === 0) out.push(items[i])
         return out
     }
-    /* Drills from a ButtonWidget instance down to its loaded facesRow
-     * (the RowWidget behind btn.children[1], the Loader). Returns null
-     * (does not fail the test itself) if any hop is missing, so callers
-     * can produce a specific fail() message. */
+    /* Drills from a ButtonWidget instance down to its loaded facesRow (the
+     * RowWidget behind the ButtonFace's Loader child). Finds the Loader by
+     * its distinguishing `source` property rather than a fixed child index
+     * — ButtonFace.qml's own internal children count/order is an
+     * implementation detail, not a contract. Returns null (does not fail
+     * the test itself) if any hop is missing, so callers can produce a
+     * specific fail() message. */
     function facesRowOf(button) {
         var btnRect = toArray(button.children)[0]
         if (!btnRect) return null
-        var loader = toArray(btnRect.children)[1]
-        if (!loader || loader.source === undefined) return null
-        return loader.item
+        var kids = toArray(btnRect.children)
+        for (var i = 0; i < kids.length; i++) {
+            if (kids[i].source !== undefined) return kids[i].item
+        }
+        return null
     }
 
     /* ── Section A: compact leaf sizing contract ─────────────────────── */
@@ -282,14 +287,8 @@ Item {
                 { fail("nested grid face collapsed to the empty floor: " + nestedGridButton.implicitWidth); return }
 
             var btnRect = toArray(nestedGridButton.children)[0]
-            if (!btnRect) { fail("could not find button's inner Rectangle"); return }
-            /* ButtonWidget.qml declares btn's children in order: faceText
-             * (Text), facesRowLoader (Loader), MouseArea — index 1 is the
-             * face content loader. */
-            var facesRowLoader = toArray(btnRect.children)[1]
-            if (!facesRowLoader || facesRowLoader.source === undefined)
-                { fail("expected facesRowLoader (Loader) at btn.children[1], got " + facesRowLoader); return }
-            var facesRow = facesRowLoader.item
+            if (!btnRect) { fail("could not find button's inner ButtonFace"); return }
+            var facesRow = facesRowOf(nestedGridButton)
             if (!facesRow) { fail("facesRow (RowWidget) did not load"); return }
             var outerRow = toArray(facesRow.children)[0]
             if (!outerRow) { fail("could not find facesRow's internal RowLayout"); return }

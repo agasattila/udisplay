@@ -23,6 +23,7 @@ static QVariantList serializeChildren(const QList<WidgetDef>& children)
         cm[QStringLiteral("value")]    = child.value;
         cm[QStringLiteral("flex")]     = child.flex;
         cm[QStringLiteral("align")]    = child.align;
+        cm[QStringLiteral("position")] = child.position;
         cm[QStringLiteral("props")]    = buildPropsMap(child);
         items.append(cm);
     }
@@ -100,6 +101,23 @@ static QVariantMap buildPropsMap(const WidgetDef& w)
         props[QStringLiteral("align")] = w.align;
         props[QStringLiteral("items")] = serializeChildren(w.children);
         break;
+    case WidgetType::Dpad: {
+        QVariantList items;
+        for (const auto& it : w.dpadItems) {
+            QVariantMap m;
+            m[QStringLiteral("widgetId")] = static_cast<int>(it.widgetId);
+            m[QStringLiteral("label")]    = it.label;
+            m[QStringLiteral("position")] = it.position;
+            m[QStringLiteral("shape")] = QStringLiteral("rect");
+            QVariantMap props;
+            props[QStringLiteral("items")] = QVariantList();
+            m[QStringLiteral("props")] = props;
+
+            items.append(m);
+        }
+        props[QStringLiteral("items")] = items;
+        break;
+    }
     default:
         break;
     }

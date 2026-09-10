@@ -126,6 +126,8 @@ Page {
                                    : type === "section"      ? sectionComp
                                    : type === "row"          ? rowComp
                                    : type === "grid"         ? gridComp
+                                   : type === "dpad"         ? dpadComp
+
                                    : unknownComp
 
                     property int     _widgetId: widgetId
@@ -148,6 +150,7 @@ Page {
                     Component { id: sectionComp;     SectionWidget     { label: _label; props: _props; onToggleClicked: controller.widgetModel.toggleSection(index) } }
                     Component { id: rowComp;         RowWidget         { label: _label; props: _props } }
                     Component { id: gridComp;        GridWidget        { label: _label; props: _props } }
+                    Component { id: dpadComp;        DpadWidget        { label: _label; props: _props } }
                     Component { id: unknownComp;     Item { height: 0 } }
                 }
             }

@@ -76,7 +76,8 @@
         { "$ref": "#/$defs/separatorWidget" },
         { "$ref": "#/$defs/sectionContainer" },
         { "$ref": "#/$defs/rowContainer" },
-        { "$ref": "#/$defs/gridContainer" }
+        { "$ref": "#/$defs/gridContainer" },
+        { "$ref": "#/$defs/dpadWidget" }
       ]
     },
 
@@ -264,12 +265,17 @@
           "$ref": "#/$defs/buttonFaceWidgetMap"
         },
         "flex": { "$ref": "#/$defs/flexProp" },
-        "align": { "$ref": "#/$defs/alignProp" }
+        "align": { "$ref": "#/$defs/alignProp" },
+        "position": {
+          "description": "Position within a `dpad` container's cross layout. Required when this button is a direct child of a `dpad` container; ignored (and should be omitted) otherwise.",
+          "type": "string",
+          "enum": ["top", "right", "bottom", "left", "center"]
+        }
       }
     },
 
     "buttonGroupWidget": {
-      "description": "Exclusive-select button group. Exactly one item is active at a time. Sends a `button_press` EVENT with the selected item's widget_id when the selection changes. Renders as a segmented control (grid layout) or directional pad (dpad layout).",
+      "description": "Exclusive-select button group. Exactly one item is active at a time. Sends a `button_press` EVENT with the selected item's widget_id when the selection changes. Renders as a segmented control (grid layout). For a directional pad, use the `dpad` container type instead.",
       "type": "object",
       "required": ["type", "items"],
       "additionalProperties": false,
@@ -281,13 +287,13 @@
           "maxLength": 32
         },
         "layout": {
-          "description": "`grid` = items laid out in a wrapping grid (default). `dpad` = classic 5-position directional pad (cross shape); items must specify `position` (top/right/bottom/left/center).",
+          "description": "Items laid out in a wrapping grid. Only `grid` is supported.",
           "type": "string",
-          "enum": ["grid", "dpad"],
+          "enum": ["grid"],
           "default": "grid"
         },
         "items": {
-          "description": "Named selectable items. Each item gets its own widget_id assigned by codegen. For `dpad` layout, each item must specify a `position`. Minimum 2 items required.",
+          "description": "Named selectable items. Each item gets its own widget_id assigned by codegen. Minimum 2 items required.",
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/buttonGroupItem" },
           "propertyNames": {
@@ -311,11 +317,6 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 32
-        },
-        "position": {
-          "description": "Position within a `dpad` layout. Required when the parent button-group has `layout: dpad`. Ignored for `grid` layout.",
-          "type": "string",
-          "enum": ["top", "right", "bottom", "left", "center"]
         }
       }
     },
@@ -540,6 +541,29 @@
           "minimum": 1
         },
         "widgets": { "$ref": "#/$defs/widgetMap" },
+        "flex": { "$ref": "#/$defs/flexProp" },
+        "align": { "$ref": "#/$defs/alignProp" }
+      }
+    },
+
+    "dpadWidgetMap": {
+      "description": "Named widget map for a `dpad` container — restricted to `button` widgets, each requiring a `position` (top/right/bottom/left/center) to place it in the cross layout.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/buttonWidget" },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "minProperties": 1
+    },
+
+    "dpadWidget": {
+      "description": "Directional pad container. Classic 5-position directional pad (cross shape), laid out from `button` children — each must declare a `position` (top/right/bottom/left/center); at least 1 required. Container name excluded from child ID paths, matching `section`/`row`/`grid`. Requires capabilities: [layout-v2].",
+      "type": "object",
+      "required": ["type", "widgets"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "dpad" },
+        "widgets": { "$ref": "#/$defs/dpadWidgetMap" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
       }

@@ -118,7 +118,7 @@ struct PathEntry {
 /* Container types: transparent to ID assignment (children inherit prefix). */
 static bool isContainer(const std::string& type)
 {
-    return type == "section" || type == "row" || type == "grid";
+    return type == "section" || type == "row" || type == "grid" || type == "dpad";
 }
 
 /* Decoration types: no widget ID, no protocol exchange. */
@@ -345,7 +345,7 @@ static WidgetDef buildTopLevelWidget(const std::string& key,
         w.groupLayout = nodeStr(node, "layout", QStringLiteral("grid"));
         if (!inEnum(w.groupLayout, UDisplaySchema::kButtonGroupLayouts)) {
             diag(diags, Severity::Error, key, "layout",
-                 QStringLiteral("unknown button-group layout '%1'; valid values: grid, dpad")
+                 QStringLiteral("unknown button-group layout '%1'; valid values: grid")
                      .arg(w.groupLayout));
         }
         if (node["items"] && node["items"].IsMap()) {
@@ -370,6 +370,38 @@ static WidgetDef buildTopLevelWidget(const std::string& key,
         }
         break;
     }
+
+    case WidgetType::Dpad: {
+        if (node["widgets"] && node["widgets"].IsMap()) {
+            int itemCount = 0;
+            for (auto ii = node["widgets"].begin();
+                 ii != node["widgets"].end(); ++ii) {
+                ++itemCount;
+                std::string ik = ii->first.as<std::string>();
+                /* Container transparency: dpad is in isContainer() /
+                 * widget_ids.py's CONTAINER_TYPES, so its own key is never a
+                 * path segment — idPrefix carries through unchanged, same as
+                 * the Row/Grid case above. Looking this up by `key + "." + ik`
+                 * instead would silently miss idMap (which was built by the
+                 * transparent-container walk) and every dpad item would fall
+                 * back to widgetId 0. */
+                std::string idPath = idPrefix.empty() ? ik : idPrefix + "." + ik;
+                DpadItem item;
+                item.keyPath  = qs(ik);
+                item.widgetId = idMap.count(idPath) ? idMap.at(idPath) : 0;
+                item.label    = nodeStr(ii->second, "label");
+                item.position = nodeStr(ii->second, "position");
+                w.dpadItems.append(item);
+            }
+            if (itemCount < 1) {
+                diag(diags, Severity::Warning, key, "widgets",
+                     QStringLiteral("dpad requires at least 1 item; found %1")
+                         .arg(itemCount));
+            }
+        }
+        break;
+    }
+
 
     case WidgetType::Slider: {
         if (node["min"] && node["min"].IsScalar())
@@ -524,6 +556,7 @@ static void appendRowGridChild(WidgetDef& parent, const std::string& key,
     WidgetDef child = buildTopLevelWidget(key, node, widgetId, idPrefix, idMap, diags);
     child.flex = parseFlex(node, key, diags);
     child.align = parseAlign(node, key, "align", kRowGridAligns, diags);
+    child.position = nodeStr(node, "position");
     parent.children.append(child);
 }
 
