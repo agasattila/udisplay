@@ -29,6 +29,7 @@ def generate_header(
     widget_types: Optional[dict] = None,
     widgets_yaml: Optional[dict] = None,
     version: str = "0.1.0",
+    namespace: Optional[str] = None,
 ) -> str:
     ctx = BuildContext(
         widget_ids=widget_ids,
@@ -39,6 +40,7 @@ def generate_header(
         widget_types=widget_types,
         widgets_yaml=widgets_yaml,
         version=version,
+        namespace=namespace,
     )
     return _c._generate_header(ctx)
 
@@ -54,6 +56,7 @@ def generate_source(
     widgets_yaml: Optional[dict] = None,
     header_name: str = "udisplay_ui.h",
     version: str = "0.1.0",
+    namespace: Optional[str] = None,
 ) -> str:
     ctx = BuildContext(
         widget_ids=widget_ids,
@@ -64,6 +67,7 @@ def generate_source(
         widget_types=widget_types,
         widgets_yaml=widgets_yaml,
         version=version,
+        namespace=namespace,
     )
     return _c._generate_source(ctx)
 
@@ -79,6 +83,7 @@ def generate_header_cpp(
     widgets_yaml: dict,
     variant: str = "safe",
     version: str = "0.1.0",
+    namespace: Optional[str] = None,
 ) -> str:
     ctx = BuildContext(
         widget_ids=widget_ids,
@@ -90,5 +95,6 @@ def generate_header_cpp(
         widgets_yaml=widgets_yaml,
         variant=variant,
         version=version,
+        namespace=namespace,
     )
     return _cpp._generate_header_cpp(ctx)

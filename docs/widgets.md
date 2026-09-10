@@ -101,19 +101,19 @@ udisplay-gen validate my_device.yaml   # exits 0 on success, non-zero with error
 
 ## Widget Type Summary
 
-| Type | Interactive | Device→client | Client→device | Setter | Handler |
+| Type | Interactive | Device→client | Client→device | Setter (C) | Handler |
 |---|---|---|---|---|---|
-| `display` | no | float (STATE_UPDATE) | — | `set_X(float v)` | — |
-| `led` | no | bool (STATE_UPDATE) | — | `set_X(uint8_t v)` | — |
-| `rgbled` | no | int32 0x00RRGGBB (STATE_UPDATE) | — | `set_X(int32_t rgb)` | — |
+| `display` | no | float (STATE_UPDATE) | — | `set_X(udisplay_t* ctx, float v)` | — |
+| `led` | no | bool (STATE_UPDATE) | — | `set_X(udisplay_t* ctx, uint8_t v)` | — |
+| `rgbled` | no | int32 0x00RRGGBB (STATE_UPDATE) | — | `set_X(udisplay_t* ctx, int32_t rgb)` | — |
 | `button` | yes | — | BUTTON_PRESS / BUTTON_RELEASE / BUTTON_CLICK events | — | `on_X_press()`, `on_X_release()`, `on_X_click()` |
 | `button-group` | yes | — | BUTTON_PRESS / BUTTON_RELEASE / BUTTON_CLICK (per item) | — | — |
 | `button-group-item` | yes (child) | — | BUTTON_PRESS / BUTTON_RELEASE / BUTTON_CLICK events | — | `on_X_press()`, `on_X_release()`, `on_X_click()` |
-| `slider` | yes | float echo (STATE_UPDATE) | SLIDER_CHANGE event | `set_X(float v)` | `on_X_change(float value)` |
-| `toggle` | yes | bool echo (STATE_UPDATE) | TOGGLE_CHANGE event | `set_X(uint8_t v)` | `on_X_change(uint8_t state)` |
-| `text` (ro) | no | string (STATE_UPDATE) | — | `set_X(const char* s, uint8_t n)` | — |
-| `text` (rw) | yes | string echo (STATE_UPDATE) | TEXT_SUBMIT event | `set_X(const char* s, uint8_t n)` | `on_X_submit(const char* str, uint8_t len)` |
-| `dropdown` | yes | uint8 index (STATE_UPDATE) | SELECTION_CHANGE event | `set_X(uint8_t index)` | `on_X_change(uint8_t index)` |
+| `slider` | yes | float echo (STATE_UPDATE) | SLIDER_CHANGE event | `set_X(udisplay_t* ctx, float v)` | `on_X_change(float value)` |
+| `toggle` | yes | bool echo (STATE_UPDATE) | TOGGLE_CHANGE event | `set_X(udisplay_t* ctx, uint8_t v)` | `on_X_change(uint8_t state)` |
+| `text` (ro) | no | string (STATE_UPDATE) | — | `set_X(udisplay_t* ctx, const char* s, uint8_t n)` | — |
+| `text` (rw) | yes | string echo (STATE_UPDATE) | TEXT_SUBMIT event | `set_X(udisplay_t* ctx, const char* s, uint8_t n)` | `on_X_submit(const char* str, uint8_t len)` |
+| `dropdown` | yes | uint8 index (STATE_UPDATE) | SELECTION_CHANGE event | `set_X(udisplay_t* ctx, uint8_t index)` | `on_X_change(uint8_t index)` |
 | `label` | no | — | — | — | — |
 | `separator` | no | — | — | — | — |
 | `section` | no (container) | — | — | — | — |
@@ -163,8 +163,10 @@ temp_display:
 #include "udisplay.h"
 #include "udisplay_ui.h"
 
+extern udisplay_t g_ctx; /* one instance per live connection — see udisplay.h */
+
 void someUpdateFunction(float temp) {
-    set_temp_display(temp);
+    set_temp_display(&g_ctx, temp);
 }
 
 // No handler — output only
@@ -243,9 +245,11 @@ power_btn:
 #include "udisplay.h"
 #include "udisplay_ui.h"
 
+extern udisplay_t g_ctx;
+
 void someUpdateFunction(uint8_t active) {
-    set_status_led(active);                  // standalone
-    set_power_btn_power_led(active);          // child LED — see `button` below
+    set_status_led(&g_ctx, active);                  // standalone
+    set_power_btn_power_led(&g_ctx, active);          // child LED — see `button` below
 }
 
 // No handler — output only
@@ -308,8 +312,10 @@ status_rgb:
 #include "udisplay.h"
 #include "udisplay_ui.h"
 
+extern udisplay_t g_ctx;
+
 void someUpdateFunction(int32_t rgb) {
-    set_status_rgb(rgb);   // 0x00RRGGBB packed, 0 = off
+    set_status_rgb(&g_ctx, rgb);   // 0x00RRGGBB packed, 0 = off
 }
 
 // No handler — output only
@@ -399,7 +405,7 @@ power_btn:
 In the generated header this produces:
 - `WIDGET_ID_POWER_BTN` — the button
 - `WIDGET_ID_POWER_BTN_POWER_LED` — the LED child
-- `set_power_btn_power_led(uint8_t v)` — setter for the LED
+- `set_power_btn_power_led(udisplay_t* ctx, uint8_t v)` — setter for the LED
 - `on_power_btn_press`, `on_power_btn_release`, `on_power_btn_click` — handler fields in `udisplay_ui_handlers_t`
 
 **Example (nested face — vertical layout via a single `grid` child):**
@@ -423,7 +429,7 @@ power_btn:
 
 `face` (the grid container) is transparent to ID assignment, same as a top-level
 `row`/`grid` — the generated header still produces `WIDGET_ID_POWER_BTN_POWER_LED`
-and `set_power_btn_power_led(uint8_t v)`, with `face` contributing no path segment
+and `set_power_btn_power_led(udisplay_t* ctx, uint8_t v)`, with `face` contributing no path segment
 of its own. `power_label` gets no ID (decoration, same as any standalone `label`).
 
 **Generated C API:**
@@ -436,12 +442,13 @@ wire up only the ones you need:
 #include "udisplay.h"
 #include "udisplay_ui.h"
 
+static udisplay_t g_ctx;
 static int g_power_on = 0;
 
 static void handle_power_btn(void)
 {
     g_power_on = !g_power_on;
-    set_power_btn_power_led((uint8_t)g_power_on);
+    set_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
 }
 
 static const udisplay_ui_handlers_t g_handlers = {
@@ -620,6 +627,7 @@ Clamp, update state, and echo the accepted value back:
 #include "udisplay.h"
 #include "udisplay_ui.h"
 
+static udisplay_t g_ctx;
 static float g_rate_hz = 1.0f;
 
 static void handle_rate_slider(float v)
@@ -627,7 +635,7 @@ static void handle_rate_slider(float v)
     if (v < 0.1f) v = 0.1f;
     if (v > 10.0f) v = 10.0f;
     g_rate_hz = v;
-    set_rate_slider(g_rate_hz);   // echo accepted value
+    set_rate_slider(&g_ctx, g_rate_hz);   // echo accepted value
 }
 
 static const udisplay_ui_handlers_t g_handlers = {
@@ -696,12 +704,13 @@ Update state, then echo the confirmed state back:
 #include "udisplay.h"
 #include "udisplay_ui.h"
 
+static udisplay_t g_ctx;
 static int g_enabled = 0;
 
 static void handle_enable_toggle(uint8_t state)
 {
     g_enabled = state;
-    set_enable_toggle((uint8_t)g_enabled);   // echo confirmed state
+    set_enable_toggle(&g_ctx, (uint8_t)g_enabled);   // echo confirmed state
 }
 
 static const udisplay_ui_handlers_t g_handlers = {
@@ -789,16 +798,18 @@ status_display:
 #include "udisplay.h"
 #include "udisplay_ui.h"
 
+extern udisplay_t g_ctx;
+
 // Setter — push a string to display (both modes)
 void someUpdateFunction(const char* status) {
-    set_status_display(status, (uint8_t)strlen(status));
+    set_status_display(&g_ctx, status, (uint8_t)strlen(status));
 }
 
 // Handler — called when the user submits text (rw only)
 static void handle_ssid_input(const char* str, uint8_t len)
 {
     // ... store the submitted SSID ...
-    set_ssid_input(str, len);   // optional echo
+    set_ssid_input(&g_ctx, str, len);   // optional echo
 }
 
 static const udisplay_ui_handlers_t g_handlers = {
@@ -898,12 +909,13 @@ hardcoding indices on either side:
 #include "udisplay.h"
 #include "udisplay_ui.h"
 
+static udisplay_t g_ctx;
 static uint8_t g_wifi_mode = WIFI_MODE_STA;
 
 static void handle_wifi_mode(uint8_t index)
 {
     g_wifi_mode = index;
-    set_wifi_mode(g_wifi_mode);   // echo confirmed selection
+    set_wifi_mode(&g_ctx, g_wifi_mode);   // echo confirmed selection
 }
 
 static const udisplay_ui_handlers_t g_handlers = {
@@ -1044,7 +1056,7 @@ advanced:
 
 In the generated header this produces:
 - `WIDGET_ID_RATE_SLIDER` (not `WIDGET_ID_ADVANCED_RATE_SLIDER`)
-- `set_rate_slider(float v)` and `on_rate_slider_change(float value)` as normal
+- `set_rate_slider(udisplay_t* ctx, float v)` and `on_rate_slider_change(float value)` as normal
 
 **Generated C++ API:** None for the section itself — same ID-flattening rule applies.
 Children still become normal members of the generated `udisplay_ui::UDisplay` class

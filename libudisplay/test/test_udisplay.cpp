@@ -61,6 +61,7 @@ static void on_comms_error(void*)
 
 class UDisplayTest : public ::testing::Test {
 protected:
+    udisplay_t ctx_{};
     std::vector<Sent> sent;
 
     void SetUp() override {
@@ -81,13 +82,13 @@ protected:
         cfg.on_comms_error   = on_comms_error;
         cfg.userdata         = &sent;
 
-        udisplay_init(&cfg);
+        udisplay_init(&ctx_, &cfg);
     }
 
     /* Helper: feed one raw message */
     void feed(std::initializer_list<uint8_t> bytes) {
         std::vector<uint8_t> v(bytes);
-        udisplay_on_message(v.data(), static_cast<uint16_t>(v.size()));
+        udisplay_on_message(&ctx_, v.data(), static_cast<uint16_t>(v.size()));
     }
 
     /* Helper: build a minimal EVENT (button press on widget 0x10) */
@@ -101,96 +102,96 @@ protected:
 
 TEST_F(UDisplayTest, ClientReady_SetsActive)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });   /* CLIENT_READY */
 
     /* EVENT should now be dispatched */
     auto ev = make_event();
-    udisplay_on_message(ev.data(), static_cast<uint16_t>(ev.size()));
+    udisplay_on_message(&ctx_, ev.data(), static_cast<uint16_t>(ev.size()));
     EXPECT_EQ(g_event_calls, 1);
 }
 
 TEST_F(UDisplayTest, ClientReady_Idempotent)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });
     feed({ 0x02u });   /* second CLIENT_READY */
 
     auto ev = make_event();
-    udisplay_on_message(ev.data(), static_cast<uint16_t>(ev.size()));
+    udisplay_on_message(&ctx_, ev.data(), static_cast<uint16_t>(ev.size()));
     EXPECT_EQ(g_event_calls, 1);
     EXPECT_EQ(g_ready_calls, 1);   /* on_client_ready fires exactly once */
 }
 
 TEST_F(UDisplayTest, Event_DroppedBeforeActive)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     /* No CLIENT_READY — active=0 */
     auto ev = make_event();
-    udisplay_on_message(ev.data(), static_cast<uint16_t>(ev.size()));
+    udisplay_on_message(&ctx_, ev.data(), static_cast<uint16_t>(ev.size()));
     EXPECT_EQ(g_event_calls, 0);
 }
 
 TEST_F(UDisplayTest, Event_DispatchedAfterActive)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });   /* CLIENT_READY → active=1 */
     auto ev = make_event();
-    udisplay_on_message(ev.data(), static_cast<uint16_t>(ev.size()));
+    udisplay_on_message(&ctx_, ev.data(), static_cast<uint16_t>(ev.size()));
     EXPECT_EQ(g_event_calls, 1);
 }
 
 TEST_F(UDisplayTest, SendFloat_DroppedBeforeActive)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     /* active=0: send callbacks should NOT fire for STATE_UPDATE */
     size_t before = sent.size();
-    udisplay_send_float(0x10u, 3.14f);
+    udisplay_send_float(&ctx_, 0x10u, 3.14f);
     EXPECT_EQ(sent.size(), before);   /* nothing sent */
 }
 
 TEST_F(UDisplayTest, SendFloat_AllowedAfterActive)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });   /* CLIENT_READY */
     size_t before = sent.size();
-    udisplay_send_float(0x10u, 3.14f);
+    udisplay_send_float(&ctx_, 0x10u, 3.14f);
     EXPECT_GT(sent.size(), before);   /* something sent */
 }
 
 TEST_F(UDisplayTest, ActiveReset_OnDisconnect)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });   /* active=1 */
-    udisplay_on_disconnect();
+    udisplay_on_disconnect(&ctx_);
 
     /* Reconnect without another CLIENT_READY */
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     auto ev = make_event();
-    udisplay_on_message(ev.data(), static_cast<uint16_t>(ev.size()));
+    udisplay_on_message(&ctx_, ev.data(), static_cast<uint16_t>(ev.size()));
     EXPECT_EQ(g_event_calls, 0);   /* active reset by disconnect */
 }
 
 TEST_F(UDisplayTest, ActiveReset_OnConnect)
 {
     /* Simulate BLE drop without disconnect: active left set */
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });   /* active=1 */
 
     /* New connection arrives without a disconnect event first */
-    udisplay_on_connect();   /* must reset active=0 */
+    udisplay_on_connect(&ctx_);   /* must reset active=0 */
 
     auto ev = make_event();
-    udisplay_on_message(ev.data(), static_cast<uint16_t>(ev.size()));
+    udisplay_on_message(&ctx_, ev.data(), static_cast<uint16_t>(ev.size()));
     EXPECT_EQ(g_event_calls, 0);   /* active was reset by new connect */
 }
 
 TEST_F(UDisplayTest, Heartbeat_SentBeforeActive)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     /* No CLIENT_READY — active=0 */
     size_t before = sent.size();
-    udisplay_heartbeat();
+    udisplay_heartbeat(&ctx_);
     EXPECT_GT(sent.size(), before);   /* HEARTBEAT bypasses active gate */
     EXPECT_EQ(sent.back().data[0], 0x40u);   /* MSG_HEARTBEAT */
 }
@@ -199,7 +200,7 @@ TEST_F(UDisplayTest, Heartbeat_SentBeforeActive)
 
 TEST_F(UDisplayTest, ClientReady_CallsOnReadyCallback)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     EXPECT_EQ(g_ready_calls, 0);
     feed({ 0x02u });
     EXPECT_EQ(g_ready_calls, 1);
@@ -207,7 +208,7 @@ TEST_F(UDisplayTest, ClientReady_CallsOnReadyCallback)
 
 TEST_F(UDisplayTest, ClientReady_CallbackNotCalledIfAlreadyActive)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });
     EXPECT_EQ(g_ready_calls, 1);
     feed({ 0x02u });   /* second CLIENT_READY — already active */
@@ -226,9 +227,9 @@ TEST_F(UDisplayTest, ClientReady_NullCallback_NoSEGV)
     cfg.send         = on_send;
     cfg.userdata     = &sent;
     /* on_client_ready left NULL */
-    udisplay_init(&cfg);
+    udisplay_init(&ctx_, &cfg);
 
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });   /* must not crash */
     SUCCEED();
 }
@@ -237,83 +238,83 @@ TEST_F(UDisplayTest, ClientReady_NullCallback_NoSEGV)
 
 TEST_F(UDisplayTest, Heartbeat_BootstrapWatchdogFiresAt3Misses)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     /* active=0, no bootstrap progress — 3 heartbeats SHOULD fire
      * on_comms_error (TODO-014: bootstrap-stall watchdog). */
-    udisplay_heartbeat();   /* miss 1 */
-    udisplay_heartbeat();   /* miss 2 */
-    udisplay_heartbeat();   /* miss 3 → fires */
+    udisplay_heartbeat(&ctx_);   /* miss 1 */
+    udisplay_heartbeat(&ctx_);   /* miss 2 */
+    udisplay_heartbeat(&ctx_);   /* miss 3 → fires */
     EXPECT_EQ(g_error_calls, 1);
 }
 
 TEST_F(UDisplayTest, Heartbeat_BootstrapChunkRequest_ResetsCounter)
 {
-    udisplay_on_connect();
-    udisplay_heartbeat();   /* miss 1 */
-    udisplay_heartbeat();   /* miss 2 */
+    udisplay_on_connect(&ctx_);
+    udisplay_heartbeat(&ctx_);   /* miss 1 */
+    udisplay_heartbeat(&ctx_);   /* miss 2 */
     feed({ 0x20u, 0x00u, 0x00u });   /* CHUNK_REQUEST idx 0 — resets counter */
-    udisplay_heartbeat();
-    udisplay_heartbeat();
+    udisplay_heartbeat(&ctx_);
+    udisplay_heartbeat(&ctx_);
     EXPECT_EQ(g_error_calls, 0);   /* only 2 misses since the reset */
-    udisplay_heartbeat();   /* miss 3 → fires */
+    udisplay_heartbeat(&ctx_);   /* miss 3 → fires */
     EXPECT_EQ(g_error_calls, 1);
 }
 
 TEST_F(UDisplayTest, Heartbeat_BootstrapChunkHeaderRequest_ResetsCounter)
 {
-    udisplay_on_connect();
-    udisplay_heartbeat();   /* miss 1 */
-    udisplay_heartbeat();   /* miss 2 */
+    udisplay_on_connect(&ctx_);
+    udisplay_heartbeat(&ctx_);   /* miss 1 */
+    udisplay_heartbeat(&ctx_);   /* miss 2 */
     feed({ 0x10u, 0x00u, 0x00u });   /* CHUNK_HEADER_REQUEST idx 0 — resets counter */
-    udisplay_heartbeat();
-    udisplay_heartbeat();
+    udisplay_heartbeat(&ctx_);
+    udisplay_heartbeat(&ctx_);
     EXPECT_EQ(g_error_calls, 0);
-    udisplay_heartbeat();   /* miss 3 → fires */
+    udisplay_heartbeat(&ctx_);   /* miss 3 → fires */
     EXPECT_EQ(g_error_calls, 1);
 }
 
 TEST_F(UDisplayTest, Heartbeat_BootstrapHandshakeAck_ResetsCounter)
 {
-    udisplay_on_connect();
-    udisplay_heartbeat();   /* miss 1 */
-    udisplay_heartbeat();   /* miss 2 */
+    udisplay_on_connect(&ctx_);
+    udisplay_heartbeat(&ctx_);   /* miss 1 */
+    udisplay_heartbeat(&ctx_);   /* miss 2 */
     feed({ 0x01u, 0x04u });   /* HANDSHAKE_ACK (no-auth) — resets counter */
-    udisplay_heartbeat();
-    udisplay_heartbeat();
+    udisplay_heartbeat(&ctx_);
+    udisplay_heartbeat(&ctx_);
     EXPECT_EQ(g_error_calls, 0);
-    udisplay_heartbeat();   /* miss 3 → fires */
+    udisplay_heartbeat(&ctx_);   /* miss 3 → fires */
     EXPECT_EQ(g_error_calls, 1);
 }
 
 TEST_F(UDisplayTest, Heartbeat_ActiveTransition_NoCarryOverFire)
 {
-    udisplay_on_connect();
-    udisplay_heartbeat();   /* miss 1 */
-    udisplay_heartbeat();   /* miss 2 */
+    udisplay_on_connect(&ctx_);
+    udisplay_heartbeat(&ctx_);   /* miss 1 */
+    udisplay_heartbeat(&ctx_);   /* miss 2 */
     feed({ 0x02u });        /* CLIENT_READY — resets counter, active=1 */
-    udisplay_heartbeat();
+    udisplay_heartbeat(&ctx_);
     EXPECT_EQ(g_error_calls, 0);   /* must not carry the 2 bootstrap misses over */
 }
 
 TEST_F(UDisplayTest, Heartbeat_MissCountIncrementsAfterActive)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });   /* active=1 */
-    udisplay_heartbeat();   /* miss 1 */
-    udisplay_heartbeat();   /* miss 2 */
+    udisplay_heartbeat(&ctx_);   /* miss 1 */
+    udisplay_heartbeat(&ctx_);   /* miss 2 */
     EXPECT_EQ(g_error_calls, 0);   /* not yet at threshold */
 }
 
 TEST_F(UDisplayTest, Heartbeat_WatchdogFiresAt3Misses)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });   /* active=1 */
-    udisplay_heartbeat();   /* miss 1 */
-    udisplay_heartbeat();   /* miss 2 */
-    udisplay_heartbeat();   /* miss 3 → fires */
+    udisplay_heartbeat(&ctx_);   /* miss 1 */
+    udisplay_heartbeat(&ctx_);   /* miss 2 */
+    udisplay_heartbeat(&ctx_);   /* miss 3 → fires */
     EXPECT_EQ(g_error_calls, 1);
     /* 4th heartbeat must NOT fire again (counter capped) */
-    udisplay_heartbeat();
+    udisplay_heartbeat(&ctx_);
     EXPECT_EQ(g_error_calls, 1);
 }
 
@@ -329,59 +330,59 @@ TEST_F(UDisplayTest, Heartbeat_WatchdogNullCallback_NoSEGV)
     cfg.send         = on_send;
     cfg.userdata     = &sent;
     /* on_comms_error left NULL */
-    udisplay_init(&cfg);
+    udisplay_init(&ctx_, &cfg);
 
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });
-    udisplay_heartbeat();
-    udisplay_heartbeat();
-    udisplay_heartbeat();   /* must not crash */
+    udisplay_heartbeat(&ctx_);
+    udisplay_heartbeat(&ctx_);
+    udisplay_heartbeat(&ctx_);   /* must not crash */
     SUCCEED();
 }
 
 TEST_F(UDisplayTest, Heartbeat_EchoResetsCounter)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });   /* active=1 */
-    udisplay_heartbeat();   /* miss 1 */
-    udisplay_heartbeat();   /* miss 2 */
+    udisplay_heartbeat(&ctx_);   /* miss 1 */
+    udisplay_heartbeat(&ctx_);   /* miss 2 */
     feed({ 0x40u });        /* echo received — counter resets to 0 */
     /* Now need 3 more misses to fire */
-    udisplay_heartbeat();
-    udisplay_heartbeat();
+    udisplay_heartbeat(&ctx_);
+    udisplay_heartbeat(&ctx_);
     EXPECT_EQ(g_error_calls, 0);
-    udisplay_heartbeat();   /* miss 3 → fires */
+    udisplay_heartbeat(&ctx_);   /* miss 3 → fires */
     EXPECT_EQ(g_error_calls, 1);
 }
 
 TEST_F(UDisplayTest, Heartbeat_MissCountResetsOnConnect)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });        /* active=1 */
-    udisplay_heartbeat();   /* miss 1 */
-    udisplay_heartbeat();   /* miss 2 */
+    udisplay_heartbeat(&ctx_);   /* miss 1 */
+    udisplay_heartbeat(&ctx_);   /* miss 2 */
     /* Reconnect resets counter */
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });        /* active=1 again */
-    udisplay_heartbeat();
-    udisplay_heartbeat();
+    udisplay_heartbeat(&ctx_);
+    udisplay_heartbeat(&ctx_);
     EXPECT_EQ(g_error_calls, 0);   /* fresh start: only 2 misses */
-    udisplay_heartbeat();
+    udisplay_heartbeat(&ctx_);
     EXPECT_EQ(g_error_calls, 1);
 }
 
 TEST_F(UDisplayTest, Heartbeat_MissCountResetsOnDisconnect)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });        /* active=1 */
-    udisplay_heartbeat();   /* miss 1 */
-    udisplay_heartbeat();   /* miss 2 */
-    udisplay_on_disconnect();   /* resets counter */
+    udisplay_heartbeat(&ctx_);   /* miss 1 */
+    udisplay_heartbeat(&ctx_);   /* miss 2 */
+    udisplay_on_disconnect(&ctx_);   /* resets counter */
     /* Reconnect — counter must be 0 */
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     feed({ 0x02u });
-    udisplay_heartbeat();
-    udisplay_heartbeat();
+    udisplay_heartbeat(&ctx_);
+    udisplay_heartbeat(&ctx_);
     EXPECT_EQ(g_error_calls, 0);
 }
 
@@ -436,6 +437,8 @@ static udisplay_config_t make_auth_cfg()
 
 class AuthTest : public ::testing::Test {
 protected:
+    udisplay_t ctx_{};
+
     void SetUp() override {
         g_auth_sent.clear();
         g_auth_check_calls = 0;
@@ -445,7 +448,7 @@ protected:
         memset(g_last_salt, 0, 32);
         memset(g_last_cred, 0, 32);
         udisplay_config_t cfg = make_auth_cfg();
-        udisplay_init(&cfg);
+        udisplay_init(&ctx_, &cfg);
     }
 
     /* Build and feed a HANDSHAKE_ACK(flags=1, credential) message */
@@ -453,13 +456,13 @@ protected:
         uint8_t msg[35];
         msg[0] = 0x01u; msg[1] = 0x04u; msg[2] = 0x01u;
         memcpy(msg + 3, credential, 32);
-        udisplay_on_message(msg, 35u);
+        udisplay_on_message(&ctx_, msg, 35u);
     }
 
     /* Build and feed a HANDSHAKE_ACK(flags=0) message */
     void feed_noauth_ack() {
         uint8_t msg[3] = {0x01u, 0x04u, 0x00u};
-        udisplay_on_message(msg, 3u);
+        udisplay_on_message(&ctx_, msg, 3u);
     }
 
     static bool sent_is_auth_challenge(const std::vector<uint8_t>& d) {
@@ -472,7 +475,7 @@ protected:
 
 TEST_F(AuthTest, Connect_SendsAuthChallenge)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     ASSERT_FALSE(g_auth_sent.empty());
     EXPECT_TRUE(sent_is_auth_challenge(g_auth_sent[0].data));
     EXPECT_EQ(g_auth_sent[0].data[3], 0x01u); /* algo = SHA-256 */
@@ -483,7 +486,7 @@ TEST_F(AuthTest, Connect_SendsAuthChallenge)
 
 TEST_F(AuthTest, AuthPass_SendsNoAuthHandshake)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     g_auth_check_result = 1; /* accept */
     uint8_t cred[32] = {};
     feed_auth_ack(cred);
@@ -495,7 +498,7 @@ TEST_F(AuthTest, AuthPass_SendsNoAuthHandshake)
 
 TEST_F(AuthTest, AuthFail_ResendsAuthChallenge_WithNewSalt)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     g_auth_check_result = 0; /* reject */
     uint8_t cred[32] = {};
     size_t before = g_auth_sent.size();
@@ -508,7 +511,7 @@ TEST_F(AuthTest, AuthFail_ResendsAuthChallenge_WithNewSalt)
 
 TEST_F(AuthTest, AuthDisconnect_ClearsState)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     g_auth_check_result = -1; /* terminate */
     uint8_t cred[32] = {};
     feed_auth_ack(cred);
@@ -523,7 +526,7 @@ TEST_F(AuthTest, AuthDisconnect_ClearsState)
 TEST_F(AuthTest, WrongFlags_SilentlyDisconnects)
 {
     /* Auth is expected, but client sends flags=0 ACK — reject */
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     size_t before = g_auth_sent.size();
     feed_noauth_ack();
     EXPECT_EQ(g_auth_check_calls, 0); /* auth_check must not have been called */
@@ -534,7 +537,7 @@ TEST_F(AuthTest, WrongFlags_SilentlyDisconnects)
 
 TEST_F(AuthTest, SaltPassedToAuthCheck)
 {
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     /* fill_rand_fn fills salt with 0x01..0x20 */
     g_auth_check_result = 1;
     uint8_t cred[32] = {};
@@ -560,6 +563,8 @@ static void transport_send_cb(const uint8_t* d, uint16_t n, void*)
 
 class TransportTest : public ::testing::Test {
 protected:
+    udisplay_t ctx_{};
+
     void SetUp() override { g_transport_sent.clear(); }
 
     udisplay_config_t ble_cfg(uint16_t mtu = 0u) const
@@ -589,10 +594,10 @@ protected:
         return cfg;
     }
 
-    static void make_active()
+    void make_active()
     {
         uint8_t cr = 0x02u;
-        udisplay_on_message(&cr, 1u);   /* CLIENT_READY → active=1 */
+        udisplay_on_message(&ctx_, &cr, 1u);   /* CLIENT_READY → active=1 */
     }
 };
 
@@ -600,8 +605,8 @@ protected:
 TEST_F(TransportTest, Ble_Handshake_IsFragmented)
 {
     auto cfg = ble_cfg();   /* MTU=0 → clamps to default (20), first_cap=14, cont_cap=17 */
-    udisplay_init(&cfg);
-    udisplay_on_connect();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
 
     /* 39 bytes at mtu=20: first 14 + cont 17 + cont 8 = 3 fragments */
     ASSERT_EQ(g_transport_sent.size(), 3u);
@@ -621,12 +626,12 @@ TEST_F(TransportTest, Ble_Handshake_IsFragmented)
 TEST_F(TransportTest, Ble_StateUpdate_HasFlagByte)
 {
     auto cfg = ble_cfg();
-    udisplay_init(&cfg);
-    udisplay_on_connect();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
     g_transport_sent.clear();
     make_active();
 
-    udisplay_send_float(0x01u, 1.0f);   /* 7-byte message; fits in 1 fragment */
+    udisplay_send_float(&ctx_, 0x01u, 1.0f);   /* 7-byte message; fits in 1 fragment */
 
     ASSERT_EQ(g_transport_sent.size(), 1u);
     /* Single fragment: v2.2 offset lo = 0x00 (single fragment starts at offset 0) */
@@ -639,8 +644,8 @@ TEST_F(TransportTest, Ble_FragmentCount_MatchesMtu)
 {
     /* mtu=10: first_cap=4, cont_cap=7 → 1 + ceil((39-4)/7) = 6 fragments */
     auto cfg = ble_cfg(10u);
-    udisplay_init(&cfg);
-    udisplay_on_connect();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
 
     ASSERT_EQ(g_transport_sent.size(), 6u);
     /* All but last are full ATT payload (10 bytes) */
@@ -657,8 +662,8 @@ TEST_F(TransportTest, Ble_FragmentCount_MatchesMtu)
 TEST_F(TransportTest, Tcp_Handshake_IsTcpFramed)
 {
     auto cfg = tcp_cfg();
-    udisplay_init(&cfg);
-    udisplay_on_connect();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
 
     ASSERT_EQ(g_transport_sent.size(), 1u);
     const auto& framed = g_transport_sent[0].data;
@@ -673,12 +678,12 @@ TEST_F(TransportTest, Tcp_Handshake_IsTcpFramed)
 TEST_F(TransportTest, Tcp_StateUpdate_IsTcpFramed)
 {
     auto cfg = tcp_cfg();
-    udisplay_init(&cfg);
-    udisplay_on_connect();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
     g_transport_sent.clear();
     make_active();
 
-    udisplay_send_float(0x01u, 1.0f);
+    udisplay_send_float(&ctx_, 0x01u, 1.0f);
 
     ASSERT_EQ(g_transport_sent.size(), 1u);
     const auto& framed = g_transport_sent[0].data;
@@ -692,17 +697,17 @@ TEST_F(TransportTest, Tcp_StateUpdate_IsTcpFramed)
 TEST_F(TransportTest, Ble_SetMtu_UpdatesFragmentSize)
 {
     auto cfg = ble_cfg();   /* default mtu=20: 3 frags for 39-byte HANDSHAKE */
-    udisplay_init(&cfg);
-    udisplay_on_connect();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
     size_t frags_small_mtu = g_transport_sent.size();
     ASSERT_GT(frags_small_mtu, 1u);   /* must be fragmented */
 
     g_transport_sent.clear();
-    udisplay_on_disconnect();
+    udisplay_on_disconnect(&ctx_);
 
     /* mtu=45: first_cap=39 → HANDSHAKE (39 bytes) fits in exactly 1 fragment */
-    udisplay_ble_set_mtu(45u);
-    udisplay_on_connect();
+    udisplay_ble_set_mtu(&ctx_, 45u);
+    udisplay_on_connect(&ctx_);
 
     ASSERT_EQ(g_transport_sent.size(), 1u);
     /* Single fragment: v2.2 offset = 0x0000 */
@@ -714,8 +719,8 @@ TEST_F(TransportTest, Ble_SetMtu_UpdatesFragmentSize)
 TEST_F(TransportTest, Ble_ZeroMtuConfig_ClampsToDefault)
 {
     auto cfg = ble_cfg(0u);   /* explicit zero → must clamp to mtu=20 */
-    udisplay_init(&cfg);
-    udisplay_on_connect();    /* must not loop or crash */
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);    /* must not loop or crash */
 
     ASSERT_FALSE(g_transport_sent.empty());
     /* Same fragment count as explicit mtu=20: 1 + ceil((39-14)/17) = 3 */
@@ -729,8 +734,8 @@ TEST_F(TransportTest, Ble_ZeroMtuConfig_ClampsToDefault)
 TEST_F(TransportTest, Feed_Tcp_RoundTrip_DispatchesMessage)
 {
     auto cfg = tcp_cfg();
-    udisplay_init(&cfg);
-    udisplay_on_connect();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
     g_transport_sent.clear();
 
     /* Frame CLIENT_READY (0x02) as a TCP message and feed it back */
@@ -739,10 +744,10 @@ TEST_F(TransportTest, Feed_Tcp_RoundTrip_DispatchesMessage)
     uint16_t n = udisplay_tcp_frame(framed, sizeof(framed), raw, 1u);
     ASSERT_EQ(n, 3u);
 
-    udisplay_feed(framed, n);
+    udisplay_feed(&ctx_, framed, n);
 
     /* Library should now be active: state updates must produce output */
-    udisplay_send_float(0x01u, 1.0f);
+    udisplay_send_float(&ctx_, 0x01u, 1.0f);
     EXPECT_FALSE(g_transport_sent.empty());
 }
 
@@ -750,8 +755,8 @@ TEST_F(TransportTest, Feed_Tcp_RoundTrip_DispatchesMessage)
 TEST_F(TransportTest, Feed_Tcp_PartialFrame_CarriesOverToNextCall)
 {
     auto cfg = tcp_cfg();
-    udisplay_init(&cfg);
-    udisplay_on_connect();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
     g_transport_sent.clear();
 
     uint8_t raw[1]    = { 0x02u };   /* CLIENT_READY */
@@ -760,12 +765,12 @@ TEST_F(TransportTest, Feed_Tcp_PartialFrame_CarriesOverToNextCall)
     ASSERT_EQ(n, 3u);
 
     /* Split the 3-byte frame across two feed() calls */
-    udisplay_feed(framed, 2u);
-    udisplay_send_float(0x01u, 1.0f);
+    udisplay_feed(&ctx_, framed, 2u);
+    udisplay_send_float(&ctx_, 0x01u, 1.0f);
     EXPECT_TRUE(g_transport_sent.empty()) << "must not activate on a partial frame";
 
-    udisplay_feed(framed + 2, 1u);
-    udisplay_send_float(0x01u, 1.0f);
+    udisplay_feed(&ctx_, framed + 2, 1u);
+    udisplay_send_float(&ctx_, 0x01u, 1.0f);
     EXPECT_FALSE(g_transport_sent.empty()) << "completed frame must activate the client";
 }
 
@@ -773,8 +778,8 @@ TEST_F(TransportTest, Feed_Tcp_PartialFrame_CarriesOverToNextCall)
 TEST_F(TransportTest, Feed_Tcp_MultipleFramesInOneCall_DrainsAll)
 {
     auto cfg = tcp_cfg();
-    udisplay_init(&cfg);
-    udisplay_on_connect();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
     g_transport_sent.clear();
 
     uint8_t client_ready[1] = { 0x02u };
@@ -785,10 +790,10 @@ TEST_F(TransportTest, Feed_Tcp_MultipleFramesInOneCall_DrainsAll)
     ASSERT_EQ(n1, 3u);
     ASSERT_EQ(n2, 3u);
 
-    udisplay_feed(framed, (uint16_t)(n1 + n2));
+    udisplay_feed(&ctx_, framed, (uint16_t)(n1 + n2));
 
     /* CLIENT_READY (first frame) must have activated the client */
-    udisplay_send_float(0x01u, 1.0f);
+    udisplay_send_float(&ctx_, 0x01u, 1.0f);
     EXPECT_FALSE(g_transport_sent.empty());
 }
 
@@ -796,8 +801,8 @@ TEST_F(TransportTest, Feed_Tcp_MultipleFramesInOneCall_DrainsAll)
 TEST_F(TransportTest, Feed_Ble_RoutesThroughBleReassembly)
 {
     auto cfg = ble_cfg(45u);   /* mtu=45: HANDSHAKE fits in 1 fragment */
-    udisplay_init(&cfg);
-    udisplay_on_connect();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
     g_transport_sent.clear();
 
     /* Client subscribes and completes bootstrap out of band for this test;
@@ -805,9 +810,9 @@ TEST_F(TransportTest, Feed_Ble_RoutesThroughBleReassembly)
      * flags=0, payload=0x02) and confirm it activates the client exactly as
      * udisplay_ble_feed() would. */
     uint8_t frag[7] = { 0x00u, 0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x02u };
-    udisplay_feed(frag, sizeof(frag));
+    udisplay_feed(&ctx_, frag, sizeof(frag));
 
-    udisplay_send_float(0x01u, 1.0f);
+    udisplay_send_float(&ctx_, 0x01u, 1.0f);
     EXPECT_FALSE(g_transport_sent.empty());
 }
 
@@ -822,14 +827,14 @@ TEST_F(TransportTest, Feed_None_PassesThroughRaw)
     cfg.chunk_count  = 1u;
     cfg.send         = transport_send_cb;
     cfg.transport    = UDISPLAY_TRANSPORT_NONE;
-    udisplay_init(&cfg);
-    udisplay_on_connect();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
     g_transport_sent.clear();
 
     uint8_t raw[1] = { 0x02u };   /* CLIENT_READY, already unframed */
-    udisplay_feed(raw, 1u);
+    udisplay_feed(&ctx_, raw, 1u);
 
-    udisplay_send_float(0x01u, 1.0f);
+    udisplay_send_float(&ctx_, 0x01u, 1.0f);
     EXPECT_FALSE(g_transport_sent.empty());
 }
 
@@ -837,12 +842,12 @@ TEST_F(TransportTest, Feed_None_PassesThroughRaw)
 TEST_F(TransportTest, Ble_SetMtu_RejectsOverCapacity)
 {
     auto cfg = ble_cfg(45u);
-    udisplay_init(&cfg);
+    udisplay_init(&ctx_, &cfg);
 
-    EXPECT_EQ(udisplay_ble_set_mtu(518u), 0) << "one byte over the 517-byte fragment buffer";
+    EXPECT_EQ(udisplay_ble_set_mtu(&ctx_, 518u), 0) << "one byte over the 517-byte fragment buffer";
 
     /* Prior value (45) must be retained: HANDSHAKE still fits in exactly 1 fragment */
-    udisplay_on_connect();
+    udisplay_on_connect(&ctx_);
     ASSERT_EQ(g_transport_sent.size(), 1u);
 }
 
@@ -850,16 +855,16 @@ TEST_F(TransportTest, Ble_SetMtu_RejectsOverCapacity)
 TEST_F(TransportTest, Ble_SetMtu_AcceptsExactCapacity)
 {
     auto cfg = ble_cfg(45u);
-    udisplay_init(&cfg);
+    udisplay_init(&ctx_, &cfg);
 
-    EXPECT_EQ(udisplay_ble_set_mtu(517u), 1);
+    EXPECT_EQ(udisplay_ble_set_mtu(&ctx_, 517u), 1);
 }
 
 /* 15: udisplay_ble_set_mtu() still rejects too-small values (existing behaviour, new return value) */
 TEST_F(TransportTest, Ble_SetMtu_RejectsTooSmall)
 {
     auto cfg = ble_cfg(45u);
-    udisplay_init(&cfg);
+    udisplay_init(&ctx_, &cfg);
 
-    EXPECT_EQ(udisplay_ble_set_mtu(6u), 0);
+    EXPECT_EQ(udisplay_ble_set_mtu(&ctx_, 6u), 0);
 }

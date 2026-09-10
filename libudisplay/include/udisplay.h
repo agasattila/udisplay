@@ -8,6 +8,12 @@
  * Include this header in firmware code. All symbols are extern "C" so
  * the library is usable from both C and C++ firmware.
  *
+ * The library is multi-instance: each live protocol session (one per
+ * transport/connection) is a `udisplay_t` the firmware allocates and owns.
+ * Running two sessions concurrently (e.g. a minimal BLE setup UI and a
+ * full-featured WiFi UI on one device) means allocating two `udisplay_t`
+ * instances and passing the correct one to every call.
+ *
  * Usage pattern (ESP-IDF / FreeRTOS, BLE transport):
  *
  *   // Provide send callback. The library calls this once per BLE ATT fragment
@@ -29,6 +35,8 @@
  *       }
  *   }
  *
+ *   static udisplay_t g_ui; // static storage — no heap needed
+ *
  *   void app_main(void) {
  *       udisplay_config_t cfg = {
  *           .merkle_root  = UDISPLAY_MERKLE_ROOT,
@@ -41,14 +49,14 @@
  *           .userdata     = NULL,
  *           .transport    = UDISPLAY_TRANSPORT_BLE,
  *       };
- *       udisplay_init(&cfg);
+ *       udisplay_init(&g_ui, &cfg);
  *
- *       // On BLE connect:    udisplay_on_connect()
- *       // On BLE disconnect: udisplay_on_disconnect()
- *       // On BLE ATT write from client: udisplay_feed(data, len)
- *       // From timer (e.g. every 5s): udisplay_heartbeat()
- *       // From sensor loop: udisplay_send_float(WIDGET_ID_READING, value)
- *       // On BLE MTU event:  udisplay_ble_set_mtu(mtu_value - 3)
+ *       // On BLE connect:    udisplay_on_connect(&g_ui)
+ *       // On BLE disconnect: udisplay_on_disconnect(&g_ui)
+ *       // On BLE ATT write from client: udisplay_feed(&g_ui, data, len)
+ *       // From timer (e.g. every 5s): udisplay_heartbeat(&g_ui)
+ *       // From sensor loop: udisplay_send_float(&g_ui, WIDGET_ID_READING, value)
+ *       // On BLE MTU event:  udisplay_ble_set_mtu(&g_ui, mtu_value - 3)
  *   }
  */
 
@@ -245,19 +253,129 @@ typedef struct {
     uint16_t ble_mtu_payload;
 } udisplay_config_t;
 
+/* ── Internal state layout (documented-internal, not opaque) ──────────────
+ *
+ * These types (chunk_server_t, ble_rx_t, tcp_rx_t, udisplay_t) define the
+ * library's instance state. They are exposed here — rather than kept behind
+ * a genuinely opaque type — specifically so firmware can statically allocate
+ * a udisplay_t with no heap:
+ *
+ *   static udisplay_t g_ble_ctx;
+ *   udisplay_init(&g_ble_ctx, &cfg);
+ *
+ * A truly opaque (forward-declared-only) type cannot be statically allocated
+ * or measured with sizeof() by a caller — both of which no-heap ESP-IDF
+ * firmware needs. The tradeoff (the same one mbedTLS and most embedded C
+ * libraries make): encapsulation here is a documentation convention, not a
+ * compiler-enforced boundary.
+ *
+ * DO NOT read or write these fields directly from firmware code. Use the
+ * functions declared below. Field layout may change between versions.
+ */
+
+/** Chunk-server state — serves CHUNK_HEADER_RESPONSE/CHUNK_RESPONSE messages. */
+typedef struct {
+    const uint8_t* const* chunks;
+    const uint8_t* const* chunk_hashes;
+    const uint16_t*       chunk_lens;
+    uint16_t              chunk_count;
+} chunk_server_t;
+
+/** BLE inbound reassembly state (v2.2 offset+packet_id scheme). */
+typedef struct {
+    uint8_t  buf[UDISPLAY_MAX_MSG_SIZE]; /**< Reassembly buffer */
+    uint16_t len;             /**< Bytes accumulated so far */
+    uint16_t msg_len;         /**< Total message length declared in first-fragment header */
+    uint16_t expected_offset; /**< Next expected fragment byte offset */
+    uint8_t  packet_id;       /**< packet_id from first fragment; expected on continuations */
+    int      in_progress;     /**< 1 while reassembling; 0 when idle */
+    int      overflow;        /**< Set on over-completion (cleared by ble_rx_reset) */
+} ble_rx_t;
+
+/** TCP inbound reassembly state (u16_le length-prefixed streaming). */
+typedef struct {
+    uint8_t  buf[UDISPLAY_RX_BUF_SIZE]; /**< Reassembly buffer (partial + in-flight bytes) */
+    uint16_t used;                      /**< Bytes currently buffered */
+} tcp_rx_t;
+
+/**
+ * One live uDisplay protocol session/connection. Each concurrently-live
+ * session (e.g. a BLE setup UI and a WiFi full UI on one device) needs its
+ * own instance. `sizeof(udisplay_t)` is roughly 2-2.5KB (dominated by
+ * `msg_buf` at 1024B and `tx_buf` at 1026B) — budget instances accordingly
+ * on RAM-constrained ESP32 variants (e.g. ESP32-C2 at 272KB total SRAM,
+ * shared with the WiFi/BLE stacks themselves).
+ *
+ * Concurrency contract: different `udisplay_t` instances may be used
+ * concurrently from different tasks/callbacks with no synchronization
+ * needed — they share no state. Calls on the SAME instance must be
+ * serialized by the caller (e.g. one FreeRTOS task owns one instance, or the
+ * firmware provides its own mutex around that instance's calls). The
+ * library does not lock internally — a lock held across the user callbacks
+ * this library invokes (on_event, auth_check, fill_random) would risk
+ * deadlock/reentrancy/blown interrupt latency, so the discipline is left to
+ * the caller instead.
+ */
+typedef struct {
+    udisplay_config_t cfg;
+    chunk_server_t    chunk_srv;
+    /* Inbound reassembly: exactly one of {ble_rx, tcp_rx} is ever active for
+     * the life of a connection (cfg.transport is fixed at udisplay_init()
+     * and never changes), so they share one union rather than two
+     * always-allocated arrays. */
+    union {
+        ble_rx_t ble_rx;
+        tcp_rx_t tcp_rx;
+    }                 rx;
+    int               connected;
+    int               active;              /**< 1 after CLIENT_READY received; 0 until then */
+    uint8_t           comms_miss_count;    /**< Consecutive comms misses; watches BOOTSTRAP stalls
+                                                 (resets on any bootstrap-progress message) and,
+                                                 once active, missed HEARTBEAT echoes */
+    uint8_t           msg_buf[UDISPLAY_MAX_MSG_SIZE];
+    /* Auth state (proto 0x04) */
+    uint8_t           auth_salt[32];       /**< Current challenge salt */
+    uint8_t           awaiting_auth_ack;   /**< 1 after HANDSHAKE(flags=1) sent */
+    uint8_t           pending_disconnect;  /**< Set when auth_check returns -1 */
+    uint8_t           insecure_salt_ctr;   /**< Counter for the deterministic
+                                                 fallback salt generator used only
+                                                 when cfg.fill_random is NULL. Was a
+                                                 function-local static before the
+                                                 multi-instance refactor -- moved
+                                                 in-struct so it can't race across
+                                                 instances (the fallback path is
+                                                 already documented insecure, but
+                                                 the concurrency contract above
+                                                 promises instances share no state,
+                                                 and this field is what makes that
+                                                 true even on the fallback path). */
+    /* Transport framing */
+    uint16_t          ble_mtu_payload;     /**< BLE ATT data bytes per fragment */
+    uint8_t           ble_tx_packet_id;    /**< Per-connection outbound packet counter */
+    union {
+        uint8_t ble_frag[517];                        /**< BLE outbound: one ATT fragment */
+        uint8_t tcp_framed[UDISPLAY_MAX_MSG_SIZE + 2u]; /**< TCP outbound: length + payload */
+    } tx_buf;
+} udisplay_t;
+
 /* ── Lifecycle ───────────────────────────────────────────────────────────── */
 
-/** Initialise the library. Must be called once before any other function. */
-void udisplay_init(const udisplay_config_t* cfg);
+/**
+ * Initialise a udisplay_t instance. Must be called once before any other
+ * function is called on @p ctx. @p ctx is caller-allocated (static, stack, or
+ * heap — the library has no opinion); its storage must remain valid for the
+ * instance's whole lifetime.
+ */
+void udisplay_init(udisplay_t* ctx, const udisplay_config_t* cfg);
 
 /**
  * Call when a client connects. Immediately transmits a HANDSHAKE message
  * via the configured send callback.
  */
-void udisplay_on_connect(void);
+void udisplay_on_connect(udisplay_t* ctx);
 
 /** Call when the client disconnects. Resets bootstrap state. */
-void udisplay_on_disconnect(void);
+void udisplay_on_disconnect(udisplay_t* ctx);
 
 /* ── Transport-aware inbound feed ────────────────────────────────────────── */
 
@@ -278,7 +396,7 @@ void udisplay_on_disconnect(void);
  * `control` characteristic, or TCP socket read) regardless of which
  * transport is configured — this is the one entry point firmware needs.
  */
-void udisplay_feed(const uint8_t* data, uint16_t len);
+void udisplay_feed(udisplay_t* ctx, const uint8_t* data, uint16_t len);
 
 /* ── BLE transport ───────────────────────────────────────────────────────── */
 
@@ -290,7 +408,7 @@ void udisplay_feed(const uint8_t* data, uint16_t len);
  * Lower-level primitive — most firmware should call udisplay_feed() instead
  * and let it dispatch here based on the configured transport.
  */
-void udisplay_ble_feed(const uint8_t* att_payload, uint16_t len);
+void udisplay_ble_feed(udisplay_t* ctx, const uint8_t* att_payload, uint16_t len);
 
 /**
  * Update the BLE ATT MTU payload size after MTU negotiation.
@@ -301,7 +419,7 @@ void udisplay_ble_feed(const uint8_t* att_payload, uint16_t len);
  *         capacity (517 bytes — the BLE 5.0 max ATT_MTU payload) — in
  *         either rejection case the previous value is retained unchanged.
  */
-int udisplay_ble_set_mtu(uint16_t mtu_payload);
+int udisplay_ble_set_mtu(udisplay_t* ctx, uint16_t mtu_payload);
 
 /* ── Raw receive (tests / TRANSPORT_NONE) ────────────────────────────────── */
 
@@ -310,7 +428,7 @@ int udisplay_ble_set_mtu(uint16_t mtu_payload);
  * Use this for TRANSPORT_NONE (unit tests, MockTransport pattern) or when
  * the firmware handles framing itself before calling this function.
  */
-void udisplay_on_message(const uint8_t* msg, uint16_t len);
+void udisplay_on_message(udisplay_t* ctx, const uint8_t* msg, uint16_t len);
 
 /* ── Heartbeat ───────────────────────────────────────────────────────────── */
 
@@ -318,24 +436,24 @@ void udisplay_on_message(const uint8_t* msg, uint16_t len);
  * Send a HEARTBEAT message. Call from a periodic timer (recommended: every 5s).
  * Ignored if no client is connected.
  */
-void udisplay_heartbeat(void);
+void udisplay_heartbeat(udisplay_t* ctx);
 
 /* ── State update senders ───────────────────────────────────────────────── */
 
 /** Send a float32 value for a widget. */
-void udisplay_send_float(uint8_t widget_id, float value);
+void udisplay_send_float(udisplay_t* ctx, uint8_t widget_id, float value);
 
 /** Send an int32 value for a widget. */
-void udisplay_send_int(uint8_t widget_id, int32_t value);
+void udisplay_send_int(udisplay_t* ctx, uint8_t widget_id, int32_t value);
 
 /** Send a boolean (uint8) value for a widget. */
-void udisplay_send_bool(uint8_t widget_id, uint8_t value);
+void udisplay_send_bool(udisplay_t* ctx, uint8_t widget_id, uint8_t value);
 
 /** Send a uint8 value for a widget (e.g. dropdown selection index). */
-void udisplay_send_uint8(uint8_t widget_id, uint8_t value);
+void udisplay_send_uint8(udisplay_t* ctx, uint8_t widget_id, uint8_t value);
 
 /** Send a string value for a widget. @p len must be ≤ 255. */
-void udisplay_send_string(uint8_t widget_id, const char* str, uint8_t len);
+void udisplay_send_string(udisplay_t* ctx, uint8_t widget_id, const char* str, uint8_t len);
 
 /* ── Property commands ──────────────────────────────────────────────────── */
 
@@ -343,14 +461,14 @@ void udisplay_send_string(uint8_t widget_id, const char* str, uint8_t len);
  * Send SET_PROPERTY command to the client.
  * Overrides a runtime property of widget @p target_id with a uint8 value.
  */
-void udisplay_set_property(uint8_t target_id, uint8_t property_id,
+void udisplay_set_property(udisplay_t* ctx, uint8_t target_id, uint8_t property_id,
                             uint8_t value);
 
 /**
  * Send RESET_PROPERTY command to the client.
  * Restores widget @p target_id's @p property_id to its YAML-defined default.
  */
-void udisplay_reset_property(uint8_t target_id, uint8_t property_id);
+void udisplay_reset_property(udisplay_t* ctx, uint8_t target_id, uint8_t property_id);
 
 /* ── BLE framing utilities (exposed for transport adapters and tests) ─────── */
 
@@ -365,6 +483,9 @@ void udisplay_reset_property(uint8_t target_id, uint8_t property_id);
  *
  * Calls @p emit once per fragment. @p userdata is forwarded to @p emit.
  * Minimum effective @p mtu_payload is 7 (6-byte header + 1 payload byte).
+ *
+ * This is a stateless utility function — it does not take a udisplay_t
+ * context, since it has no instance state of its own.
  */
 void udisplay_ble_fragment(const uint8_t* msg, uint16_t msg_len,
                             uint16_t mtu_payload, uint8_t packet_id,
@@ -378,6 +499,8 @@ void udisplay_ble_fragment(const uint8_t* msg, uint16_t msg_len,
  * Prepend a u16_le length prefix to @p msg and write the framed message to
  * @p out (which must have capacity @p out_cap ≥ msg_len + 2).
  * Returns total bytes written (msg_len + 2), or 0 if @p out_cap is too small.
+ *
+ * Stateless utility function — no udisplay_t context needed.
  */
 uint16_t udisplay_tcp_frame(uint8_t* out, uint16_t out_cap,
                              const uint8_t* msg, uint16_t msg_len);
@@ -386,6 +509,8 @@ uint16_t udisplay_tcp_frame(uint8_t* out, uint16_t out_cap,
  * Parse a u16_le length-prefixed TCP buffer.
  * Returns true and sets *msg_out / *msg_len_out on success.
  * Returns false if @p buf_len < 2 or < 2 + declared payload length.
+ *
+ * Stateless utility function — no udisplay_t context needed.
  */
 int udisplay_tcp_unframe(const uint8_t* buf, uint16_t buf_len,
                           const uint8_t** msg_out, uint16_t* msg_len_out);

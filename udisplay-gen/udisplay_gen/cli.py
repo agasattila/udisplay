@@ -76,7 +76,16 @@ cli.add_command(validate_cmd, name="validate")
     default=False,
     help="C++ only: use std::function for event handlers (requires C++11 with <functional>).",
 )
-def build(yaml_file: str, output_dir: str, lang: str, modern: bool) -> None:
+@click.option(
+    "--namespace",
+    default=None,
+    metavar="NAME",
+    help="Prefix generated data assets (widget IDs, merkle/chunk arrays) and the "
+         "bind/init helper with NAME, so two separately-generated outputs can "
+         "coexist in one firmware image (multi-instance uDisplay). Omit for the "
+         "default unprefixed single-instance output.",
+)
+def build(yaml_file: str, output_dir: str, lang: str, modern: bool, namespace: str | None) -> None:
     """
     Compile a uDisplay YAML definition to:
     \b
@@ -141,6 +150,7 @@ def build(yaml_file: str, output_dir: str, lang: str, modern: bool) -> None:
         widget_types=widget_type_map,
         widgets_yaml=doc["widgets"],
         variant="modern" if modern else "safe",
+        namespace=namespace,
     )
 
     n = math.ceil(len(ctx.blob) / CHUNK_SIZE)
@@ -149,7 +159,13 @@ def build(yaml_file: str, output_dir: str, lang: str, modern: bool) -> None:
         f"root {ctx.root.hex()[:16]}..."
     )
 
-    for f in _BACKENDS[lang].generate(ctx):
+    try:
+        outputs = _BACKENDS[lang].generate(ctx)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    for f in outputs:
         path = out / f.name
         if isinstance(f.content, bytes):
             path.write_bytes(f.content)

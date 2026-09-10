@@ -193,7 +193,22 @@ udisplay-gen build device.yaml --lang cpp -o ./generated
 
 # Generate C++ code with std::function handlers (C++14+)
 udisplay-gen build device.yaml --lang cpp --modern -o ./generated
+
+# Multi-instance firmware: two separately-generated outputs coexisting in one
+# binary need distinct namespaces so their widget IDs, blob data, and
+# bind/init helper don't collide at link time. Omit --namespace for the
+# default unprefixed single-instance output.
+udisplay-gen build ble_ui.yaml --namespace ble -o ./generated
+udisplay-gen build wifi_ui.yaml --namespace wifi -o ./generated
 ```
+
+`--namespace` must be a valid C identifier (letters, digits, underscore; cannot start
+with a digit). It prefixes generated widget-ID macros and blob data arrays
+(`WIDGET_ID_*` → `BLE_WIDGET_ID_*`, `UDISPLAY_MERKLE_ROOT` → `BLE_UDISPLAY_MERKLE_ROOT`)
+and the bind/init surface (`udisplay_ui_init` → `udisplay_ble_ui_init`, and for
+`--lang cpp`, `namespace udisplay_ui` → `namespace udisplay_ble_ui`) — everything else
+(the core `udisplay_*` functions in `udisplay.h`) takes the same `udisplay_t* ctx` for
+every instance regardless of namespace.
 
 ### Run tests
 

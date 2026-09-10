@@ -89,7 +89,7 @@ static void on_tick(double dt_sec)
     g_hb_acc += dt_sec;
     if (g_hb_acc >= 5.0) {
         g_hb_acc = 0.0;
-        udisplay_heartbeat();
+        udisplay_heartbeat(ui.ctx());
     }
 
     /* Data update at (base_rate × multiplier) Hz */
@@ -125,12 +125,12 @@ static void on_tick(double dt_sec)
 static void on_connect()
 {
     g_initial_sent = 0;
-    udisplay_on_connect();
+    udisplay_on_connect(ui.ctx());
 }
 
 static void on_disconnect()
 {
-    udisplay_on_disconnect();
+    udisplay_on_disconnect(ui.ctx());
     g_initial_sent = 0;
 }
 

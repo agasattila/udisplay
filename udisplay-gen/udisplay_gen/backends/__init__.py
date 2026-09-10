@@ -20,6 +20,9 @@ class BuildContext:
     widgets_yaml: Optional[dict] = None
     variant:      str = "safe"                  # C++ only: "safe" | "modern"
     version:      str = "0.1.0"
+    namespace:    Optional[str] = None          # prefixes data assets + bind/init helper
+                                                 # so two generated outputs can coexist
+                                                 # in one firmware image (multi-instance)
 
 
 @dataclass

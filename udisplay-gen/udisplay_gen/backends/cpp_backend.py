@@ -14,10 +14,12 @@ from . import BuildContext, OutputFile
 from ._shared import (
     _hex_rows, _HEADER_COMMENT,
     _config_fields, _config_sequential_assignment,
+    _ns_validate, _ns_fn,
 )
 
 
 def generate(ctx: BuildContext) -> List[OutputFile]:
+    _ns_validate(ctx.namespace)
     return [
         OutputFile("udisplay_ui.hpp", _generate_header_cpp(ctx)),
         OutputFile("udisplay_ui.bin", ctx.blob),
@@ -80,44 +82,45 @@ def _cpp_base_classes(variant: str) -> list:
         "",
         "class Widget {",
         "protected:",
+        "    udisplay_t* _ctx;",
         "    uint8_t _id;",
-        "    explicit Widget(uint8_t id) : _id(id) {}",
+        "    Widget(udisplay_t* ctx, uint8_t id) : _ctx(ctx), _id(id) {}",
         "    friend class UDisplay;",
         "};",
         "",
         "template<typename T>",
         "class OutputWidget : public Widget {",
         "public:",
-        "    explicit OutputWidget(uint8_t id) : Widget(id) {}",
+        "    OutputWidget(udisplay_t* ctx, uint8_t id) : Widget(ctx, id) {}",
         "    void set(T v);",
         "};",
         "",
-        "template<> inline void OutputWidget<bool>::set(bool v)         { udisplay_send_bool(_id, v); }",
-        "template<> inline void OutputWidget<float>::set(float v)       { udisplay_send_float(_id, v); }",
-        "template<> inline void OutputWidget<uint32_t>::set(uint32_t v) { udisplay_send_int(_id, static_cast<int32_t>(v)); }",
-        "template<> inline void OutputWidget<uint8_t>::set(uint8_t v)   { udisplay_send_uint8(_id, v); }",
+        "template<> inline void OutputWidget<bool>::set(bool v)         { udisplay_send_bool(_ctx, _id, v); }",
+        "template<> inline void OutputWidget<float>::set(float v)       { udisplay_send_float(_ctx, _id, v); }",
+        "template<> inline void OutputWidget<uint32_t>::set(uint32_t v) { udisplay_send_int(_ctx, _id, static_cast<int32_t>(v)); }",
+        "template<> inline void OutputWidget<uint8_t>::set(uint8_t v)   { udisplay_send_uint8(_ctx, _id, v); }",
         "",
         "/* -- Standard concrete widget classes --------------------------------------- */",
         "",
-        "class DisplayWidget : public OutputWidget<float>    { public: explicit DisplayWidget(uint8_t id) : OutputWidget(id) {} };",
-        "class LedWidget     : public OutputWidget<bool>     { public: explicit LedWidget(uint8_t id)     : OutputWidget(id) {} };",
-        "class RgbLedWidget  : public OutputWidget<uint32_t> { public: explicit RgbLedWidget(uint8_t id)  : OutputWidget(id) {} };",
+        "class DisplayWidget : public OutputWidget<float>    { public: DisplayWidget(udisplay_t* ctx, uint8_t id)    : OutputWidget(ctx, id) {} };",
+        "class LedWidget     : public OutputWidget<bool>     { public: LedWidget(udisplay_t* ctx, uint8_t id)     : OutputWidget(ctx, id) {} };",
+        "class RgbLedWidget  : public OutputWidget<uint32_t> { public: RgbLedWidget(udisplay_t* ctx, uint8_t id)  : OutputWidget(ctx, id) {} };",
         "",
         "class ToggleWidget : public OutputWidget<bool> {",
         "public:",
-        "    explicit ToggleWidget(uint8_t id) : OutputWidget(id) {}",
+        "    ToggleWidget(udisplay_t* ctx, uint8_t id) : OutputWidget(ctx, id) {}",
         handler("on_change(bool state)"),
         "};",
         "",
         "class SliderWidget : public OutputWidget<float> {",
         "public:",
-        "    explicit SliderWidget(uint8_t id) : OutputWidget(id) {}",
+        "    SliderWidget(udisplay_t* ctx, uint8_t id) : OutputWidget(ctx, id) {}",
         handler("on_change(float value)"),
         "};",
         "",
         "class ButtonWidget : public Widget {",
         "public:",
-        "    explicit ButtonWidget(uint8_t id) : Widget(id) {}",
+        "    ButtonWidget(udisplay_t* ctx, uint8_t id) : Widget(ctx, id) {}",
         handler("on_press()"),
         handler("on_release()"),
         handler("on_click()"),
@@ -125,7 +128,7 @@ def _cpp_base_classes(variant: str) -> list:
         "",
         "class ButtonItem : public Widget {",
         "public:",
-        "    explicit ButtonItem(uint8_t id) : Widget(id) {}",
+        "    ButtonItem(udisplay_t* ctx, uint8_t id) : Widget(ctx, id) {}",
         handler("on_press()"),
         handler("on_release()"),
         handler("on_click()"),
@@ -133,15 +136,15 @@ def _cpp_base_classes(variant: str) -> list:
         "",
         "class TextRwWidget : public Widget {",
         "public:",
-        "    explicit TextRwWidget(uint8_t id) : Widget(id) {}",
-        "    void set(const char* s, uint8_t n) { udisplay_send_string(_id, s, n); }",
+        "    TextRwWidget(udisplay_t* ctx, uint8_t id) : Widget(ctx, id) {}",
+        "    void set(const char* s, uint8_t n) { udisplay_send_string(_ctx, _id, s, n); }",
         handler("on_submit(const char* str, uint8_t len)"),
         "};",
         "",
         "class TextRoWidget : public Widget {",
         "public:",
-        "    explicit TextRoWidget(uint8_t id) : Widget(id) {}",
-        "    void set(const char* s, uint8_t n) { udisplay_send_string(_id, s, n); }",
+        "    TextRoWidget(udisplay_t* ctx, uint8_t id) : Widget(ctx, id) {}",
+        "    void set(const char* s, uint8_t n) { udisplay_send_string(_ctx, _id, s, n); }",
         "};",
     ]
     return lines
@@ -184,10 +187,10 @@ def _cpp_generated_classes(
                       handler("on_press()"), handler("on_release()"), handler("on_click()")]
             for sub_key, _, _ in sub:
                 lines.append(f"    LedWidget {sub_key};")
-            params = ["uint8_t id"] + [f"uint8_t {sk}_id" for sk, _, _ in sub]
-            inits = ["Widget(id)"] + [f"{sk}({sk}_id)" for sk, _, _ in sub]
+            params = ["udisplay_t* ctx", "uint8_t id"] + [f"uint8_t {sk}_id" for sk, _, _ in sub]
+            inits = ["Widget(ctx, id)"] + [f"{sk}(ctx, {sk}_id)" for sk, _, _ in sub]
             lines += [
-                f"    explicit {cn}({', '.join(params)})",
+                f"    {cn}({', '.join(params)})",
                 f"        : {', '.join(inits)} {{}}",
                 "};",
                 "",
@@ -202,10 +205,10 @@ def _cpp_generated_classes(
             lines += [f"class {cn} : public Widget {{", "public:"]
             for sub_key, _, _ in sub:
                 lines.append(f"    ButtonItem {sub_key};")
-            params = ["uint8_t group_id"] + [f"uint8_t {sk}_id" for sk, _, _ in sub]
-            inits = ["Widget(group_id)"] + [f"{sk}({sk}_id)" for sk, _, _ in sub]
+            params = ["udisplay_t* ctx", "uint8_t group_id"] + [f"uint8_t {sk}_id" for sk, _, _ in sub]
+            inits = ["Widget(ctx, group_id)"] + [f"{sk}(ctx, {sk}_id)" for sk, _, _ in sub]
             lines += [
-                f"    explicit {cn}({', '.join(params)})",
+                f"    {cn}({', '.join(params)})",
                 f"        : {', '.join(inits)} {{}}",
                 "};",
                 "",
@@ -263,8 +266,8 @@ def _cpp_ctor_args(path: str, type_str: str, widget_ids: dict, widget_types: dic
     if type_str in ("button", "button-group"):
         sub = _cpp_sub_members(path, widget_types, widget_ids)
         sub_ids = "".join(f", 0x{sw:02X}u" for _, _, sw in sub)
-        return f"0x{wid:02X}u{sub_ids}"
-    return f"0x{wid:02X}u"
+        return f"&_ctx, 0x{wid:02X}u{sub_ids}"
+    return f"&_ctx, 0x{wid:02X}u"
 
 
 def _cpp_dispatch_cases(
@@ -335,6 +338,7 @@ def _cpp_dispatch_cases(
 
 
 def _generate_header_cpp(ctx: BuildContext) -> str:
+    _ns_validate(ctx.namespace)
     widget_ids    = ctx.widget_ids
     blob          = ctx.blob
     root          = ctx.root
@@ -344,6 +348,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
     widgets_yaml  = ctx.widgets_yaml
     variant       = ctx.variant
     version       = ctx.version
+    ns_name       = _ns_fn(ctx.namespace, "udisplay_ui")
 
     n = math.ceil(len(blob) / CHUNK_SIZE)
     dropdown_items = collect_dropdown_items(widgets_yaml)
@@ -361,7 +366,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
 
     lines += [
         "",
-        "namespace udisplay_ui {",
+        f"namespace {ns_name} {{",
         "",
         "/* -- Blob data + runtime state ---------------------------------------------- */",
         "namespace detail {",
@@ -414,6 +419,13 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         "/* -- UDisplay: top-level aggregate ----------------------------------------- */",
         "",
         "class UDisplay {",
+        "private:",
+        "    /* Declared first (before the public widget members below) so it is",
+        "     * constructed first -- C++ initializes members in DECLARATION order,",
+        "     * not initializer-list order, and every widget member below takes",
+        "     * &_ctx in its own constructor. */",
+        "    udisplay_t _ctx;",
+        "",
         "public:",
     ]
 
@@ -439,10 +451,25 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
     lines += [
         "    {}",
         "",
+        "    /* Non-copyable, non-movable: widgets above cache a raw pointer to _ctx's",
+        "     * storage (taken at construction, see the member list above). Moving or",
+        "     * copying this object would leave every widget's cached pointer dangling",
+        "     * or aliased to the wrong instance -- so its address must stay fixed for",
+        "     * its whole lifetime. Construct once (static, global, or in-place). */",
+        "    UDisplay(const UDisplay&) = delete;",
+        "    UDisplay& operator=(const UDisplay&) = delete;",
+        "    UDisplay(UDisplay&&) = delete;",
+        "    UDisplay& operator=(UDisplay&&) = delete;",
+        "",
         "    void init(udisplay_send_fn send, udisplay_transport_t transport);",
         "    void feed(const uint8_t* data, uint16_t len);",
-        "    static int ble_set_mtu(uint16_t mtu_payload);",
+        "    int ble_set_mtu(uint16_t mtu_payload);",
         "    static uint16_t tcp_frame(uint8_t* out, uint16_t cap, const uint8_t* msg, uint16_t len);",
+        "",
+        "    /* Raw handle accessor -- call the ctx-taking core API in udisplay.h",
+        "     * directly for anything this class doesn't wrap (heartbeat,",
+        "     * on_connect/on_disconnect, set_property/reset_property, ...). */",
+        "    udisplay_t* ctx() { return &_ctx; }",
         "",
         "private:",
         "    static void _dispatch(const udisplay_event_t* ev, void* ud);",
@@ -471,17 +498,17 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
             ),
         )
     ] + [
-        "    udisplay_init(&cfg);",
+        "    udisplay_init(&_ctx, &cfg);",
         "}",
         "",
         "inline void UDisplay::feed(const uint8_t* data, uint16_t len)",
         "{",
-        "    udisplay_feed(data, len);",
+        "    udisplay_feed(&_ctx, data, len);",
         "}",
         "",
         "inline int UDisplay::ble_set_mtu(uint16_t mtu_payload)",
         "{",
-        "    return udisplay_ble_set_mtu(mtu_payload);",
+        "    return udisplay_ble_set_mtu(&_ctx, mtu_payload);",
         "}",
         "",
         "inline uint16_t UDisplay::tcp_frame(uint8_t* out, uint16_t cap, const uint8_t* msg, uint16_t len)",
@@ -515,7 +542,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         "    if (self->on_comms_error) self->on_comms_error();",
         "}",
         "",
-        "} // namespace udisplay_ui",
+        f"}} // namespace {ns_name}",
     ]
 
     return "\n".join(lines) + "\n"
