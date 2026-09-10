@@ -427,7 +427,7 @@ device sends raw, unvalidated YAML with `type: row` or `type: grid` as a button 
 (schema-illegal via `buttonFaceChild`'s `oneOf`, but the client parses device YAML
 directly with no runtime schema validation), that container is treated as a flat leaf
 and its own nested children are never registered in `idMap` under any path. When
-`buildTopLevelWidget`'s `Row`/`Grid` case (`YamlParser.cpp:~397`) then looks up those
+`buildWidget`'s `Row`/`Grid` case (`YamlParser.cpp:~586`) then looks up those
 grandchildren via **bare, unprefixed key** (`idMap.count(ck)` — correct only for
 legitimate top-level/container-transparent nesting), a grandchild whose bare key
 happens to coincide with any other widget's name elsewhere in the same document
@@ -464,7 +464,7 @@ fixed as part of that redesign's Increment 1/2 work; this TODO is about preventi
 pattern from recurring, not about the instances themselves.
 **Increment 2 status:** All three concrete instances are now fixed —
 `collectPathsRecursive`'s button-child loop now recurses (`YamlParser.cpp`),
-`buildTopLevelWidget`'s Row/Grid case now threads an explicit `idPrefix` so nested
+`buildWidget`'s Row/Grid case now threads an explicit `idPrefix` so nested
 container ID lookups resolve correctly, and `widget_ids.py`'s `_collect()`/
 `collect_types()` both recurse the same way. The concrete cross-widget
 state-corruption path described above no longer exists. What remains open is this
