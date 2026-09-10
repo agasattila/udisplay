@@ -363,25 +363,29 @@ design after V1 widget system expansion (TODO-016/017/018/009) is proven in prod
 
 ---
 
-### TODO-032: Section inside Row/Grid support
-**What:** Support `section` type as a child of Row/Grid containers in WidgetDelegate. Currently `WidgetDelegate.qml` maps `section` → null (zero-height placeholder, safe default).
-**Why:** The flat-model collapse mechanism (`SectionWidget` + `sectionOwnerRow`) was designed for top-level use only. A Section's children are separate rows in `m_widgets` with a visibility flag — they are NOT embedded in `props.items`. Supporting Section inside a Row/Grid requires either: (a) serializing Section children into `props.items` (architectural change to `buildPropsMap`), or (b) a new Section variant that works inline.
-**Context:** Explicitly deferred in TODO-031 PR 2 review. `WidgetDelegate` maps `section` → null to avoid the rendering confusion of showing a header with no children. Top-level Section behavior (flat model + collapse) is unaffected.
+### TODO-032: Section inside Row/Grid/Dpad support
+**What:** Support `section` type as a child of Row/Grid/Dpad containers. Currently `WidgetDelegate.qml`'s `sourceComponent` ternary has no `section` case (falls through to `null` — zero-height placeholder, safe default), and `YamlParser.cpp`'s `buildWidget()` has no `WidgetType::Section` case in its nested-children dispatch (only Button/ButtonGroup/Dpad/Row/Grid are handled there) — so a section nested this way loses its whole subtree at parse time, before rendering is even reached.
+**Why:** The flat-model collapse mechanism (`SectionWidget` + `parentId`) was designed for top-level use only. Post widget-model-flatten refactor, a section's children are real rows scoped by `WidgetModel::childModel(sectionRow)` exactly like every other container's children — but nothing constructs those rows when the section itself is reached via `buildWidget()`'s nested recursion (only via the top-level `buildAndAppendWidgets()` path), and nothing in `WidgetDelegate.qml` would render them even if they existed. Supporting Section inside Row/Grid/Dpad requires: (a) a `WidgetType::Section` case in `buildWidget()`'s nested dispatch, and (b) a `section` case in `WidgetDelegate.qml`'s `sourceComponent` ternary (mirroring `DeviceScreen.qml`'s own top-level dispatch, which already has one).
+**Context:** Explicitly deferred in TODO-031 PR 2 review; reconfirmed still present (with the above updated mechanism, no behavior change) during the widget-model-flatten refactor's adversarial/red-team review (2026-09-10) — this is a pre-existing gap, not a regression from that refactor. Top-level Section behavior (flat model + collapse + own-child rendering) is unaffected and fully supported.
 **Effort:** M (human: ~2 days / CC: ~30 min)
-**Priority:** P3 — edge case; no known firmware use case for Section-inside-Row
+**Priority:** P3 — edge case; no known firmware use case for Section-inside-Row/Grid/Dpad
 **Depends on:** TODO-031 complete.
 
 ---
 
 ### TODO-036: Cap recursion depth for nested row/grid/section/button-children
 **What:** Add a depth counter (parameter or thread-local) threaded through
-`YamlParser.cpp`'s `buildTopLevelWidget()`/`appendRowGridChild()`/
-`buildAndAppendWidgets()` recursion, `WidgetModel::indexDescendants()`, and
+`YamlParser.cpp`'s `buildWidget()`/`buildAndAppendWidgets()` recursion and
 `WidgetDump::dumpWidget()`, that errors out (not just warns) past a sane
-max nesting depth (e.g. 8-10 levels). The QML side (`WidgetDelegate.qml`'s
-`rowComp`/`gridComp` dynamic `Loader{source:...}` self-recursion) inherits
-whatever depth the parsed model reaches, so capping at parse time is
-sufficient — no separate QML-side guard needed.
+max nesting depth (e.g. 8-10 levels). Post widget-model-flatten refactor,
+there is no separate `WidgetModel::indexDescendants()` to also guard —
+depth-sensitive traversal now lives in the `parentId`-chain ancestor walks
+(`WidgetModel::data()`'s `VisibleRole` case, `WidgetModel::toggleSection()`),
+which are bounded by the SAME parse-time recursion depth this TODO caps, so
+no separate runtime guard is needed there either. The QML side
+(`WidgetDelegate.qml`'s `rowComp`/`gridComp` dynamic `Loader{source:...}`
+self-recursion) inherits whatever depth the parsed model reaches, so
+capping at parse time is sufficient — no separate QML-side guard needed.
 **Why:** Found during adversarial review of the row/grid alignment PR — `row`/`grid`/`section` are ID-transparent (`isContainer()`
 in YamlParser.cpp, consume no widget ID), so the existing `240`-widget
 safety cap only bounds *leaf* widget count, not container nesting depth.
