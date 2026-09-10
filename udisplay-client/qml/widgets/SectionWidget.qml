@@ -31,10 +31,21 @@ import "./"
  * props.collapsible: bool — show chevron toggle
  * props.collapsed:   bool — current collapsed state (runtime, from model)
  * childModel: every child of this section, as a real model (see
- * WidgetModel::childModel()) — supplied by DeviceScreen.qml's sectionComp. */
+ * WidgetModel::childModel()) — supplied by WidgetDelegate.qml's sectionComp.
+ *
+ * label: non-required (unlike an earlier version of this file) — WidgetDelegate.qml
+ * loads this component via Qt.resolvedUrl (a dynamic Loader{source:}, not a
+ * static `SectionWidget { }` instantiation, to avoid the same WidgetDelegate<->
+ * container cycle rowComp/gridComp already sidestep this way — see
+ * WidgetDelegate.qml's header comment). A Loader{source:}-created object gets
+ * its properties set via a live binding in onLoaded, AFTER construction — a
+ * required property has no way to be satisfied at that point (required
+ * properties must be satisfied at creation), so label must default like every
+ * other RowWidget.qml/GridWidget.qml container property that goes through this
+ * same dynamic-Loader path. */
 Rectangle {
     id: root
-    required property string label
+    property string label: ""
     property var props: ({})
     property var childModel: null
 

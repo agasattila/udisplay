@@ -38,6 +38,15 @@ QtObject {
         generation++
     }
 
+    /* Spy for WidgetDelegate.qml's sectionComp, which calls
+     * controller.widgetModel.toggleSection(model.row) from its toggleClicked
+     * handler. Records the row so a test can assert the signal was wired to
+     * the right call with the right argument. */
+    property int lastToggledRow: -1
+    function toggleSection(row) {
+        lastToggledRow = row
+    }
+
     function childModel(key) {
         return (key in _registry) ? _registry[key] : _empty
     }

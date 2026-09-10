@@ -118,87 +118,19 @@ Page {
                     return controller.widgetModel.childModel(-1)
                 }
 
-                delegate: Loader {
-                    required property int     widgetId
-                    required property string  type
-                    required property string  label
-                    required property bool    enabled
-                    required property bool    widgetVisible
-                    required property var     value
-                    required property var     props
-                    /* This delegate's own row in the FLAT WidgetModel — NOT
-                     * the same as this Repeater's local `index` (which is
-                     * this row's position among top-level widgets only).
-                     * toggleSection() takes a flat-model row, so it must
-                     * use `row`, not `index`. */
-                    required property int     row
-
+                /* Top-level widgets are just this flat list's parentId:-1
+                 * "container" — structurally no different from any other
+                 * container's own children, so they're dispatched by the
+                 * exact same WidgetDelegate.qml every other container
+                 * (RowWidget/GridWidget/SectionWidget) already uses. This
+                 * used to be a second, hand-rolled type->component dispatch
+                 * table duplicating WidgetDelegate.qml's — see
+                 * WidgetDelegate.qml's header comment for the bug that
+                 * duplication caused (a childModel-wiring fix landing in
+                 * one copy but not the other). */
+                delegate: WidgetDelegate {
+                    required property var model
                     Layout.fillWidth: true
-                    visible: widgetVisible
-
-                    sourceComponent: type === "display"      ? displayComp
-                                   : type === "led"          ? ledComp
-                                   : type === "rgbled"       ? rgbledComp
-                                   : type === "button"       ? buttonComp
-                                   : type === "button-group" ? buttonGroupComp
-                                   : type === "slider"       ? sliderComp
-                                   : type === "toggle"       ? toggleComp
-                                   : type === "text"         ? textComp
-                                   : type === "dropdown"     ? dropdownComp
-                                   : type === "label"        ? labelComp
-                                   : type === "separator"    ? separatorComp
-                                   : type === "section"      ? sectionComp
-                                   : type === "row"          ? rowComp
-                                   : type === "grid"         ? gridComp
-                                   : type === "dpad"         ? dpadComp
-
-                                   : unknownComp
-
-                    property int     _widgetId: widgetId
-                    property string  _label:    label
-                    property bool    _enabled:  enabled
-                    property var     _value:    value
-                    property var     _props:    props
-
-                    Component { id: displayComp;     DisplayWidget     { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
-                    Component { id: ledComp;         LedWidget         { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
-                    Component { id: rgbledComp;      RgbLedWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value } }
-                    Component { id: buttonComp;      ButtonWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; props: _props; childModel: { controller.widgetModel.generation; return controller.widgetModel.childModel(row) } } }
-                    Component { id: buttonGroupComp; ButtonGroupWidget { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; childModel: { controller.widgetModel.generation; return controller.widgetModel.childModel(row) } } }
-                    Component { id: sliderComp;      SliderWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
-                    Component { id: toggleComp;      ToggleWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value } }
-                    Component { id: textComp;        TextWidget        { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
-                    Component { id: dropdownComp;    DropdownWidget    { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
-                    Component { id: labelComp;       LabelWidget       { props: _props } }
-                    Component { id: separatorComp;   SeparatorWidget   {} }
-                    /* childModel keyed by `row` (this widget's own flat-list
-                     * index), NOT widgetId — row/grid/section/dpad
-                     * containers all share widgetId 0, so widgetId-keyed
-                     * lookup would collide every top-level container into
-                     * one shared child model.
-                     *
-                     * `controller.widgetModel.generation` is read but unused
-                     * in each binding below — see WidgetModel.h's `generation`
-                     * doc: childModel() has no NOTIFY of its own, so without
-                     * this dependency these bindings would never re-evaluate
-                     * after a live design-mode reload resets the model,
-                     * leaving each container pointing at a deleted ChildModel. */
-                    Component {
-                        id: sectionComp
-                        SectionWidget {
-                            label: _label
-                            props: _props
-                            onToggleClicked: controller.widgetModel.toggleSection(row)
-                            childModel: {
-                                controller.widgetModel.generation
-                                return controller.widgetModel.childModel(row)
-                            }
-                        }
-                    }
-                    Component { id: rowComp;         RowWidget         { label: _label; props: _props; childModel: { controller.widgetModel.generation; return controller.widgetModel.childModel(row) } } }
-                    Component { id: gridComp;        GridWidget        { label: _label; props: _props; childModel: { controller.widgetModel.generation; return controller.widgetModel.childModel(row) } } }
-                    Component { id: dpadComp;        DpadWidget        { label: _label; props: _props; childModel: { controller.widgetModel.generation; return controller.widgetModel.childModel(row) } } }
-                    Component { id: unknownComp;     Item { height: 0 } }
                 }
             }
 

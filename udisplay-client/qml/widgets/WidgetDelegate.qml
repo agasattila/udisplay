@@ -3,9 +3,20 @@ import QtQuick.Controls.Material
 import QtQuick.Layouts
 import "./"
 
-/* Shared child widget dispatcher for RowWidget and GridWidget Repeaters.
- * Selects the correct widget component from the current row's `type` role
- * and forwards all standard widget properties to the instantiated child.
+/* Shared widget dispatcher — used as the Repeater delegate by RowWidget,
+ * GridWidget, SectionWidget, AND DeviceScreen.qml's top-level Repeater (the
+ * flat list's own parentId:-1 "container"). Selects the correct widget
+ * component from the current row's `type` role and forwards all standard
+ * widget properties to the instantiated child.
+ *
+ * DeviceScreen.qml previously hand-rolled its own second copy of this exact
+ * type->component dispatch for top-level widgets instead of reusing this
+ * file. That duplication is what let a childModel-wiring fix land here
+ * (buttonComp/buttonGroupComp) without the equivalent fix landing in
+ * DeviceScreen.qml's copy — a top-level button's face children were
+ * silently dropped while the identical button nested in a row worked fine.
+ * DeviceScreen.qml now uses this file directly as its Repeater's delegate;
+ * do not reintroduce a second dispatch table there.
  *
  * Uses import "./" (NOT the module URI) — Android qmlcachegen requirement.
  *
@@ -31,8 +42,6 @@ import "./"
  * Repeater+delegate reproduction (the same failure mode the old `modelData`
  * version of this file already documented) — do not re-add this property
  * here.
- *
- * section children are not supported yet
  */
 Loader {
     id: root
@@ -81,7 +90,7 @@ Loader {
      * for N flat widgets, the overwhelming majority of which are leaves
      * whose throwaway ChildModel is never read. */
     property bool   _isContainer: _type === "row" || _type === "grid" || _type === "button"
-                                 || _type === "button-group" || _type === "dpad"
+                                 || _type === "button-group" || _type === "dpad" || _type === "section"
 
     /* Every widget's own children, scoped by its FLAT ROW index — NOT
      * widgetId: row/grid/section/dpad containers all have widgetId 0 (only
@@ -123,6 +132,7 @@ Loader {
                    : _type === "row"          ? rowComp
                    : _type === "grid"         ? gridComp
                    : _type === "dpad"         ? dpadComp
+                   : _type === "section"      ? sectionComp
                    : null
 
     /* Leaf widget components — no cycle: none of these files reference WidgetDelegate */
@@ -176,6 +186,24 @@ Loader {
              * width 0 — same class of bug Layout.fillWidth above already
              * fixes for nested rows (see the long implicitWidth-propagation
              * comment on this file's Layout.preferredWidth above). */
+            Layout.fillWidth: true
+        }
+    }
+    Component {
+        id: sectionComp
+        Loader {
+            anchors { left: parent.left; right: parent.right }
+            source: Qt.resolvedUrl("SectionWidget.qml")
+            onLoaded: {
+                item.label = Qt.binding(function() { return root._label })
+                item.props = Qt.binding(function() { return root._props })
+                item.childModel = Qt.binding(function() { return root._childModel })
+                /* toggleSection() takes the flat-model row this section
+                 * itself occupies (model.row), not widgetId — sections
+                 * always have widgetId 0 (see this file's own _childModel
+                 * comment on why row, not widgetId, keys container lookups). */
+                item.toggleClicked.connect(function() { controller.widgetModel.toggleSection(model.row) })
+            }
             Layout.fillWidth: true
         }
     }
