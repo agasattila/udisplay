@@ -97,6 +97,7 @@ Page {
             spacing: 0
 
             Repeater {
+                objectName: "topLevelRepeater"
                 /* Top-level widgets only. controller.widgetModel itself is
                  * now the full FLAT list (every widget, any nesting depth);
                  * childModel(-1) returns just the rows whose parentId is -1
@@ -162,8 +163,8 @@ Page {
                     Component { id: displayComp;     DisplayWidget     { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
                     Component { id: ledComp;         LedWidget         { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
                     Component { id: rgbledComp;      RgbLedWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value } }
-                    Component { id: buttonComp;      ButtonWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; props: _props } }
-                    Component { id: buttonGroupComp; ButtonGroupWidget { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
+                    Component { id: buttonComp;      ButtonWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; props: _props; childModel: { controller.widgetModel.generation; return controller.widgetModel.childModel(row) } } }
+                    Component { id: buttonGroupComp; ButtonGroupWidget { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; childModel: { controller.widgetModel.generation; return controller.widgetModel.childModel(row) } } }
                     Component { id: sliderComp;      SliderWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
                     Component { id: toggleComp;      ToggleWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value } }
                     Component { id: textComp;        TextWidget        { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }

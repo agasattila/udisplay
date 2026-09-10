@@ -22,8 +22,20 @@ QtObject {
     property var _empty: ListModel {}
     property var _registry: ({})
 
+    /* Mirrors the real WidgetModel's `generation` NOTIFY property (see
+     * WidgetModel.h) so a childModel()-consuming binding that reads
+     * `generation` for reactivity -- as DeviceScreen.qml/WidgetDelegate.qml
+     * both do -- re-evaluates when a test calls register() after the
+     * consuming item was already constructed, not just at construction
+     * time. Without this, register() calls made from a sibling's
+     * Component.onCompleted (which always runs after the consumer's own
+     * bindings have already been evaluated once) would silently have no
+     * effect on an already-evaluated childModel() binding. */
+    property int generation: 0
+
     function register(key, model) {
         _registry[key] = model
+        generation++
     }
 
     function childModel(key) {
