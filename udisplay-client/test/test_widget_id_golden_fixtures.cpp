@@ -36,6 +36,10 @@ void collectIds(const QList<WidgetDef>& widgets, QMap<QString, uint8_t>& out)
             for (const auto& item : w.groupItems)
                 out[item.keyPath] = item.widgetId;
         }
+        if (w.type == WidgetType::Dpad) {
+            for (const auto& item : w.dpadItems)
+                out[item.keyPath] = item.widgetId;
+        }
     }
 }
 

@@ -378,10 +378,17 @@ static WidgetDef buildTopLevelWidget(const std::string& key,
                  ii != node["widgets"].end(); ++ii) {
                 ++itemCount;
                 std::string ik = ii->first.as<std::string>();
-                std::string ip = key + "." + ik;
+                /* Container transparency: dpad is in isContainer() /
+                 * widget_ids.py's CONTAINER_TYPES, so its own key is never a
+                 * path segment — idPrefix carries through unchanged, same as
+                 * the Row/Grid case above. Looking this up by `key + "." + ik`
+                 * instead would silently miss idMap (which was built by the
+                 * transparent-container walk) and every dpad item would fall
+                 * back to widgetId 0. */
+                std::string idPath = idPrefix.empty() ? ik : idPrefix + "." + ik;
                 DpadItem item;
-                item.keyPath  = qs(ip);
-                item.widgetId = idMap.count(ip) ? idMap.at(ip) : 0;
+                item.keyPath  = qs(ik);
+                item.widgetId = idMap.count(idPath) ? idMap.at(idPath) : 0;
                 item.label    = nodeStr(ii->second, "label");
                 item.position = nodeStr(ii->second, "position");
                 w.dpadItems.append(item);

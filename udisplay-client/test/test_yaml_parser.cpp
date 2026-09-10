@@ -767,9 +767,12 @@ private slots:
         QVERIFY(hasRelay);
     }
 
-    /* ── dpad: container type (not a button-group items-group) ────── */
+    /* ── dpad: container type, flat dpadItems (not a button-group
+     * items-group, and NOT embedded as generic WidgetDef children the way
+     * row/grid are — see WidgetModel.cpp's Dpad case, which serializes
+     * dpadItems directly instead of recursing into children). ────── */
 
-    void dpad_children_embedded()
+    void dpad_itemsParsed_notEmbeddedAsChildren()
     {
         const char* yaml =
             "widgets:\n"
@@ -788,27 +791,35 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        /* dpad appears as a single top-level entry (children NOT in flat list),
-         * same shape as row/grid. */
+        /* dpad appears as a single top-level entry. Its items land in
+         * dpadItems, not children — dpad is not a transparent generic
+         * container like row/grid, it's a flat button-position list. */
         QCOMPARE(widgets.size(), 1);
         QCOMPARE(widgets[0].type,     WidgetType::Dpad);
         QCOMPARE(widgets[0].widgetId, uint8_t(0));
-        QCOMPARE(widgets[0].children.size(), 2);
+        QCOMPARE(widgets[0].children.size(), 0);
+        QCOMPARE(widgets[0].dpadItems.size(), 2);
 
-        const WidgetDef& up = widgets[0].children[0];
+        const DpadItem& up = widgets[0].dpadItems[0];
         QCOMPARE(up.keyPath,  QStringLiteral("up_btn"));
-        QCOMPARE(up.type,     WidgetType::Button);
+        QCOMPARE(up.label,    QStringLiteral("Up"));
         QCOMPARE(up.position, QStringLiteral("top"));
 
-        const WidgetDef& down = widgets[0].children[1];
+        const DpadItem& down = widgets[0].dpadItems[1];
         QCOMPARE(down.keyPath,  QStringLiteral("down_btn"));
+        QCOMPARE(down.label,    QStringLiteral("Down"));
         QCOMPARE(down.position, QStringLiteral("bottom"));
     }
 
-    void dpad_childrenGetIds_transparentToContainer()
+    void dpad_itemsGetIds_transparentToContainer()
     {
-        /* down_btn (0x10), up_btn (0x11) — sorted alphabetically, same
-         * transparent-container behavior as row/grid/section. */
+        /* down_btn (0x10), up_btn (0x11) — sorted alphabetically. dpad is
+         * in isContainer()/widget_ids.py's CONTAINER_TYPES, so its own key
+         * is never a path segment: item IDs are looked up bare, same
+         * transparent-container behavior as row/grid/section (NOT prefixed
+         * like button-group items). See tests/protocol_vectors.json's
+         * "nesting_and_dpad" golden fixture for the cross-checked version
+         * of this same rule. */
         const char* yaml =
             "widgets:\n"
             "  d:\n"
@@ -826,9 +837,9 @@ private slots:
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets.size(), 1);
         bool hasUp = false, hasDown = false;
-        for (const auto& child : widgets[0].children) {
-            if (child.keyPath == "up_btn")   { QCOMPARE(child.widgetId, uint8_t(0x11)); hasUp = true; }
-            if (child.keyPath == "down_btn") { QCOMPARE(child.widgetId, uint8_t(0x10)); hasDown = true; }
+        for (const auto& item : widgets[0].dpadItems) {
+            if (item.keyPath == "up_btn")   { QCOMPARE(item.widgetId, uint8_t(0x11)); hasUp = true; }
+            if (item.keyPath == "down_btn") { QCOMPARE(item.widgetId, uint8_t(0x10)); hasDown = true; }
         }
         QVERIFY(hasUp);
         QVERIFY(hasDown);
