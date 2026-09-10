@@ -187,6 +187,9 @@ int main(int argc, char* argv[])
         }
     }
 
+    // Disable stdout buffering for immediate log output.
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     udisplay_ui_init(&g_ctx, demo_tcp_send, UDISPLAY_TRANSPORT_TCP);
     udisplay_ui_set_handlers(&g_handlers);
 
