@@ -3,6 +3,12 @@
  *
  * Critical property: widget ID assignment must exactly match udisplay-gen.
  * Canonical reference: tests/protocol_vectors.json → merkle.v5_full_vocabulary.
+ *
+ * widgets is a FLAT list now — every widget, any nesting depth (button face
+ * children, row/grid/section/dpad children, button-group items), is its own
+ * entry, linked to its container via `parentId` (the containing widget's own
+ * row index, -1 for top-level). There is no more `.children` field to
+ * recurse into — see WidgetDef.h.
  */
 #include <QtTest>
 #include "YamlParser.h"
@@ -83,12 +89,39 @@ class TestYamlParser : public QObject
     Q_OBJECT
 
 private:
+    /* Searches the WHOLE flat list — keyPath is unique across every depth,
+     * so this finds a widget regardless of nesting. */
     static const WidgetDef* findByKey(const QList<WidgetDef>& list, const char* key)
     {
         QString k = QString::fromLatin1(key);
         for (const auto& w : list)
             if (w.keyPath == k) return &w;
         return nullptr;
+    }
+
+    static int findRowByKey(const QList<WidgetDef>& list, const char* key)
+    {
+        QString k = QString::fromLatin1(key);
+        for (int i = 0; i < list.size(); ++i)
+            if (list[i].keyPath == k) return i;
+        return -1;
+    }
+
+    /* Every widget whose parentId == parentRow, in declaration order —
+     * the flat-model equivalent of the old WidgetDef.children list. */
+    static QList<const WidgetDef*> childrenOf(const QList<WidgetDef>& list, int parentRow)
+    {
+        QList<const WidgetDef*> out;
+        for (const auto& w : list)
+            if (w.parentId == parentRow)
+                out.append(&w);
+        return out;
+    }
+
+    /* Top-level widgets (parentId == -1), in declaration order. */
+    static QList<const WidgetDef*> topLevel(const QList<WidgetDef>& list)
+    {
+        return childrenOf(list, -1);
     }
 
 private slots:
@@ -130,7 +163,9 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(YAML_V5, widgets, name, version));
-        QCOMPARE(widgets.size(), 7);
+        /* 7 top-level + fire_btn.status_led + mode_sel.{dc,ac} = 10 flat rows */
+        QCOMPARE(widgets.size(), 10);
+        QCOMPARE(topLevel(widgets).size(), 7);
 
         struct { const char* key; uint8_t id; } expected[] = {
             { "display_volt",  0x10 },
@@ -156,27 +191,30 @@ private slots:
         QVERIFY(p.parse(YAML_V5, widgets, name, version));
 
         /* fire_btn child: status_led → 0x12 */
-        const WidgetDef* fb = findByKey(widgets, "fire_btn");
-        QVERIFY(fb);
-        QCOMPARE(fb->children.size(), 1);
-        QCOMPARE(fb->children[0].keyPath,  QStringLiteral("fire_btn.status_led"));
-        QCOMPARE(fb->children[0].widgetId, uint8_t(0x12));
-        QCOMPARE(fb->children[0].label,    QStringLiteral("Active"));
+        int fbRow = findRowByKey(widgets, "fire_btn");
+        QVERIFY(fbRow >= 0);
+        QList<const WidgetDef*> fbChildren = childrenOf(widgets, fbRow);
+        QCOMPARE(fbChildren.size(), 1);
+        QCOMPARE(fbChildren[0]->keyPath,  QStringLiteral("fire_btn.status_led"));
+        QCOMPARE(fbChildren[0]->widgetId, uint8_t(0x12));
+        QCOMPARE(fbChildren[0]->label,    QStringLiteral("Active"));
 
-        /* mode_sel items: ac → 0x14, dc → 0x15 */
-        const WidgetDef* ms = findByKey(widgets, "mode_sel");
-        QVERIFY(ms);
-        QCOMPARE(ms->groupItems.size(), 2);
+        /* mode_sel items: ac → 0x14, dc → 0x15 — ordinary flat rows now,
+         * not a separate groupItems list. */
+        int msRow = findRowByKey(widgets, "mode_sel");
+        QVERIFY(msRow >= 0);
+        QList<const WidgetDef*> items = childrenOf(widgets, msRow);
+        QCOMPARE(items.size(), 2);
 
         bool foundAc = false, foundDc = false;
-        for (const auto& item : ms->groupItems) {
-            if (item.keyPath == "mode_sel.ac") {
-                QCOMPARE(item.widgetId, uint8_t(0x14));
-                QCOMPARE(item.label, QStringLiteral("ACV"));
+        for (const auto* item : items) {
+            if (item->keyPath == "mode_sel.ac") {
+                QCOMPARE(item->widgetId, uint8_t(0x14));
+                QCOMPARE(item->label, QStringLiteral("ACV"));
                 foundAc = true;
-            } else if (item.keyPath == "mode_sel.dc") {
-                QCOMPARE(item.widgetId, uint8_t(0x15));
-                QCOMPARE(item.label, QStringLiteral("DCV"));
+            } else if (item->keyPath == "mode_sel.dc") {
+                QCOMPARE(item->widgetId, uint8_t(0x15));
+                QCOMPARE(item->label, QStringLiteral("DCV"));
                 foundDc = true;
             }
         }
@@ -211,10 +249,10 @@ private slots:
 
         const WidgetDef* dv = findByKey(widgets, "display_volt");
         QVERIFY(dv);
-        QCOMPARE(dv->label,  QStringLiteral("Voltage"));
-        QCOMPARE(dv->unit,   QStringLiteral("V"));
-        QCOMPARE(dv->format, QStringLiteral("%.3f"));
-        QCOMPARE(dv->displayStyle,  QStringLiteral("large"));
+        QCOMPARE(dv->label, QStringLiteral("Voltage"));
+        QCOMPARE(dv->props[QStringLiteral("unit")].toString(),   QStringLiteral("V"));
+        QCOMPARE(dv->props[QStringLiteral("format")].toString(), QStringLiteral("%.3f"));
+        QCOMPARE(dv->style, QStringLiteral("large"));
     }
 
     void v5_slider_props()
@@ -226,11 +264,11 @@ private slots:
 
         const WidgetDef* sr = findByKey(widgets, "slider_rate");
         QVERIFY(sr);
-        QCOMPARE(sr->label,      QStringLiteral("Rate"));
-        QCOMPARE(sr->sliderMin,  1.0);
-        QCOMPARE(sr->sliderMax,  100.0);
-        QCOMPARE(sr->sliderStep, 1.0);
-        QCOMPARE(sr->unit,       QStringLiteral("Hz"));
+        QCOMPARE(sr->label, QStringLiteral("Rate"));
+        QCOMPARE(sr->props[QStringLiteral("min")].toDouble(),  1.0);
+        QCOMPARE(sr->props[QStringLiteral("max")].toDouble(),  100.0);
+        QCOMPARE(sr->props[QStringLiteral("step")].toDouble(), 1.0);
+        QCOMPARE(sr->props[QStringLiteral("unit")].toString(), QStringLiteral("Hz"));
     }
 
     void v5_text_props()
@@ -242,7 +280,7 @@ private slots:
 
         const WidgetDef* sf = findByKey(widgets, "ssid_field");
         QVERIFY(sf);
-        QCOMPARE(sf->textMode, QStringLiteral("rw"));
+        QCOMPARE(sf->props[QStringLiteral("mode")].toString(), QStringLiteral("rw"));
     }
 
     void v5_button_props()
@@ -254,9 +292,9 @@ private slots:
 
         const WidgetDef* fb = findByKey(widgets, "fire_btn");
         QVERIFY(fb);
-        QCOMPARE(fb->shape, QStringLiteral("circle"));
-        /* button no longer stores per-widget color — style comes from global stylesheet */
-        QVERIFY(fb->color.isEmpty());
+        QCOMPARE(fb->props[QStringLiteral("shape")].toString(), QStringLiteral("circle"));
+        /* button never stores a "color" prop — style comes from global stylesheet */
+        QVERIFY(!fb->props.contains(QStringLiteral("color")));
     }
 
     void v5_deviceNameVersion()
@@ -292,8 +330,8 @@ private slots:
             "    type: display\n"
             "    label: Temp\n";
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].format, QStringLiteral("%.2f"));
-        QCOMPARE(widgets[0].displayStyle,  QStringLiteral("default"));
+        QCOMPARE(widgets[0].props[QStringLiteral("format")].toString(), QStringLiteral("%.2f"));
+        QCOMPARE(widgets[0].style, QStringLiteral("default"));
     }
 
     /* ── Error handling ───────────────────────────────────────────── */
@@ -325,21 +363,26 @@ private slots:
 
     void declarationOrder_preserved()
     {
-        /* top-level widgets come out in YAML declaration order, not sorted */
+        /* top-level widgets come out in YAML declaration order, not sorted —
+         * checked via topLevel(), not raw flat indices, since a widget's
+         * own children (fire_btn.status_led, mode_sel's items) are now
+         * interspersed immediately after their parent in the flat list. */
         YamlParser p;
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(YAML_V5, widgets, name, version));
 
+        QList<const WidgetDef*> top = topLevel(widgets);
+        QCOMPARE(top.size(), 7);
         /* Declaration order: slider_rate, toggle_relay, fire_btn,
          * display_volt, mode_sel, power_led, ssid_field             */
-        QCOMPARE(widgets[0].keyPath, QStringLiteral("slider_rate"));
-        QCOMPARE(widgets[1].keyPath, QStringLiteral("toggle_relay"));
-        QCOMPARE(widgets[2].keyPath, QStringLiteral("fire_btn"));
-        QCOMPARE(widgets[3].keyPath, QStringLiteral("display_volt"));
-        QCOMPARE(widgets[4].keyPath, QStringLiteral("mode_sel"));
-        QCOMPARE(widgets[5].keyPath, QStringLiteral("power_led"));
-        QCOMPARE(widgets[6].keyPath, QStringLiteral("ssid_field"));
+        QCOMPARE(top[0]->keyPath, QStringLiteral("slider_rate"));
+        QCOMPARE(top[1]->keyPath, QStringLiteral("toggle_relay"));
+        QCOMPARE(top[2]->keyPath, QStringLiteral("fire_btn"));
+        QCOMPARE(top[3]->keyPath, QStringLiteral("display_volt"));
+        QCOMPARE(top[4]->keyPath, QStringLiteral("mode_sel"));
+        QCOMPARE(top[5]->keyPath, QStringLiteral("power_led"));
+        QCOMPARE(top[6]->keyPath, QStringLiteral("ssid_field"));
     }
 
     /* ── Robustness / error paths ─────────────────────────────────── */
@@ -491,10 +534,10 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets.size(), 1);
-        QCOMPARE(widgets[0].type,       WidgetType::Label);
-        QCOMPARE(widgets[0].widgetId,   uint8_t(0));
-        QCOMPARE(widgets[0].labelText,  QStringLiteral("Hello world"));
-        QCOMPARE(widgets[0].labelStyle, QStringLiteral("heading"));
+        QCOMPARE(widgets[0].type,     WidgetType::Label);
+        QCOMPARE(widgets[0].widgetId, uint8_t(0));
+        QCOMPARE(widgets[0].props[QStringLiteral("text")].toString(), QStringLiteral("Hello world"));
+        QCOMPARE(widgets[0].style, QStringLiteral("heading"));
     }
 
     /* Decorations are transparent to ID assignment: a toggle after a
@@ -539,16 +582,18 @@ private slots:
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets.size(), 1);
         const WidgetDef& w = widgets[0];
-        QCOMPARE(w.type,            WidgetType::Dropdown);
-        QCOMPARE(w.widgetId,        uint8_t(0x10));
-        QCOMPARE(w.dropdownItems.size(), 2);
-        QCOMPARE(w.dropdownItems[0].key,   QStringLiteral("sta"));
-        QCOMPARE(w.dropdownItems[0].label, QStringLiteral("Station"));
-        QCOMPARE(w.dropdownItems[1].key,   QStringLiteral("ap"));
-        QCOMPARE(w.dropdownItems[1].label, QStringLiteral("Access Point"));
+        QCOMPARE(w.type,     WidgetType::Dropdown);
+        QCOMPARE(w.widgetId, uint8_t(0x10));
+        QVariantList items = w.props[QStringLiteral("items")].toList();
+        QCOMPARE(items.size(), 2);
+        QCOMPARE(items[0].toMap()[QStringLiteral("key")].toString(),   QStringLiteral("sta"));
+        QCOMPARE(items[0].toMap()[QStringLiteral("label")].toString(), QStringLiteral("Station"));
+        QCOMPARE(items[1].toMap()[QStringLiteral("key")].toString(),   QStringLiteral("ap"));
+        QCOMPARE(items[1].toMap()[QStringLiteral("label")].toString(), QStringLiteral("Access Point"));
     }
 
-    /* Dropdown items do NOT get their own widget IDs */
+    /* Dropdown items do NOT get their own widget IDs, and are not flat rows
+     * (config-only key/label pairs — see WidgetDef.h). */
     void dropdown_items_have_no_ids()
     {
         /* Only the dropdown itself gets 0x10; items are value-only */
@@ -589,20 +634,22 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        /* Row appears as a single top-level entry (children NOT in flat list) */
-        QCOMPARE(widgets.size(), 1);
+        /* Row + its 2 children are all flat rows now — 3 entries total,
+         * children immediately following their container. */
+        QCOMPARE(widgets.size(), 3);
         QCOMPARE(widgets[0].type,     WidgetType::Row);
         QCOMPARE(widgets[0].widgetId, uint8_t(0));
-        QCOMPARE(widgets[0].children.size(), 2);
 
-        const WidgetDef& relay = widgets[0].children[0];
-        QCOMPARE(relay.keyPath, QStringLiteral("relay"));
-        QCOMPARE(relay.type,    WidgetType::Toggle);
-        QCOMPARE(relay.flex,    1);
+        const WidgetDef& relay = widgets[1];
+        QCOMPARE(relay.keyPath,  QStringLiteral("relay"));
+        QCOMPARE(relay.type,     WidgetType::Toggle);
+        QCOMPARE(relay.parentId, 0);
+        QCOMPARE(relay.flex,     1);
 
-        const WidgetDef& fan = widgets[0].children[1];
-        QCOMPARE(fan.keyPath, QStringLiteral("fan"));
-        QCOMPARE(fan.flex,    0);
+        const WidgetDef& fan = widgets[2];
+        QCOMPARE(fan.keyPath,  QStringLiteral("fan"));
+        QCOMPARE(fan.parentId, 0);
+        QCOMPARE(fan.flex,     0);
     }
 
     void row_flex_invalidValue_warnsAndClampsToOne()
@@ -619,7 +666,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].children[0].flex, 1);
+        QCOMPARE(widgets[1].flex, 1);
         bool warned = false;
         for (const auto& d : p.diagnostics())
             if (d.field == "flex" && d.severity == YamlParser::Severity::Warning) warned = true;
@@ -644,7 +691,7 @@ private slots:
          * (its own default), never inherits the container's align. A
          * child's align is independent of its container's; there is no
          * tri-state "unspecified" sentinel. */
-        QCOMPARE(widgets[0].children[0].align, QStringLiteral("left"));
+        QCOMPARE(widgets[1].align, QStringLiteral("left"));
     }
 
     void row_align_containerAndChildOverride()
@@ -665,11 +712,11 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets[0].align, QStringLiteral("center"));
-        QCOMPARE(widgets[0].children[0].align, QStringLiteral("right")); /* relay: own override */
+        QCOMPARE(widgets[1].align, QStringLiteral("right")); /* relay: own override */
         /* fan didn't declare its own align — resolves to "left", NOT the
          * container's "center". A child's align never inherits from its
          * container. */
-        QCOMPARE(widgets[0].children[1].align, QStringLiteral("left"));
+        QCOMPARE(widgets[2].align, QStringLiteral("left"));
     }
 
     void row_align_invalidValue_warnsAndDefaultsToLeft()
@@ -710,8 +757,8 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].labelAlign, QStringLiteral("justify"));
-        QCOMPARE(widgets[1].labelAlign, QStringLiteral("left"));
+        QCOMPARE(widgets[0].props[QStringLiteral("labelAlign")].toString(), QStringLiteral("justify"));
+        QCOMPARE(widgets[1].props[QStringLiteral("labelAlign")].toString(), QStringLiteral("left"));
     }
 
     void label_align_insideRow_doesNotWarnOnJustify()
@@ -734,7 +781,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].children[0].labelAlign, QStringLiteral("justify"));
+        QCOMPARE(widgets[1].props[QStringLiteral("labelAlign")].toString(), QStringLiteral("justify"));
         for (const auto& d : p.diagnostics())
             QVERIFY2(!(d.field == "align" && d.severity == YamlParser::Severity::Warning),
                      "label's own justify textAlign must not warn as an invalid row-align value");
@@ -756,23 +803,25 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets.size(), 1);
+        QCOMPARE(topLevel(widgets).size(), 1);
         /* fan < relay → IDs 0x10, 0x11 */
         bool hasFan = false, hasRelay = false;
-        for (const auto& child : widgets[0].children) {
-            if (child.keyPath == "fan")   { QCOMPARE(child.widgetId, uint8_t(0x10)); hasFan = true; }
-            if (child.keyPath == "relay") { QCOMPARE(child.widgetId, uint8_t(0x11)); hasRelay = true; }
+        for (const auto* child : childrenOf(widgets, 0)) {
+            if (child->keyPath == "fan")   { QCOMPARE(child->widgetId, uint8_t(0x10)); hasFan = true; }
+            if (child->keyPath == "relay") { QCOMPARE(child->widgetId, uint8_t(0x11)); hasRelay = true; }
         }
         QVERIFY(hasFan);
         QVERIFY(hasRelay);
     }
 
-    /* ── dpad: container type, flat dpadItems (not a button-group
-     * items-group, and NOT embedded as generic WidgetDef children the way
-     * row/grid are — see WidgetModel.cpp's Dpad case, which serializes
-     * dpadItems directly instead of recursing into children). ────── */
+    /* ── dpad: container type — items are now ordinary flat rows ─────
+     * (this is a behavior change from the pre-flattening design: dpad
+     * items used to be id/label/position-only markers with no real type
+     * parsing; they now go through the same full parse as any other
+     * widget, since every real dpad item already carries an explicit
+     * `type:` in YAML — e.g. `type: button`). ────────────────────── */
 
-    void dpad_itemsParsed_notEmbeddedAsChildren()
+    void dpad_itemsAreFlatRowsWithPositionInProps()
     {
         const char* yaml =
             "widgets:\n"
@@ -791,24 +840,23 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        /* dpad appears as a single top-level entry. Its items land in
-         * dpadItems, not children — dpad is not a transparent generic
-         * container like row/grid, it's a flat button-position list. */
-        QCOMPARE(widgets.size(), 1);
+        QCOMPARE(topLevel(widgets).size(), 1);
         QCOMPARE(widgets[0].type,     WidgetType::Dpad);
         QCOMPARE(widgets[0].widgetId, uint8_t(0));
-        QCOMPARE(widgets[0].children.size(), 0);
-        QCOMPARE(widgets[0].dpadItems.size(), 2);
 
-        const DpadItem& up = widgets[0].dpadItems[0];
-        QCOMPARE(up.keyPath,  QStringLiteral("up_btn"));
-        QCOMPARE(up.label,    QStringLiteral("Up"));
-        QCOMPARE(up.position, QStringLiteral("top"));
+        QList<const WidgetDef*> items = childrenOf(widgets, 0);
+        QCOMPARE(items.size(), 2);
 
-        const DpadItem& down = widgets[0].dpadItems[1];
-        QCOMPARE(down.keyPath,  QStringLiteral("down_btn"));
-        QCOMPARE(down.label,    QStringLiteral("Down"));
-        QCOMPARE(down.position, QStringLiteral("bottom"));
+        const WidgetDef* up = items[0];
+        QCOMPARE(up->keyPath, QStringLiteral("up_btn"));
+        QCOMPARE(up->type,    WidgetType::Button);
+        QCOMPARE(up->label,   QStringLiteral("Up"));
+        QCOMPARE(up->props[QStringLiteral("position")].toString(), QStringLiteral("top"));
+
+        const WidgetDef* down = items[1];
+        QCOMPARE(down->keyPath, QStringLiteral("down_btn"));
+        QCOMPARE(down->label,   QStringLiteral("Down"));
+        QCOMPARE(down->props[QStringLiteral("position")].toString(), QStringLiteral("bottom"));
     }
 
     void dpad_itemsGetIds_transparentToContainer()
@@ -835,11 +883,11 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets.size(), 1);
+        QCOMPARE(topLevel(widgets).size(), 1);
         bool hasUp = false, hasDown = false;
-        for (const auto& item : widgets[0].dpadItems) {
-            if (item.keyPath == "up_btn")   { QCOMPARE(item.widgetId, uint8_t(0x11)); hasUp = true; }
-            if (item.keyPath == "down_btn") { QCOMPARE(item.widgetId, uint8_t(0x10)); hasDown = true; }
+        for (const auto* item : childrenOf(widgets, 0)) {
+            if (item->keyPath == "up_btn")   { QCOMPARE(item->widgetId, uint8_t(0x11)); hasUp = true; }
+            if (item->keyPath == "down_btn") { QCOMPARE(item->widgetId, uint8_t(0x10)); hasDown = true; }
         }
         QVERIFY(hasUp);
         QVERIFY(hasDown);
@@ -886,15 +934,15 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets.size(), 1);
-        QCOMPARE(widgets[0].type,       WidgetType::Grid);
-        QCOMPARE(widgets[0].gridColumns, 3);
-        QCOMPARE(widgets[0].children.size(), 2);
+        QCOMPARE(topLevel(widgets).size(), 1);
+        QCOMPARE(widgets[0].type, WidgetType::Grid);
+        QCOMPARE(widgets[0].props[QStringLiteral("columns")].toInt(), 3);
+        QCOMPARE(childrenOf(widgets, 0).size(), 2);
     }
 
     /* Row nested inside row: outer row → inner row → leaf widgets.
-     * Regression test for buildTopLevelWidget missing Row/Grid case —
-     * nested rows parsed with empty children list (invisible in QML). */
+     * Regression test for buildWidget missing Row/Grid case — nested rows
+     * parsed with empty children (invisible in QML). */
     void row_inside_row_children_parsed()
     {
         const char* yaml =
@@ -918,21 +966,24 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
 
-        QCOMPARE(widgets.size(), 1);
+        QCOMPARE(topLevel(widgets).size(), 1);
         QCOMPARE(widgets[0].type, WidgetType::Row);
-        QCOMPARE(widgets[0].children.size(), 2);
+        QList<const WidgetDef*> outerChildren = childrenOf(widgets, 0);
+        QCOMPARE(outerChildren.size(), 2);
 
         /* inner row — first child (YAML document order) */
-        const WidgetDef& inner = widgets[0].children[0];
-        QCOMPARE(inner.type, WidgetType::Row);
-        QCOMPARE(inner.children.size(), 1);
-        QCOMPARE(inner.children[0].type, WidgetType::Toggle);
-        QCOMPARE(inner.children[0].flex, 1);
+        const WidgetDef* inner = outerChildren[0];
+        QCOMPARE(inner->type, WidgetType::Row);
+        int innerRow = findRowByKey(widgets, "inner");
+        QList<const WidgetDef*> innerChildren = childrenOf(widgets, innerRow);
+        QCOMPARE(innerChildren.size(), 1);
+        QCOMPARE(innerChildren[0]->type, WidgetType::Toggle);
+        QCOMPARE(innerChildren[0]->flex, 1);
 
         /* right display — second child */
-        const WidgetDef& right = widgets[0].children[1];
-        QCOMPARE(right.type, WidgetType::Display);
-        QCOMPARE(right.flex, 1);
+        const WidgetDef* right = outerChildren[1];
+        QCOMPARE(right->type, WidgetType::Display);
+        QCOMPARE(right->flex, 1);
     }
 
     /* Row nested inside grid (cross-type, depth-2). */
@@ -957,15 +1008,18 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
 
-        QCOMPARE(widgets.size(), 1);
+        QCOMPARE(topLevel(widgets).size(), 1);
         QCOMPARE(widgets[0].type, WidgetType::Grid);
-        QCOMPARE(widgets[0].gridColumns, 2);
-        QCOMPARE(widgets[0].children.size(), 2);
+        QCOMPARE(widgets[0].props[QStringLiteral("columns")].toInt(), 2);
+        QList<const WidgetDef*> gridChildren = childrenOf(widgets, 0);
+        QCOMPARE(gridChildren.size(), 2);
 
-        const WidgetDef& inner_row = widgets[0].children[0];
-        QCOMPARE(inner_row.type, WidgetType::Row);
-        QCOMPARE(inner_row.children.size(), 1);
-        QCOMPARE(inner_row.children[0].type, WidgetType::Led);
+        const WidgetDef* innerRow = gridChildren[0];
+        QCOMPARE(innerRow->type, WidgetType::Row);
+        int innerRowIdx = findRowByKey(widgets, "inner_row");
+        QList<const WidgetDef*> innerChildren = childrenOf(widgets, innerRowIdx);
+        QCOMPARE(innerChildren.size(), 1);
+        QCOMPARE(innerChildren[0]->type, WidgetType::Led);
     }
 
     /* ── capabilities (v5+) ───────────────────────────────────────── */
@@ -1045,10 +1099,10 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QVERIFY(widgets[0].collapsible);
+        QVERIFY(widgets[0].props[QStringLiteral("collapsible")].toBool());
     }
 
-    void section_children_get_sectionOwnerRow()
+    void section_children_get_parentId()
     {
         const char* yaml =
             "widgets:\n"
@@ -1065,15 +1119,21 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        /* widgets[0] = section header at row 0 */
-        QCOMPARE(widgets[0].sectionOwnerRow, -1);
-        /* widgets[1] and [2] are children — should point back to row 0 */
-        QCOMPARE(widgets[1].sectionOwnerRow, 0);
-        QCOMPARE(widgets[2].sectionOwnerRow, 0);
+        /* widgets[0] = section header at row 0, top-level */
+        QCOMPARE(widgets[0].parentId, -1);
+        /* widgets[1] and [2] are children — parentId points back to row 0 */
+        QCOMPARE(widgets[1].parentId, 0);
+        QCOMPARE(widgets[2].parentId, 0);
     }
 
-    void section_non_collapsible_children_have_no_sectionOwnerRow()
+    void section_nonCollapsible_childrenStillGetParentId()
     {
+        /* Unlike the pre-flattening sectionOwnerRow field (only ever
+         * assigned for COLLAPSIBLE sections' children), parentId reflects
+         * true structural nesting unconditionally — a non-collapsible
+         * section's children still point back to it. WidgetModel's
+         * VisibleRole walk simply never triggers hiding through a
+         * non-collapsible ancestor, so this carries no behavior risk. */
         const char* yaml =
             "widgets:\n"
             "  info:\n"
@@ -1086,12 +1146,11 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        /* Non-collapsible section: children keep sectionOwnerRow == -1 */
-        QCOMPARE(widgets[0].collapsible, false);
-        QCOMPARE(widgets[1].sectionOwnerRow, -1);
+        QCOMPARE(widgets[0].props[QStringLiteral("collapsible")].toBool(), false);
+        QCOMPARE(widgets[1].parentId, 0);
     }
 
-    /* ── TODO-020: LED color property ────────────────────────────────── */
+    /* ── LED color property ────────────────────────────────────────── */
 
     void led_colorParsed()
     {
@@ -1106,8 +1165,8 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets.size(), 1);
-        QCOMPARE(widgets[0].type,  WidgetType::Led);
-        QCOMPARE(widgets[0].color, QStringLiteral("#ff0000"));
+        QCOMPARE(widgets[0].type, WidgetType::Led);
+        QCOMPARE(widgets[0].props[QStringLiteral("color")].toString(), QStringLiteral("#ff0000"));
     }
 
     void led_colorDefault()
@@ -1122,10 +1181,10 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets.size(), 1);
-        QCOMPARE(widgets[0].color, QStringLiteral("#00d4aa"));
+        QCOMPARE(widgets[0].props[QStringLiteral("color")].toString(), QStringLiteral("#00d4aa"));
     }
 
-    /* ── TODO-021: rgbled widget type ────────────────────────────────── */
+    /* ── rgbled widget type ────────────────────────────────────────── */
 
     void rgbled_typeRecognized()
     {
@@ -1143,7 +1202,8 @@ private slots:
         QCOMPARE(widgets[0].widgetId, uint8_t(0x10));
         QCOMPARE(widgets[0].label,    QStringLiteral("RGB Status"));
     }
-    /* ── Global stylesheet (TODO-025) ───────────────────────────────── */
+
+    /* ── Global stylesheet ───────────────────────────────────────── */
 
     void style_absent_yields_default_token()
     {
@@ -1289,7 +1349,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QVERIFY(widgets[0].color.isEmpty());
+        QVERIFY(!widgets[0].props.contains(QStringLiteral("color")));
     }
 
     /* ── debug_state: design-mode preview values ─────────────────────── */
@@ -1420,9 +1480,10 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets.size(), 1);
-        QCOMPARE(widgets[0].children.size(), 1);
-        QCOMPARE(widgets[0].children[0].debugValue, QVariant(true));
+        QCOMPARE(topLevel(widgets).size(), 1);
+        QList<const WidgetDef*> children = childrenOf(widgets, 0);
+        QCOMPARE(children.size(), 1);
+        QCOMPARE(children[0]->debugValue, QVariant(true));
     }
 
     void debugState_absent_isNull()
@@ -1458,8 +1519,8 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets.size(), 1);
-        QCOMPARE(widgets[0].textMode,        QStringLiteral("readonly"));
-        QCOMPARE(widgets[0].defaultTextMode, QStringLiteral("readonly"));
+        QCOMPARE(widgets[0].props[QStringLiteral("mode")].toString(),        QStringLiteral("readonly"));
+        QCOMPARE(widgets[0].props[QStringLiteral("defaultMode")].toString(), QStringLiteral("readonly"));
     }
 
     /* "rw" must pass through unchanged. */
@@ -1476,7 +1537,7 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets.size(), 1);
-        QCOMPARE(widgets[0].textMode, QStringLiteral("rw"));
+        QCOMPARE(widgets[0].props[QStringLiteral("mode")].toString(), QStringLiteral("rw"));
     }
 
     /* Absent mode: defaults to "readonly". */
@@ -1492,7 +1553,7 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets.size(), 1);
-        QCOMPARE(widgets[0].textMode, QStringLiteral("readonly"));
+        QCOMPARE(widgets[0].props[QStringLiteral("mode")].toString(), QStringLiteral("readonly"));
     }
 
     /* ── Strict validation: fatal errors (parse fails) ───────────────── */
@@ -1643,7 +1704,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].sliderStep, 1.0);
+        QCOMPARE(widgets[0].props[QStringLiteral("step")].toDouble(), 1.0);
         bool hasWarning = false;
         for (const auto& d : p.diagnostics())
             if (d.field == QStringLiteral("step")) hasWarning = true;
@@ -1663,7 +1724,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].sliderStep, 1.0);
+        QCOMPARE(widgets[0].props[QStringLiteral("step")].toDouble(), 1.0);
         bool hasWarning = false;
         for (const auto& d : p.diagnostics())
             if (d.field == QStringLiteral("step")) hasWarning = true;
@@ -1699,7 +1760,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].textMaxLength, 1);
+        QCOMPARE(widgets[0].props[QStringLiteral("maxlength")].toInt(), 1);
         bool hasWarning = false;
         for (const auto& d : p.diagnostics())
             if (d.field == QStringLiteral("maxlength")) hasWarning = true;
@@ -1717,7 +1778,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].textMaxLength, 255);
+        QCOMPARE(widgets[0].props[QStringLiteral("maxlength")].toInt(), 255);
         bool hasWarning = false;
         for (const auto& d : p.diagnostics())
             if (d.field == QStringLiteral("maxlength")) hasWarning = true;
@@ -1735,7 +1796,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].color, QStringLiteral("#00d4aa"));
+        QCOMPARE(widgets[0].props[QStringLiteral("color")].toString(), QStringLiteral("#00d4aa"));
         bool hasWarning = false;
         for (const auto& d : p.diagnostics())
             if (d.field == QStringLiteral("color")) hasWarning = true;
@@ -1754,7 +1815,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].color, QStringLiteral("#00d4aa"));
+        QCOMPARE(widgets[0].props[QStringLiteral("color")].toString(), QStringLiteral("#00d4aa"));
         bool hasWarning = false;
         for (const auto& d : p.diagnostics())
             if (d.field == QStringLiteral("color")) hasWarning = true;
@@ -1797,7 +1858,7 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QVERIFY(p.diagnostics().isEmpty());
-        QCOMPARE(widgets[0].children.size(), 2);
+        QCOMPARE(childrenOf(widgets, 0).size(), 2);
     }
 
     void gridColumns_one_acceptedAsColumnLayout()
@@ -1818,7 +1879,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].gridColumns, 1);
+        QCOMPARE(widgets[0].props[QStringLiteral("columns")].toInt(), 1);
         bool hasWarning = false;
         for (const auto& d : p.diagnostics())
             if (d.field == QStringLiteral("columns")) hasWarning = true;
@@ -1844,7 +1905,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].gridColumns, 1);
+        QCOMPARE(widgets[0].props[QStringLiteral("columns")].toInt(), 1);
         bool hasWarning = false;
         for (const auto& d : p.diagnostics())
             if (d.field == QStringLiteral("columns")) hasWarning = true;
@@ -1941,7 +2002,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].shape, QStringLiteral("circle"));
+        QCOMPARE(widgets[0].props[QStringLiteral("shape")].toString(), QStringLiteral("circle"));
         QVERIFY(p.diagnostics().isEmpty());
     }
 
@@ -1956,7 +2017,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].color, QStringLiteral("#ff0000"));
+        QCOMPARE(widgets[0].props[QStringLiteral("color")].toString(), QStringLiteral("#ff0000"));
         QVERIFY(p.diagnostics().isEmpty());
     }
 
@@ -1973,7 +2034,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].sliderStep, 0.5);
+        QCOMPARE(widgets[0].props[QStringLiteral("step")].toDouble(), 0.5);
         QVERIFY(p.diagnostics().isEmpty());
     }
 
@@ -2006,7 +2067,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].textMaxLength, 64);
+        QCOMPARE(widgets[0].props[QStringLiteral("maxlength")].toInt(), 64);
         QVERIFY(p.diagnostics().isEmpty());
     }
 
@@ -2029,7 +2090,7 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].children.size(), 0);
+        QCOMPARE(childrenOf(widgets, 0).size(), 0);
         bool hasWarning = false;
         for (const auto& d : p.diagnostics())
             if (d.field == QStringLiteral("children")) hasWarning = true;
@@ -2061,11 +2122,11 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
 
-        const WidgetDef* btn = findByKey(widgets, "btn");
-        QVERIFY(btn);
-        QCOMPARE(btn->widgetId, uint8_t(0x10));
-        QCOMPARE(btn->children.size(), 2);
-        const WidgetDef* status = findByKey(btn->children, "btn.status");
+        int btnRow = findRowByKey(widgets, "btn");
+        QVERIFY(btnRow >= 0);
+        QCOMPARE(widgets[btnRow].widgetId, uint8_t(0x10));
+        QCOMPARE(childrenOf(widgets, btnRow).size(), 2);
+        const WidgetDef* status = findByKey(widgets, "btn.status");
         QVERIFY(status);
         /* btn=0x10, btn.status=0x11 (caption consumed no slot) */
         QCOMPARE(status->widgetId, uint8_t(0x11));
@@ -2093,9 +2154,10 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QVERIFY(p.diagnostics().isEmpty());
-        QCOMPARE(widgets[0].children.size(), 1);
-        QCOMPARE(widgets[0].children[0].type,  WidgetType::Led);
-        QCOMPARE(widgets[0].children[0].label, QStringLiteral("Armed"));
+        QList<const WidgetDef*> children = childrenOf(widgets, 0);
+        QCOMPARE(children.size(), 1);
+        QCOMPARE(children[0]->type,  WidgetType::Led);
+        QCOMPARE(children[0]->label, QStringLiteral("Armed"));
     }
 
     /* A button child with type: rgbled parses correctly via real YAML text
@@ -2114,8 +2176,9 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QVERIFY(p.diagnostics().isEmpty());
-        QCOMPARE(widgets[0].children.size(), 1);
-        QCOMPARE(widgets[0].children[0].type, WidgetType::RgbLed);
+        QList<const WidgetDef*> children = childrenOf(widgets, 0);
+        QCOMPARE(children.size(), 1);
+        QCOMPARE(children[0]->type, WidgetType::RgbLed);
     }
 
     /* A button child with type: display parses correctly via real YAML text —
@@ -2135,9 +2198,10 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QVERIFY(p.diagnostics().isEmpty());
-        QCOMPARE(widgets[0].children.size(), 1);
-        QCOMPARE(widgets[0].children[0].type,  WidgetType::Display);
-        QCOMPARE(widgets[0].children[0].label, QStringLiteral("Volts"));
+        QList<const WidgetDef*> children = childrenOf(widgets, 0);
+        QCOMPARE(children.size(), 1);
+        QCOMPARE(children[0]->type,  WidgetType::Display);
+        QCOMPARE(children[0]->label, QStringLiteral("Volts"));
     }
 
     /* A button child with any widget type is now accepted (not just led). */
@@ -2155,9 +2219,10 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].children.size(), 1);
-        QCOMPARE(widgets[0].children[0].type,  WidgetType::Toggle);
-        QCOMPARE(widgets[0].children[0].label, QStringLiteral("Enable"));
+        QList<const WidgetDef*> children = childrenOf(widgets, 0);
+        QCOMPARE(children.size(), 1);
+        QCOMPARE(children[0]->type,  WidgetType::Toggle);
+        QCOMPARE(children[0]->label, QStringLiteral("Enable"));
     }
 
     /* A button with no type field produces an Unknown-type child (not an Error). */
@@ -2175,8 +2240,9 @@ private slots:
         QString name, version;
         p.parse(yaml, widgets, name, version);
         /* Parse may warn about unknown type but must not hard-fail the whole YAML */
-        QCOMPARE(widgets[0].children.size(), 1);
-        QCOMPARE(widgets[0].children[0].type, WidgetType::Unknown);
+        QList<const WidgetDef*> children = childrenOf(widgets, 0);
+        QCOMPARE(children.size(), 1);
+        QCOMPARE(children[0]->type, WidgetType::Unknown);
     }
 
     /* A button can have multiple children (no "at most 1" restriction). */
@@ -2196,7 +2262,7 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QVERIFY(p.diagnostics().isEmpty());
-        QCOMPARE(widgets[0].children.size(), 2);
+        QCOMPARE(childrenOf(widgets, 0).size(), 2);
     }
 
     /* debug_state on a button child is propagated to child.debugValue. */
@@ -2214,19 +2280,20 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        QCOMPARE(widgets[0].children.size(), 1);
-        QCOMPARE(widgets[0].children[0].debugValue, QVariant(true));
+        QList<const WidgetDef*> children = childrenOf(widgets, 0);
+        QCOMPARE(children.size(), 1);
+        QCOMPARE(children[0]->debugValue, QVariant(true));
     }
 
-    /* ── Increment 2: button face row/grid nesting ───────────────────── */
+    /* ── button face row/grid nesting ───────────────── */
 
     /* A grid nested inside a button face is transparent to ID assignment,
      * matching top-level container semantics — the grid itself gets
      * widgetId 0 (no container name in the path), and its led grandchild
      * gets a real, non-zero ID prefixed by the BUTTON's own path (not the
      * grid's throwaway key). Regression guard for collectPathsRecursive's
-     * button-child loop (previously flat, one level only) and
-     * buildTopLevelWidget's Row/Grid idPrefix threading. */
+     * button-child loop (previously flat, one level only) and buildWidget's
+     * Row/Grid idPrefix threading. */
     void button_gridChild_ledGrandchild_getsRealId()
     {
         const char* yaml =
@@ -2247,20 +2314,23 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
 
-        const WidgetDef* btn = findByKey(widgets, "btn");
-        QVERIFY(btn);
-        QCOMPARE(btn->widgetId, uint8_t(0x10));
-        QCOMPARE(btn->children.size(), 1);
+        int btnRow = findRowByKey(widgets, "btn");
+        QVERIFY(btnRow >= 0);
+        QCOMPARE(widgets[btnRow].widgetId, uint8_t(0x10));
+        QList<const WidgetDef*> btnChildren = childrenOf(widgets, btnRow);
+        QCOMPARE(btnChildren.size(), 1);
 
-        const WidgetDef& face = btn->children[0];
-        QCOMPARE(face.type, WidgetType::Grid);
-        QCOMPARE(face.widgetId, uint8_t(0));   /* container: transparent, no ID */
-        QCOMPARE(face.children.size(), 1);
+        const WidgetDef* face = btnChildren[0];
+        QCOMPARE(face->type, WidgetType::Grid);
+        QCOMPARE(face->widgetId, uint8_t(0));   /* container: transparent, no ID */
+        int faceRow = findRowByKey(widgets, "btn.face");
+        QList<const WidgetDef*> faceChildren = childrenOf(widgets, faceRow);
+        QCOMPARE(faceChildren.size(), 1);
 
-        const WidgetDef& status = face.children[0];
-        QCOMPARE(status.type, WidgetType::Led);
+        const WidgetDef* status = faceChildren[0];
+        QCOMPARE(status->type, WidgetType::Led);
         /* btn=0x10, btn.status=0x11 — "face" contributes no path segment */
-        QCOMPARE(status.widgetId, uint8_t(0x11));
+        QCOMPARE(status->widgetId, uint8_t(0x11));
 
         const WidgetDef* zzz = findByKey(widgets, "zzz_toggle");
         QVERIFY(zzz);
@@ -2288,15 +2358,18 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
 
-        const WidgetDef* btn = findByKey(widgets, "btn");
-        QVERIFY(btn);
-        QCOMPARE(btn->children.size(), 1);
-        const WidgetDef& face = btn->children[0];
-        QCOMPARE(face.type, WidgetType::Row);
-        QCOMPARE(face.widgetId, uint8_t(0));
-        QCOMPARE(face.children.size(), 1);
-        QCOMPARE(face.children[0].type, WidgetType::RgbLed);
-        QCOMPARE(face.children[0].widgetId, uint8_t(0x11));
+        int btnRow = findRowByKey(widgets, "btn");
+        QVERIFY(btnRow >= 0);
+        QList<const WidgetDef*> btnChildren = childrenOf(widgets, btnRow);
+        QCOMPARE(btnChildren.size(), 1);
+        const WidgetDef* face = btnChildren[0];
+        QCOMPARE(face->type, WidgetType::Row);
+        QCOMPARE(face->widgetId, uint8_t(0));
+        int faceRow = findRowByKey(widgets, "btn.face");
+        QList<const WidgetDef*> faceChildren = childrenOf(widgets, faceRow);
+        QCOMPARE(faceChildren.size(), 1);
+        QCOMPARE(faceChildren[0]->type, WidgetType::RgbLed);
+        QCOMPARE(faceChildren[0]->widgetId, uint8_t(0x11));
     }
 
     /* A direct excluded interactive type (toggle) in a button face emits a
@@ -2326,8 +2399,9 @@ private slots:
         QVERIFY(hasWarning);
 
         /* Still parses and would render — not stripped, just flagged. */
-        QCOMPARE(widgets[0].children.size(), 1);
-        QCOMPARE(widgets[0].children[0].type, WidgetType::Toggle);
+        QList<const WidgetDef*> children = childrenOf(widgets, 0);
+        QCOMPARE(children.size(), 1);
+        QCOMPARE(children[0]->type, WidgetType::Toggle);
     }
 
     /* The excluded-type warning walks the FULL recursive face subtree, not
@@ -2490,17 +2564,19 @@ private slots:
         QVERIFY(p.parse(yaml, widgets, name, version));
         QVERIFY(p.diagnostics().isEmpty());
 
-        const WidgetDef* btn = findByKey(widgets, "btn");
-        QVERIFY(btn);
-        QCOMPARE(btn->widgetId, uint8_t(0x10));
-        QCOMPARE(btn->children.size(), 1);
+        int btnRow = findRowByKey(widgets, "btn");
+        QVERIFY(btnRow >= 0);
+        QCOMPARE(widgets[btnRow].widgetId, uint8_t(0x10));
+        QList<const WidgetDef*> btnChildren = childrenOf(widgets, btnRow);
+        QCOMPARE(btnChildren.size(), 1);
 
-        const WidgetDef& face = btn->children[0];
-        QCOMPARE(face.children.size(), 3);
+        int faceRow = findRowByKey(widgets, "btn.face");
+        QList<const WidgetDef*> faceChildren = childrenOf(widgets, faceRow);
+        QCOMPARE(faceChildren.size(), 3);
 
-        const WidgetDef* a = findByKey(face.children, "a");
-        const WidgetDef* b = findByKey(face.children, "b");
-        const WidgetDef* c = findByKey(face.children, "c");
+        const WidgetDef* a = findByKey(widgets, "a");
+        const WidgetDef* b = findByKey(widgets, "b");
+        const WidgetDef* c = findByKey(widgets, "c");
         QVERIFY(a); QVERIFY(b); QVERIFY(c);
         QCOMPARE(a->type, WidgetType::Led);
         QCOMPARE(a->widgetId, uint8_t(0x11));
@@ -2510,7 +2586,7 @@ private slots:
         QCOMPARE(c->widgetId, uint8_t(0));   /* decoration: no ID slot consumed */
     }
 
-    /* ── Problem 3: non-map widget entry emits a warning ─────────────── */
+    /* ── Non-map widget entry emits a warning ─────────────── */
 
     /* A scalar entry in the widgets map (e.g. "foo: bar") must emit a
      * Warning and continue — parse succeeds for any valid siblings. */

@@ -4,8 +4,25 @@
 /**
  * Plain-data structs for uDisplay widget definitions parsed from YAML.
  *
- * YamlParser produces a QList<WidgetDef>.
- * WidgetModel wraps that list for QML.
+ * YamlParser produces a QList<WidgetDef> — a FLAT list. Every widget,
+ * regardless of nesting depth in the source YAML (button face children, row/
+ * grid/section layout children, button-group items, dpad items), is its own
+ * row in declaration order. `parentId` links a row to its container: -1 for
+ * top-level widgets, otherwise the flat-list row index of the parent widget
+ * (NOT the parent's widgetId — containers like row/grid/section always have
+ * widgetId 0, so multiple sibling containers would collide if parentId were
+ * widgetId-keyed; and 0 is itself a valid row index, so it cannot double as
+ * the "no parent" sentinel either — that's why -1, not 0, means top-level).
+ * parentId is only valid until the next
+ * WidgetModel::setWidgets() call (row indices are reassigned on every reset).
+ *
+ * Every type-specific attribute (slider min/max/step, button shape/color,
+ * dropdown items, section collapsible, ...) lives in `props`, a QVariantMap
+ * built once by YamlParser at parse time — not projected on every QML read.
+ * WidgetModel wraps the flat list for QML; a container's children are
+ * obtained via WidgetModel::childModel(parentId), not by enumerating an
+ * "items" key inside props.
+ *
  * DeviceController owns both.
  */
 #pragma once
@@ -13,6 +30,7 @@
 #include <QList>
 #include <QString>
 #include <QVariant>
+#include <QVariantMap>
 #include <cstdint>
 
 /* ── Widget type enum ───────────────────────────────────────────────────── */
@@ -61,40 +79,18 @@ struct StyleToken {
     QString error        = QStringLiteral("#e05555");
 };
 
-/* ── Dropdown item ────────────────────────────────────────────────────────── */
-struct DropdownItem {
-    QString key;    /* YAML key, e.g. "sta" */
-    QString label;  /* Display label, e.g. "Station" */
-};
-
-/* ── ButtonGroup item ────────────────────────────────────────────────────── */
-/* NOTE: ButtonGroupItems intentionally do NOT participate in the unified
- * WidgetDef.children model. button-group items are events-only (BUTTON_PRESS)
- * with no state pushed from the device — they have no value model and do not
- * need recursive child rendering. WidgetDef.children is for stateful children. */
-struct ButtonGroupItem {
-    QString  keyPath;   /* e.g. "mode_sel.ac" */
-    uint8_t  widgetId;
-    QString  label;
-    QString  position;  /* "top"|"right"|"bottom"|"left"|"center" — dpad only */
-};
-
-/* ── Dpad item ────────────────────────────────────────────────────── */
-struct DpadItem {
-    QString  keyPath;   /* e.g. "mode_sel.ac" */
-    uint8_t  widgetId;
-    QString  label;
-    QString  position;  /* "top"|"right"|"bottom"|"left"|"center" */
-};
-
-
 /* ── Main widget definition ─────────────────────────────────────────────── */
 struct WidgetDef {
-    /* Common */
+    /* Common — every widget, regardless of type, has these. */
     QString    keyPath;     /* YAML key path, e.g. "fire_btn" or "mode_sel.ac" */
-    uint8_t    widgetId;    /* 0x10–0xFF, assigned by YamlParser */
+    uint8_t    widgetId;    /* 0x10–0xFF, assigned by YamlParser; 0 for containers/decorations */
     WidgetType type;
     QString    label;
+
+    /* parentId: flat-list row index of the containing widget, or -1 for
+     * top-level. See file header comment — NOT a widgetId, and NOT 0 for
+     * "no parent" (0 is a valid row index). */
+    int parentId = -1;
 
     /* Runtime properties (reset to these on reconnect) */
     bool enabled = true;
@@ -107,75 +103,28 @@ struct WidgetDef {
      * applied by DeviceController::applyParsedYaml() in design mode only. */
     QVariant debugValue;
 
-    /* ── Type-specific fields ─────────────────────────────────────── */
+    /* Visual style variant, meaning depends on type (display: "default"|
+     * "large"; label: "heading"|"body"|"caption"; empty for types that don't
+     * have one). Also copied into props["style"] at parse time so existing
+     * QML (DisplayWidget.qml, LabelWidget.qml) keeps reading props.style
+     * unchanged. */
+    QString style;
 
-    /* display */
-    QString unit;
-    QString format;        /* printf-style, default "%.2f" */
-    QString displayStyle;  /* "default" | "large" */
-
-    /* button */
-    QString          shape;   /* "rect" | "circle" | "square" */
-    QString          color;   /* "#rrggbb" */
-
-    /* button-group */
-    QString               groupLayout; /* "grid" | "dpad" */
-    QList<ButtonGroupItem> groupItems;
-
-    /* dpad */
-    QList<DpadItem> dpadItems;
-
-
-    /* slider */
-    double  sliderMin  = 0.0;
-    double  sliderMax  = 100.0;
-    double  sliderStep = 1.0;
-    /* unit field is shared with display */
-
-    /* text */
-    QString textMode;        /* "readonly" | "rw" */
-    QString defaultTextMode; /* YAML-declared default, used by resetProperty */
-    QString textPlaceholder;
-    int     textMaxLength = 255;
-
-    /* dropdown */
-    QList<DropdownItem> dropdownItems;
-
-    /* label */
-    QString labelText;   /* display text */
-    QString labelStyle;  /* "heading" | "body" | "caption" */
-    QString labelAlign  = QStringLiteral("left"); /* "left"|"right"|"center"|"justify" */
-
-    /* layout */
-    int flex        = 0; /* layout weight inside row/grid (0 = auto-width, no stretch) */
-    int gridColumns = 2; /* column count for grid containers */
-
-    /* Content alignment ("left"|"right"|"center"). Dual purpose, same
-     * convention as `flex` above: on a row/grid WidgetDef, the resolved
-     * default applied to children that don't declare their own (always a
-     * concrete value — YamlParser fills "left" when the row/grid's own
-     * YAML omits align:). On a WidgetDef that IS a row/grid child, an
-     * empty string means "no override, inherit the parent's align" — only
-     * a non-empty value here (from the child's own align: key) overrides
-     * the container's default for that one child. Do NOT default this to
-     * "left": that would make every child indistinguishable from one that
-     * explicitly opted into left-alignment, breaking the inherit-by-default
-     * behavior. */
+    /* Layout weight/alignment inside a row/grid container. flex=0 means
+     * auto-width (no stretch). align is a null QString by default — see the
+     * detailed inherit-vs-override note this used to carry in WidgetDef;
+     * still true here: only a non-empty value overrides the parent
+     * container's own resolved default. */
+    int     flex  = 0;
     QString align;
 
-    /* Position within a `dpad` container's cross layout
-     * ("top"|"right"|"bottom"|"left"|"center"). Only meaningful for a button
-     * widget that is a direct child of a dpad container; empty otherwise. */
-    QString position;
-
-    /* section collapse */
-    bool collapsible    = false; /* section only: can the user collapse it */
-    int  sectionOwnerRow = -1;   /* flat-model row of parent collapsible section, or -1 */
-
-    /* children — unified child list for button (face widgets) and row/grid/section
-     * (layout children). Depth-1 for PR 1; PR 2 extends QML rendering to
-     * unlimited depth. See TODO-031. */
-    QList<WidgetDef> children;
+    /* Every other, type-specific attribute (slider min/max/step, button
+     * shape/color, dropdown items, section collapsible, dpad/button-group
+     * item position, grid columns, button-group layout, text mode/
+     * placeholder/maxlength, ...) — built once by YamlParser at parse time.
+     * WidgetModel's PropsRole returns this directly; it does not rebuild it
+     * per read. */
+    QVariantMap props;
 };
 
 /* ── WidgetType helpers ─────────────────────────────────────────────────── */

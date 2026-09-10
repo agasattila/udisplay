@@ -5,10 +5,10 @@
  * WidgetModel. Takes the same QList<WidgetDef> that YamlParser::parse() and
  * DeviceController::applyParsedYaml()/onBootstrapSucceeded() already produce.
  *
- * Prints every field relevant to each widget's type (mirroring the per-type
- * switch in WidgetModel::buildPropsMap), plus fields that map is deliberately
- * reduced from (defaultTextMode, sectionOwnerRow) since a debug dump is meant
- * to show full internal state, not just what QML needs to render.
+ * Prints every field relevant to each widget's type (the common fields plus
+ * whatever YamlParser wrote into `props` for that type), plus `parentId` —
+ * a debug dump is meant to show full internal state, not just what QML
+ * needs to render.
  *
  * value and debugValue are printed as two separate fields: value only ever
  * carries a device-pushed STATE_UPDATE (real mode) or a design-mode preview

@@ -2,14 +2,20 @@
  * WidgetModel unit tests.
  *
  * Covers:
- *   - setValue for top-level widgets (ValueRole + dataChanged)
- *   - setValue for button children (PropsRole + bc.value storage)  ← regression test
- *   - setProperty / resetProperty for ENABLED, VISIBLE, MODE
- *   - data() PropsRole for all 5 typed widgets
- *   - setWidgets populates m_childIndex correctly
+ *   - setValue/setProperty/resetProperty for a widget at ANY nesting depth —
+ *     always targets that widget's OWN row now (WidgetModel is a flat list;
+ *     see WidgetModel.h). This inverts the pre-flattening behavior, where a
+ *     descendant mutation emitted PropsRole on its top-level ancestor
+ *     instead — setValue_leafAtAnyDepth_emitsValueRoleOnOwnRow below is the
+ *     regression-rule test for that inversion.
+ *   - data() PropsRole for all typed widgets
+ *   - childModel(parentId): row count, role passthrough, pointer stability
+ *   - setWidgets populates m_idToRow correctly (single hash, every depth)
  *   - clear() resets all state
+ *   - toggleSection via parentId-chain visibility
  */
 #include <QtTest>
+#include <QAbstractListModel>
 #include "WidgetModel.h"
 #include "WidgetDef.h"
 #include "Protocol.h"
@@ -17,36 +23,37 @@
 /* ── Fixture helpers ─────────────────────────────────────────────────────── */
 
 /* Build a minimal toggle widget. */
-static WidgetDef makeToggle(uint8_t id, const QString& key)
+static WidgetDef makeToggle(uint8_t id, const QString& key, int parentId = -1)
 {
     WidgetDef w;
     w.keyPath  = key;
     w.widgetId = id;
     w.type     = WidgetType::Toggle;
     w.label    = QStringLiteral("Toggle");
+    w.parentId = parentId;
     return w;
 }
 
-/* Build a button with one LED child. */
-static WidgetDef makeButtonWithLed(uint8_t btnId, uint8_t ledId)
+/* Flat list: [button, led]. */
+static QList<WidgetDef> makeButtonWithLed(uint8_t btnId, uint8_t ledId)
 {
-    WidgetDef w;
-    w.keyPath  = QStringLiteral("btn");
-    w.widgetId = btnId;
-    w.type     = WidgetType::Button;
-    w.label    = QStringLiteral("Fire");
-    w.shape    = QStringLiteral("circle");
+    WidgetDef btn;
+    btn.keyPath  = QStringLiteral("btn");
+    btn.widgetId = btnId;
+    btn.type     = WidgetType::Button;
+    btn.label    = QStringLiteral("Fire");
+    btn.props[QStringLiteral("shape")] = QStringLiteral("circle");
 
     WidgetDef led;
     led.keyPath  = QStringLiteral("btn.led");
     led.widgetId = ledId;
     led.type     = WidgetType::Led;
     led.label    = QStringLiteral("Active");
-    w.children.append(led);
-    return w;
+    led.parentId = 0;
+
+    return { btn, led };
 }
 
-/* Build a display widget. */
 static WidgetDef makeDisplay(uint8_t id)
 {
     WidgetDef w;
@@ -54,64 +61,66 @@ static WidgetDef makeDisplay(uint8_t id)
     w.widgetId = id;
     w.type     = WidgetType::Display;
     w.label    = QStringLiteral("Voltage");
-    w.unit     = QStringLiteral("V");
-    w.format   = QStringLiteral("%.3f");
-    w.displayStyle = QStringLiteral("large");
+    w.style    = QStringLiteral("large");
+    w.props[QStringLiteral("unit")]   = QStringLiteral("V");
+    w.props[QStringLiteral("format")] = QStringLiteral("%.3f");
+    w.props[QStringLiteral("style")]  = w.style;
     return w;
 }
 
-/* Build a slider widget. */
 static WidgetDef makeSlider(uint8_t id)
 {
     WidgetDef w;
-    w.keyPath   = QStringLiteral("rate");
-    w.widgetId  = id;
-    w.type      = WidgetType::Slider;
-    w.label     = QStringLiteral("Rate");
-    w.sliderMin  = 1.0;
-    w.sliderMax  = 100.0;
-    w.sliderStep = 0.5;
-    w.unit       = QStringLiteral("Hz");
+    w.keyPath  = QStringLiteral("rate");
+    w.widgetId = id;
+    w.type     = WidgetType::Slider;
+    w.label    = QStringLiteral("Rate");
+    w.props[QStringLiteral("min")]  = 1.0;
+    w.props[QStringLiteral("max")]  = 100.0;
+    w.props[QStringLiteral("step")] = 0.5;
+    w.props[QStringLiteral("unit")] = QStringLiteral("Hz");
     return w;
 }
 
-/* Build a text widget. */
 static WidgetDef makeText(uint8_t id)
 {
     WidgetDef w;
-    w.keyPath        = QStringLiteral("ssid");
-    w.widgetId       = id;
-    w.type           = WidgetType::Text;
-    w.label          = QStringLiteral("SSID");
-    w.textMode        = QStringLiteral("rw");
-    w.defaultTextMode = QStringLiteral("rw");
-    w.textPlaceholder = QStringLiteral("Enter SSID");
-    w.textMaxLength  = 32;
+    w.keyPath  = QStringLiteral("ssid");
+    w.widgetId = id;
+    w.type     = WidgetType::Text;
+    w.label    = QStringLiteral("SSID");
+    w.props[QStringLiteral("mode")]        = QStringLiteral("rw");
+    w.props[QStringLiteral("defaultMode")] = QStringLiteral("rw");
+    w.props[QStringLiteral("placeholder")] = QStringLiteral("Enter SSID");
+    w.props[QStringLiteral("maxlength")]   = 32;
     return w;
 }
 
-/* Build a button-group with two items. */
-static WidgetDef makeButtonGroup(uint8_t groupId, uint8_t dcId, uint8_t acId)
+/* Flat list: [group, dc-item, ac-item]. */
+static QList<WidgetDef> makeButtonGroup(uint8_t groupId, uint8_t dcId, uint8_t acId)
 {
     WidgetDef w;
-    w.keyPath     = QStringLiteral("mode");
-    w.widgetId    = groupId;
-    w.type        = WidgetType::ButtonGroup;
-    w.label       = QStringLiteral("Mode");
-    w.groupLayout = QStringLiteral("grid");
+    w.keyPath  = QStringLiteral("mode");
+    w.widgetId = groupId;
+    w.type     = WidgetType::ButtonGroup;
+    w.label    = QStringLiteral("Mode");
+    w.props[QStringLiteral("layout")] = QStringLiteral("grid");
 
-    ButtonGroupItem dc;
+    WidgetDef dc;
     dc.keyPath  = QStringLiteral("mode.dc");
     dc.widgetId = dcId;
+    dc.type     = WidgetType::Button;
     dc.label    = QStringLiteral("DCV");
-    w.groupItems.append(dc);
+    dc.parentId = 0;
 
-    ButtonGroupItem ac;
+    WidgetDef ac;
     ac.keyPath  = QStringLiteral("mode.ac");
     ac.widgetId = acId;
+    ac.type     = WidgetType::Button;
     ac.label    = QStringLiteral("ACV");
-    w.groupItems.append(ac);
-    return w;
+    ac.parentId = 0;
+
+    return { w, dc, ac };
 }
 
 /* Retrieve a role value from the model at the given row. */
@@ -148,20 +157,20 @@ private slots:
 
     void setWidgets_childIndex_populated()
     {
-        /* After setWidgets, setValue on a child ID must route to the parent row.
-         * This is the regression guard for the ButtonWidget LED bug. */
+        /* After setWidgets, setValue on a child ID must route to ITS OWN
+         * row (every widget, any depth, is a real row now — this is the
+         * regression guard for the ButtonWidget LED bug, updated for the
+         * flat model). */
         WidgetModel m;
-        m.setWidgets({ makeButtonWithLed(0x10, 0x11) });
+        m.setWidgets(makeButtonWithLed(0x10, 0x11));
 
         QSignalSpy spy(&m, &WidgetModel::dataChanged);
-        m.setValue(0x11, true); /* child LED ID */
+        m.setValue(0x11, true); /* child LED ID, row 1 */
 
-        /* PropsRole on the parent row (0) must have been notified */
         QCOMPARE(spy.count(), 1);
-        QModelIndex parentIdx = m.index(0);
-        QCOMPARE(spy.at(0).at(0).value<QModelIndex>(), parentIdx);
+        QCOMPARE(spy.at(0).at(0).value<QModelIndex>(), m.index(1));
         QVector<int> roles = spy.at(0).at(2).value<QVector<int>>();
-        QVERIFY(roles.contains(WidgetModel::PropsRole));
+        QVERIFY(roles.contains(WidgetModel::ValueRole));
     }
 
     void setWidgets_replaceClears()
@@ -188,12 +197,12 @@ private slots:
     {
         /* After clear(), a subsequent setValue on the old child ID must be a no-op. */
         WidgetModel m;
-        m.setWidgets({ makeButtonWithLed(0x10, 0x11) });
+        m.setWidgets(makeButtonWithLed(0x10, 0x11));
         m.clear();
 
         QSignalSpy spy(&m, &WidgetModel::dataChanged);
         m.setValue(0x11, true);
-        QCOMPARE(spy.count(), 0); /* no-op: child index cleared */
+        QCOMPARE(spy.count(), 0); /* no-op: id→row index cleared */
     }
 
     /* ── setValue — top-level ─────────────────────────────────────────── */
@@ -226,50 +235,31 @@ private slots:
         QCOMPARE(spy.count(), 0);
     }
 
-    /* ── setValue — button child (REGRESSION TEST for LED bug) ────────── */
+    /* ── setValue — descendant (REGRESSION TEST) ──────────────────────── */
 
-    void setValue_buttonChild_storesValueInBc()
+    void setValue_leafAtAnyDepth_emitsValueRoleOnOwnRow()
     {
+        /* THE regression-rule test for this refactor: a widget nested at
+         * any depth, when its value changes, must emit dataChanged with
+         * ValueRole targeted at ITS OWN row — not PropsRole on some
+         * ancestor. Before the flattening, this exact scenario
+         * (setValue on a button's LED child) emitted PropsRole on the
+         * parent row and explicitly did NOT emit ValueRole at all. A
+         * regression back to that whole-branch-rebuild behavior must fail
+         * this test. */
         WidgetModel m;
-        m.setWidgets({ makeButtonWithLed(0x10, 0x11) });
-
-        /* Set the LED (child 0x11) value to true */
-        m.setValue(0x11, true);
-
-        /* Retrieve via PropsRole — children serialised under "items" key */
-        QVariant propsVar = roleAt(m, 0, WidgetModel::PropsRole);
-        QVariantMap props = propsVar.toMap();
-        QVERIFY(props.contains(QStringLiteral("items")));
-        QVariantList kids = props[QStringLiteral("items")].toList();
-        QCOMPARE(kids.size(), 1);
-        QVariantMap kid = kids.at(0).toMap();
-        QCOMPARE(kid[QStringLiteral("widgetId")].toInt(), 0x11);
-        QCOMPARE(kid[QStringLiteral("value")].toBool(), true);
-    }
-
-    void setValue_buttonChild_emitsPropsRoleOnParent()
-    {
-        WidgetModel m;
-        m.setWidgets({ makeButtonWithLed(0x10, 0x11) });
+        m.setWidgets(makeButtonWithLed(0x10, 0x11));
         QSignalSpy spy(&m, &WidgetModel::dataChanged);
         m.setValue(0x11, true);
 
         QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.at(0).at(0).value<QModelIndex>(), m.index(1));
         QVector<int> roles = spy.at(0).at(2).value<QVector<int>>();
-        QVERIFY(roles.contains(WidgetModel::PropsRole));
-        /* Must NOT emit ValueRole on the child (children are not in m_idToRow) */
-        QVERIFY(!roles.contains(WidgetModel::ValueRole));
-    }
+        QVERIFY(roles.contains(WidgetModel::ValueRole));
+        QCOMPARE(roleAt(m, 1, WidgetModel::ValueRole).toBool(), true);
 
-    void setValue_buttonChild_doesNotEmitValueRoleForParent()
-    {
-        /* Sanity: a child setState emits PropsRole, not ValueRole, on the parent */
-        WidgetModel m;
-        m.setWidgets({ makeButtonWithLed(0x10, 0x11) });
-        QSignalSpy spy(&m, &WidgetModel::dataChanged);
-        m.setValue(0x11, false);
-        QVector<int> roles = spy.at(0).at(2).value<QVector<int>>();
-        QVERIFY(!roles.contains(WidgetModel::ValueRole));
+        /* Parent row (0) must NOT have been touched at all. */
+        QCOMPARE(spy.count(), 1); /* only the one signal, for row 1 */
     }
 
     /* ── setProperty ──────────────────────────────────────────────────── */
@@ -316,7 +306,7 @@ private slots:
     {
         WidgetModel m;
         m.setWidgets({ makeText(0x10) });
-        /* textMode starts as "rw" from makeText; set to readonly (0) */
+        /* mode starts as "rw" from makeText; set to readonly (0) */
         m.setProperty(0x10, Proto::PROP_MODE, 0);
         QVariantMap props = roleAt(m, 0, WidgetModel::PropsRole).toMap();
         QCOMPARE(props[QStringLiteral("mode")].toString(),
@@ -362,12 +352,12 @@ private slots:
         QCOMPARE(spy.count(), 0);
     }
 
-    /* ── TODO-028: resetProperty PROP_MODE restores YAML default ─────── */
+    /* ── resetProperty PROP_MODE restores YAML default ────────────────── */
 
     void resetProperty_textMode_restoresYamlDefault()
     {
         WidgetModel m;
-        m.setWidgets({ makeText(0x10) }); /* defaultTextMode = "rw" */
+        m.setWidgets({ makeText(0x10) }); /* defaultMode = "rw" */
 
         /* Device sets mode to readonly */
         m.setProperty(0x10, Proto::PROP_MODE, 0);
@@ -386,7 +376,7 @@ private slots:
     void resetProperty_textMode_alreadyDefault_noSignal()
     {
         WidgetModel m;
-        m.setWidgets({ makeText(0x10) }); /* textMode already == defaultTextMode */
+        m.setWidgets({ makeText(0x10) }); /* mode already == defaultMode */
         QSignalSpy spy(&m, &WidgetModel::dataChanged);
         m.resetProperty(0x10, Proto::PROP_MODE);
         QCOMPARE(spy.count(), 0);
@@ -406,31 +396,34 @@ private slots:
 
     void data_propsRole_button()
     {
+        /* Face children are no longer enumerated inside props — they are
+         * ordinary flat rows of their own, reached via their parent's
+         * widgetId (see WidgetModel::childModel()), not via a props["items"]
+         * key. */
         WidgetModel m;
-        m.setWidgets({ makeButtonWithLed(0x10, 0x11) });
+        m.setWidgets(makeButtonWithLed(0x10, 0x11));
         QVariantMap props = roleAt(m, 0, WidgetModel::PropsRole).toMap();
         QCOMPARE(props[QStringLiteral("shape")].toString(), QStringLiteral("circle"));
         QVERIFY(!props.contains(QStringLiteral("color")));
-        QVariantList kids = props[QStringLiteral("items")].toList();
-        QCOMPARE(kids.size(), 1);
-        QVariantMap kid = kids.at(0).toMap();
-        QCOMPARE(kid[QStringLiteral("widgetId")].toInt(), 0x11);
-        QCOMPARE(kid[QStringLiteral("label")].toString(), QStringLiteral("Active"));
+        QVERIFY(!props.contains(QStringLiteral("items")));
+
+        QCOMPARE(roleAt(m, 1, WidgetModel::WidgetIdRole).toInt(), 0x11);
+        QCOMPARE(roleAt(m, 1, WidgetModel::LabelRole).toString(), QStringLiteral("Active"));
         /* value starts as null (no setValue called yet) */
-        QVERIFY(!kid[QStringLiteral("value")].isValid());
+        QVERIFY(!roleAt(m, 1, WidgetModel::ValueRole).isValid());
     }
 
     void data_propsRole_buttonGroup()
     {
         WidgetModel m;
-        m.setWidgets({ makeButtonGroup(0x10, 0x11, 0x12) });
+        m.setWidgets(makeButtonGroup(0x10, 0x11, 0x12));
         QVariantMap props = roleAt(m, 0, WidgetModel::PropsRole).toMap();
         QCOMPARE(props[QStringLiteral("layout")].toString(), QStringLiteral("grid"));
-        QVariantList items = props[QStringLiteral("items")].toList();
-        QCOMPARE(items.size(), 2);
-        /* Items preserve declaration order (dc first, ac second) */
-        QCOMPARE(items.at(0).toMap()[QStringLiteral("label")].toString(), QStringLiteral("DCV"));
-        QCOMPARE(items.at(1).toMap()[QStringLiteral("label")].toString(), QStringLiteral("ACV"));
+        QVERIFY(!props.contains(QStringLiteral("items")));
+
+        /* Items are ordinary flat rows now, declaration order preserved. */
+        QCOMPARE(roleAt(m, 1, WidgetModel::LabelRole).toString(), QStringLiteral("DCV"));
+        QCOMPARE(roleAt(m, 2, WidgetModel::LabelRole).toString(), QStringLiteral("ACV"));
     }
 
     void data_propsRole_slider()
@@ -496,6 +489,21 @@ private slots:
         QVERIFY(!m.data(QModelIndex(), WidgetModel::LabelRole).isValid());
     }
 
+    void data_parentRole_topLevelIsNegativeOne()
+    {
+        WidgetModel m;
+        m.setWidgets({ makeToggle(0x10, "t") });
+        QCOMPARE(roleAt(m, 0, WidgetModel::ParentRole).toInt(), -1);
+    }
+
+    void data_rowRole_matchesFlatIndex()
+    {
+        WidgetModel m;
+        m.setWidgets(makeButtonWithLed(0x10, 0x11));
+        QCOMPARE(roleAt(m, 0, WidgetModel::RowRole).toInt(), 0);
+        QCOMPARE(roleAt(m, 1, WidgetModel::RowRole).toInt(), 1);
+    }
+
     /* setProperty PROP_MODE on a non-Text widget must be a silent no-op. */
     void setProperty_mode_onNonText_isNoop()
     {
@@ -510,14 +518,17 @@ private slots:
 
     void data_propsRole_dropdown()
     {
+        /* Dropdown items are config-only (key/label pairs, no widgetId, no
+         * state — the schema never assigns them protocol IDs) so they stay
+         * inside props["items"] as a plain QVariantList; they never became
+         * flat rows. */
         WidgetDef w;
         w.keyPath  = QStringLiteral("mode");
         w.widgetId = 0x10;
         w.type     = WidgetType::Dropdown;
-        DropdownItem sta; sta.key = QStringLiteral("sta"); sta.label = QStringLiteral("Station");
-        DropdownItem ap;  ap.key  = QStringLiteral("ap");  ap.label  = QStringLiteral("AP");
-        w.dropdownItems.append(sta);
-        w.dropdownItems.append(ap);
+        QVariantMap sta; sta[QStringLiteral("key")] = QStringLiteral("sta"); sta[QStringLiteral("label")] = QStringLiteral("Station");
+        QVariantMap ap;  ap[QStringLiteral("key")]  = QStringLiteral("ap");  ap[QStringLiteral("label")]  = QStringLiteral("AP");
+        w.props[QStringLiteral("items")] = QVariantList{ sta, ap };
 
         WidgetModel m;
         m.setWidgets({ w });
@@ -532,11 +543,12 @@ private slots:
     void data_propsRole_label()
     {
         WidgetDef w;
-        w.keyPath    = QStringLiteral("title");
-        w.widgetId   = 0;
-        w.type       = WidgetType::Label;
-        w.labelText  = QStringLiteral("Hello");
-        w.labelStyle = QStringLiteral("heading");
+        w.keyPath  = QStringLiteral("title");
+        w.widgetId = 0;
+        w.type     = WidgetType::Label;
+        w.style    = QStringLiteral("heading");
+        w.props[QStringLiteral("text")]  = QStringLiteral("Hello");
+        w.props[QStringLiteral("style")] = w.style;
 
         WidgetModel m;
         m.setWidgets({ w });
@@ -545,209 +557,292 @@ private slots:
         QCOMPARE(props[QStringLiteral("style")].toString(), QStringLiteral("heading"));
     }
 
-    void data_propsRole_row_hasItems()
-    {
-        WidgetDef child1 = makeToggle(0x10, "relay");
-        child1.flex = 1;
-        WidgetDef child2 = makeToggle(0x11, "fan");
+    /* ── childModel(): children as a real model, not props["items"] ───── */
 
+    void childModel_row_exposesChildrenWithFlexAndRoles()
+    {
         WidgetDef row;
         row.keyPath  = QStringLiteral("ctrl_row");
         row.widgetId = 0;
         row.type     = WidgetType::Row;
-        row.children.append(child1);
-        row.children.append(child2);
+
+        WidgetDef child1 = makeToggle(0x10, "relay", 0);
+        child1.flex = 1;
+        WidgetDef child2 = makeToggle(0x11, "fan", 0);
 
         WidgetModel m;
-        m.setWidgets({ row });
-        QVariantMap props = roleAt(m, 0, WidgetModel::PropsRole).toMap();
-        QVariantList items = props[QStringLiteral("items")].toList();
-        QCOMPARE(items.size(), 2);
+        m.setWidgets({ row, child1, child2 });
 
-        QVariantMap item0 = items.at(0).toMap();
-        QCOMPARE(item0[QStringLiteral("widgetId")].toInt(), 0x10);
-        QCOMPARE(item0[QStringLiteral("type")].toString(),  QStringLiteral("toggle"));
-        QCOMPARE(item0[QStringLiteral("flex")].toInt(),     1);
-        QVERIFY(item0[QStringLiteral("enabled")].toBool());
-        QVERIFY(item0[QStringLiteral("visible")].toBool());
+        auto* cm = qobject_cast<QAbstractListModel*>(m.childModel(0));
+        QVERIFY(cm);
+        QCOMPARE(cm->rowCount(), 2);
+        QCOMPARE(cm->data(cm->index(0, 0), WidgetModel::WidgetIdRole).toInt(), 0x10);
+        QCOMPARE(cm->data(cm->index(0, 0), WidgetModel::FlexRole).toInt(), 1);
+        QVERIFY(cm->data(cm->index(0, 0), WidgetModel::EnabledRole).toBool());
+        QVERIFY(cm->data(cm->index(0, 0), WidgetModel::VisibleRole).toBool());
+        QCOMPARE(cm->data(cm->index(1, 0), WidgetModel::WidgetIdRole).toInt(), 0x11);
+        QCOMPARE(cm->data(cm->index(1, 0), WidgetModel::FlexRole).toInt(), 0);
     }
 
-    void data_propsRole_grid_hasColumnsAndItems()
+    void childModel_grid_exposesColumnsInOwnPropsAndChildrenSeparately()
     {
-        WidgetDef child = makeToggle(0x10, "a");
-
         WidgetDef grid;
-        grid.keyPath     = QStringLiteral("g");
-        grid.widgetId    = 0;
-        grid.type        = WidgetType::Grid;
-        grid.gridColumns = 3;
-        grid.children.append(child);
+        grid.keyPath  = QStringLiteral("g");
+        grid.widgetId = 0;
+        grid.type     = WidgetType::Grid;
+        grid.props[QStringLiteral("columns")] = 3;
+
+        WidgetDef child = makeToggle(0x10, "a", 0);
 
         WidgetModel m;
-        m.setWidgets({ grid });
-        QVariantMap props = roleAt(m, 0, WidgetModel::PropsRole).toMap();
-        QCOMPARE(props[QStringLiteral("columns")].toInt(), 3);
-        QVariantList items = props[QStringLiteral("items")].toList();
-        QCOMPARE(items.size(), 1);
+        m.setWidgets({ grid, child });
+
+        QCOMPARE(roleAt(m, 0, WidgetModel::PropsRole).toMap()[QStringLiteral("columns")].toInt(), 3);
+        auto* cm = qobject_cast<QAbstractListModel*>(m.childModel(0));
+        QVERIFY(cm);
+        QCOMPARE(cm->rowCount(), 1);
+        QCOMPARE(cm->data(cm->index(0, 0), WidgetModel::WidgetIdRole).toInt(), 0x10);
     }
 
-    /* ── container child reactive updates (unified m_childIndex) ──────── */
-
-    void setValue_containerChild_storesValueInChild()
+    void childModel_get_returnsAllRolesAsMap()
     {
-        WidgetDef child = makeToggle(0x11, "relay");
         WidgetDef row;
         row.keyPath  = QStringLiteral("r");
         row.widgetId = 0;
         row.type     = WidgetType::Row;
-        row.children.append(child);
+        WidgetDef child = makeToggle(0x10, "relay", 0);
+        child.flex = 2;
 
         WidgetModel m;
-        m.setWidgets({ row });
-        m.setValue(0x11, true);
+        m.setWidgets({ row, child });
 
-        QVariantMap props = roleAt(m, 0, WidgetModel::PropsRole).toMap();
-        QVariantList items = props[QStringLiteral("items")].toList();
-        QCOMPARE(items.size(), 1);
-        QCOMPARE(items.at(0).toMap()[QStringLiteral("value")].toBool(), true);
+        auto* cm = qobject_cast<ChildModel*>(m.childModel(0));
+        QVERIFY(cm);
+        QVariantMap item = cm->get(0);
+        QCOMPARE(item[QStringLiteral("widgetId")].toInt(), 0x10);
+        QCOMPARE(item[QStringLiteral("flex")].toInt(), 2);
+        QCOMPARE(item[QStringLiteral("type")].toString(), QStringLiteral("toggle"));
     }
 
-    void setValue_containerChild_emitsPropsRoleOnContainer()
+    void childModel_isCachedAndStableAcrossCalls()
     {
-        WidgetDef child = makeToggle(0x11, "relay");
+        WidgetModel m;
+        m.setWidgets(makeButtonWithLed(0x10, 0x11));
+        QObject* cm1 = m.childModel(0);
+        QObject* cm2 = m.childModel(0);
+        QCOMPARE(cm1, cm2);
+    }
+
+    void childModel_isRecreatedAfterReset()
+    {
+        WidgetModel m;
+        m.setWidgets(makeButtonWithLed(0x10, 0x11));
+        QObject* before = m.childModel(0);
+        m.setWidgets(makeButtonWithLed(0x12, 0x13));
+        QObject* after = m.childModel(0);
+        QVERIFY(before != after);
+    }
+
+    /* REGRESSION: every QML container (Row/Grid/ButtonGroup/Dpad, and the
+     * top-level Repeater via childModel(-1)) binds its Repeater to a
+     * ChildModel instance, not to WidgetModel itself. A live setValue()
+     * (STATE_UPDATE from the device) must still reach that ChildModel's own
+     * dataChanged, or the change never reaches the screen after initial
+     * load — this exact gap existed until ChildModel started forwarding
+     * dataChanged from its source. */
+    void childModel_forwardsDataChangedFromSource()
+    {
         WidgetDef row;
         row.keyPath  = QStringLiteral("r");
         row.widgetId = 0;
         row.type     = WidgetType::Row;
-        row.children.append(child);
+        WidgetDef child = makeToggle(0x10, "relay", 0);
 
         WidgetModel m;
-        m.setWidgets({ row });
-        QSignalSpy spy(&m, &WidgetModel::dataChanged);
-        m.setValue(0x11, true);
+        m.setWidgets({ row, child });
+
+        auto* cm = qobject_cast<QAbstractListModel*>(m.childModel(0));
+        QVERIFY(cm);
+        QSignalSpy spy(cm, &QAbstractListModel::dataChanged);
+
+        m.setValue(0x10, true);
 
         QCOMPARE(spy.count(), 1);
+        const QModelIndex idx = spy.at(0).at(0).value<QModelIndex>();
+        QCOMPARE(idx.row(), 0); /* child is ChildModel's own row 0, not the flat row */
         QVector<int> roles = spy.at(0).at(2).value<QVector<int>>();
-        QVERIFY(roles.contains(WidgetModel::PropsRole));
-        QVERIFY(!roles.contains(WidgetModel::ValueRole));
+        QVERIFY(roles.contains(WidgetModel::ValueRole));
+        QVERIFY(cm->data(cm->index(0, 0), WidgetModel::ValueRole).toBool());
     }
 
-    void setProperty_containerChild_enabled_routesToContainer()
+    /* A dataChanged emitted for a row that belongs to a DIFFERENT parent
+     * must not leak into a sibling container's ChildModel — only the
+     * matching row's own ChildModel should re-emit. */
+    void childModel_doesNotForwardDataChangedForOtherParentsRows()
     {
-        WidgetDef child = makeToggle(0x11, "relay");
+        WidgetDef rowA;
+        rowA.keyPath  = QStringLiteral("a");
+        rowA.widgetId = 0;
+        rowA.type     = WidgetType::Row;
+        WidgetDef childA = makeToggle(0x10, "a-child", 0);
+
+        WidgetDef rowB;
+        rowB.keyPath  = QStringLiteral("b");
+        rowB.widgetId = 0;
+        rowB.type     = WidgetType::Row;
+        WidgetDef childB = makeToggle(0x11, "b-child", 2); /* rowB's own flat row index */
+
+        WidgetModel m;
+        m.setWidgets({ rowA, childA, rowB, childB });
+
+        auto* cmA = qobject_cast<QAbstractListModel*>(m.childModel(0));
+        auto* cmB = qobject_cast<QAbstractListModel*>(m.childModel(2));
+        QSignalSpy spyA(cmA, &QAbstractListModel::dataChanged);
+        QSignalSpy spyB(cmB, &QAbstractListModel::dataChanged);
+
+        m.setValue(0x11, true); /* childB's own value, row belongs to rowB's ChildModel only */
+
+        QCOMPARE(spyA.count(), 0);
+        QCOMPARE(spyB.count(), 1);
+    }
+
+    /* REGRESSION: every childModel()-calling QML binding (WidgetDelegate.qml's
+     * _childModel, DeviceScreen.qml's top-level Repeater and rowComp/gridComp/
+     * dpadComp) needs a NOTIFYing dependency to force re-evaluation after a
+     * live design-mode reload calls setWidgets() again — childModel() itself
+     * has no NOTIFY, so without `generation`, every such binding would keep
+     * referencing a ChildModel already deleted by clearChildModels(). This
+     * test covers the C++ half of that contract: generation must increment
+     * and emit exactly once per reset, so a QML binding that reads it (see
+     * WidgetModel.h's `generation` doc) is guaranteed to re-evaluate. */
+    void generation_incrementsAndEmitsOnSetWidgetsAndClear()
+    {
+        WidgetModel m;
+        QSignalSpy spy(&m, &WidgetModel::generationChanged);
+
+        int before = m.generation();
+        m.setWidgets({ makeToggle(0x10, "a") });
+        QCOMPARE(m.generation(), before + 1);
+        QCOMPARE(spy.count(), 1);
+
+        m.clear();
+        QCOMPARE(m.generation(), before + 2);
+        QCOMPARE(spy.count(), 2);
+
+        /* setValue/setProperty/toggleSection are NOT resets — they must not
+         * bump generation, or every live device update would needlessly
+         * force every QML container to re-fetch (and every Repeater to
+         * re-instantiate) its childModel(). */
+        m.setWidgets({ makeToggle(0x10, "a") });
+        int afterSetup = m.generation();
+        spy.clear();
+        m.setValue(0x10, true);
+        QCOMPARE(m.generation(), afterSetup);
+        QCOMPARE(spy.count(), 0);
+    }
+
+    /* ── setValue/setProperty/resetProperty at any nesting depth ──────── */
+
+    void setValue_containerChild_storesValueInOwnRow()
+    {
         WidgetDef row;
         row.keyPath  = QStringLiteral("r");
         row.widgetId = 0;
         row.type     = WidgetType::Row;
-        row.children.append(child);
+        WidgetDef child = makeToggle(0x11, "relay", 0);
 
         WidgetModel m;
-        m.setWidgets({ row });
-        QVERIFY(m.data(m.index(0), WidgetModel::PropsRole)
-                  .toMap()[QStringLiteral("items")].toList()
-                  .at(0).toMap()[QStringLiteral("enabled")].toBool());
+        m.setWidgets({ row, child });
+        m.setValue(0x11, true);
+
+        QCOMPARE(roleAt(m, 1, WidgetModel::ValueRole).toBool(), true);
+    }
+
+    void setProperty_containerChild_enabled_routesToOwnRow()
+    {
+        WidgetDef row;
+        row.keyPath  = QStringLiteral("r");
+        row.widgetId = 0;
+        row.type     = WidgetType::Row;
+        WidgetDef child = makeToggle(0x11, "relay", 0);
+
+        WidgetModel m;
+        m.setWidgets({ row, child });
+        QVERIFY(roleAt(m, 1, WidgetModel::EnabledRole).toBool());
 
         QSignalSpy spy(&m, &WidgetModel::dataChanged);
         m.setProperty(0x11, Proto::PROP_ENABLED, 0);
 
         QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.at(0).at(0).value<QModelIndex>(), m.index(1));
         QVector<int> roles = spy.at(0).at(2).value<QVector<int>>();
-        QVERIFY(roles.contains(WidgetModel::PropsRole));
-
-        bool enabled = m.data(m.index(0), WidgetModel::PropsRole)
-                         .toMap()[QStringLiteral("items")].toList()
-                         .at(0).toMap()[QStringLiteral("enabled")].toBool();
-        QVERIFY(!enabled);
+        QVERIFY(roles.contains(WidgetModel::EnabledRole));
+        QVERIFY(!roleAt(m, 1, WidgetModel::EnabledRole).toBool());
     }
 
-    void setProperty_containerChild_visible_routesToContainer()
+    void setProperty_containerChild_visible_routesToOwnRow()
     {
-        WidgetDef child = makeToggle(0x11, "fan");
         WidgetDef row;
         row.keyPath  = QStringLiteral("r");
         row.widgetId = 0;
         row.type     = WidgetType::Row;
-        row.children.append(child);
+        WidgetDef child = makeToggle(0x11, "fan", 0);
 
         WidgetModel m;
-        m.setWidgets({ row });
+        m.setWidgets({ row, child });
         m.setProperty(0x11, Proto::PROP_VISIBLE, 0);
-
-        bool visible = m.data(m.index(0), WidgetModel::PropsRole)
-                         .toMap()[QStringLiteral("items")].toList()
-                         .at(0).toMap()[QStringLiteral("visible")].toBool();
-        QVERIFY(!visible);
+        QVERIFY(!roleAt(m, 1, WidgetModel::VisibleRole).toBool());
     }
 
     void resetProperty_containerChild_enabled_restoresTrue()
     {
-        WidgetDef child = makeToggle(0x11, "relay");
         WidgetDef row;
         row.keyPath  = QStringLiteral("r");
         row.widgetId = 0;
         row.type     = WidgetType::Row;
-        row.children.append(child);
+        WidgetDef child = makeToggle(0x11, "relay", 0);
 
         WidgetModel m;
-        m.setWidgets({ row });
+        m.setWidgets({ row, child });
         m.setProperty(0x11, Proto::PROP_ENABLED, 0);
         m.resetProperty(0x11, Proto::PROP_ENABLED);
-
-        bool enabled = m.data(m.index(0), WidgetModel::PropsRole)
-                         .toMap()[QStringLiteral("items")].toList()
-                         .at(0).toMap()[QStringLiteral("enabled")].toBool();
-        QVERIFY(enabled);
+        QVERIFY(roleAt(m, 1, WidgetModel::EnabledRole).toBool());
     }
 
-    /* Button children now participate in the unified m_childIndex and receive
-     * property commands the same way container children do (new in this PR). */
-    void setProperty_buttonChild_enabled_routesToParent()
+    void setProperty_buttonChild_enabled_routesToOwnRow()
     {
         WidgetModel m;
-        m.setWidgets({ makeButtonWithLed(0x10, 0x11) });
-        QVERIFY(m.data(m.index(0), WidgetModel::PropsRole)
-                  .toMap()[QStringLiteral("items")].toList()
-                  .at(0).toMap()[QStringLiteral("enabled")].toBool());
+        m.setWidgets(makeButtonWithLed(0x10, 0x11));
+        QVERIFY(roleAt(m, 1, WidgetModel::EnabledRole).toBool());
 
         QSignalSpy spy(&m, &WidgetModel::dataChanged);
         m.setProperty(0x11, Proto::PROP_ENABLED, 0);
 
         QCOMPARE(spy.count(), 1);
         QVector<int> roles = spy.at(0).at(2).value<QVector<int>>();
-        QVERIFY(roles.contains(WidgetModel::PropsRole));
-
-        bool enabled = m.data(m.index(0), WidgetModel::PropsRole)
-                         .toMap()[QStringLiteral("items")].toList()
-                         .at(0).toMap()[QStringLiteral("enabled")].toBool();
-        QVERIFY(!enabled);
+        QVERIFY(roles.contains(WidgetModel::EnabledRole));
+        QVERIFY(!roleAt(m, 1, WidgetModel::EnabledRole).toBool());
     }
 
     void resetProperty_buttonChild_restoresEnabled()
     {
         WidgetModel m;
-        m.setWidgets({ makeButtonWithLed(0x10, 0x11) });
+        m.setWidgets(makeButtonWithLed(0x10, 0x11));
         m.setProperty(0x11, Proto::PROP_ENABLED, 0);
         m.resetProperty(0x11, Proto::PROP_ENABLED);
-
-        bool enabled = m.data(m.index(0), WidgetModel::PropsRole)
-                         .toMap()[QStringLiteral("items")].toList()
-                         .at(0).toMap()[QStringLiteral("enabled")].toBool();
-        QVERIFY(enabled);
+        QVERIFY(roleAt(m, 1, WidgetModel::EnabledRole).toBool());
     }
 
-    /* Unified m_childIndex covers both button children and container children;
-     * clear() must flush the entire map. This tests the container-child path. */
     void clear_unifiedChildIndexAlsoClear()
     {
-        WidgetDef child = makeToggle(0x11, "relay");
         WidgetDef row;
         row.keyPath  = QStringLiteral("r");
         row.widgetId = 0;
         row.type     = WidgetType::Row;
-        row.children.append(child);
+        WidgetDef child = makeToggle(0x11, "relay", 0);
 
         WidgetModel m;
-        m.setWidgets({ row });
+        m.setWidgets({ row, child });
         m.clear();
 
         QSignalSpy spy(&m, &WidgetModel::dataChanged);
@@ -755,19 +850,19 @@ private slots:
         QCOMPARE(spy.count(), 0);
     }
 
-    /* Unified map routes BOTH button child and container child IDs after setWidgets
-     * with mixed parent types. */
     void setWidgets_unifiedIndex_buttonAndContainerChild()
     {
         WidgetDef row;
         row.keyPath  = QStringLiteral("r");
         row.widgetId = 0;
         row.type     = WidgetType::Row;
-        row.children.append(makeToggle(0x12, "toggle"));
+
+        QList<WidgetDef> widgets = makeButtonWithLed(0x10, 0x11);
+        widgets.append(row);
+        widgets.append(makeToggle(0x12, "toggle", widgets.size() - 1));
 
         WidgetModel m;
-        /* row (container child 0x12) + button (button child 0x11) in same model */
-        m.setWidgets({ makeButtonWithLed(0x10, 0x11), row });
+        m.setWidgets(widgets);
 
         QSignalSpy spy(&m, &WidgetModel::dataChanged);
         m.setValue(0x11, true);
@@ -777,23 +872,23 @@ private slots:
         QCOMPARE(spy.count(), 1);
     }
 
-    /* ── toggleSection ───────────────────────────────────────────────── */
+    /* ── toggleSection (parentId-chain visibility) ────────────────────── */
 
-    /* Helper: build a collapsible section at row 0 with two child toggles */
+    /* Helper: build a collapsible section at row 0 with two child toggles,
+     * each a direct child (parentId=0) — matches how a real YAML section's
+     * children are parented under the new flat model, regardless of
+     * collapsibility. */
     static QList<WidgetDef> makeCollapsibleSection()
     {
         WidgetDef section;
-        section.keyPath     = QStringLiteral("ctrl");
-        section.widgetId    = 0;
-        section.type        = WidgetType::Section;
-        section.label       = QStringLiteral("Controls");
-        section.collapsible = true;
+        section.keyPath = QStringLiteral("ctrl");
+        section.widgetId = 0;
+        section.type = WidgetType::Section;
+        section.label = QStringLiteral("Controls");
+        section.props[QStringLiteral("collapsible")] = true;
 
-        WidgetDef child1 = makeToggle(0x10, "relay");
-        child1.sectionOwnerRow = 0;
-
-        WidgetDef child2 = makeToggle(0x11, "fan");
-        child2.sectionOwnerRow = 0;
+        WidgetDef child1 = makeToggle(0x10, "relay", 0);
+        WidgetDef child2 = makeToggle(0x11, "fan", 0);
 
         return { section, child1, child2 };
     }
@@ -864,25 +959,24 @@ private slots:
     void toggleSection_collapsingOuterSection_hidesNestedChildren()
     {
         /* Layout:
-         *   row 0: Section A (collapsible, sectionOwnerRow=-1)
-         *   row 1: Section B (collapsible, sectionOwnerRow=0)
-         *   row 2: Widget C  (sectionOwnerRow=1)
+         *   row 0: Section A (collapsible, parentId=-1)
+         *   row 1: Section B (collapsible, parentId=0, owned by A)
+         *   row 2: Widget C  (parentId=1, owned by B)
          */
         WidgetDef sectionA;
-        sectionA.keyPath     = QStringLiteral("a");
-        sectionA.widgetId    = 0;
-        sectionA.type        = WidgetType::Section;
-        sectionA.collapsible = true;
+        sectionA.keyPath  = QStringLiteral("a");
+        sectionA.widgetId = 0;
+        sectionA.type     = WidgetType::Section;
+        sectionA.props[QStringLiteral("collapsible")] = true;
 
         WidgetDef sectionB;
-        sectionB.keyPath        = QStringLiteral("b");
-        sectionB.widgetId       = 0;
-        sectionB.type           = WidgetType::Section;
-        sectionB.collapsible    = true;
-        sectionB.sectionOwnerRow = 0;  /* owned by Section A */
+        sectionB.keyPath  = QStringLiteral("b");
+        sectionB.widgetId = 0;
+        sectionB.type     = WidgetType::Section;
+        sectionB.props[QStringLiteral("collapsible")] = true;
+        sectionB.parentId = 0;
 
-        WidgetDef widgetC = makeToggle(0x10, "c");
-        widgetC.sectionOwnerRow = 1;   /* owned by Section B */
+        WidgetDef widgetC = makeToggle(0x10, "c", 1);
 
         WidgetModel m;
         m.setWidgets({ sectionA, sectionB, widgetC });
@@ -904,14 +998,13 @@ private slots:
     void toggleSection_ignoresNonCollapsibleSection()
     {
         WidgetDef section;
-        section.keyPath     = QStringLiteral("info");
-        section.widgetId    = 0;
-        section.type        = WidgetType::Section;
-        section.label       = QStringLiteral("Info");
-        section.collapsible = false;
+        section.keyPath  = QStringLiteral("info");
+        section.widgetId = 0;
+        section.type     = WidgetType::Section;
+        section.label    = QStringLiteral("Info");
+        section.props[QStringLiteral("collapsible")] = false;
 
-        WidgetDef child = makeToggle(0x10, "relay");
-        /* sectionOwnerRow stays -1 for non-collapsible sections */
+        WidgetDef child = makeToggle(0x10, "relay", 0);
 
         WidgetModel m;
         m.setWidgets({ section, child });
@@ -924,145 +1017,86 @@ private slots:
         QVERIFY(roleAt(m, 1, WidgetModel::VisibleRole).toBool());
     }
 
-    /* ── TODO-031: depth-2 and depth-3 descendant indexing ──────────────── */
+    /* ── depth-2 and depth-3 descendants: same one code path as depth-1 ─── */
 
-    /* Build outerRow(widgetId=0) → innerRow(widgetId=0) → toggle(id) */
-    static WidgetDef makeRowDepth2(uint8_t toggleId)
+    /* Build outerRow(row0,parentId=-1) → innerRow(row1,parentId=0) →
+     * toggle(row2,parentId=1). */
+    static QList<WidgetDef> makeRowDepth2(uint8_t toggleId)
     {
-        WidgetDef innerRow;
-        innerRow.keyPath  = QStringLiteral("inner");
-        innerRow.widgetId = 0;
-        innerRow.type     = WidgetType::Row;
-        innerRow.children.append(makeToggle(toggleId, QStringLiteral("deep")));
-
         WidgetDef outerRow;
         outerRow.keyPath  = QStringLiteral("outer");
         outerRow.widgetId = 0;
         outerRow.type     = WidgetType::Row;
-        outerRow.children.append(innerRow);
-        return outerRow;
+
+        WidgetDef innerRow;
+        innerRow.keyPath  = QStringLiteral("inner");
+        innerRow.widgetId = 0;
+        innerRow.type     = WidgetType::Row;
+        innerRow.parentId = 0;
+
+        WidgetDef toggle = makeToggle(toggleId, QStringLiteral("deep"), 1);
+
+        return { outerRow, innerRow, toggle };
     }
 
-    /* m_childPath correctly indexes a depth-2 widget after setWidgets. */
-    void setWidgets_depth2_childIndexed()
+    void setValue_depth2_emitsValueRoleOnOwnRow()
     {
         WidgetModel m;
-        m.setWidgets({ makeRowDepth2(0x15) });
-
-        /* setValue on the depth-2 toggle must emit a signal (proves it was found) */
-        QSignalSpy spy(&m, &WidgetModel::dataChanged);
-        m.setValue(0x15, true);
-        QCOMPARE(spy.count(), 1);
-    }
-
-    /* setValue on a depth-2 widget stores the value in the serialized tree. */
-    void setValue_depth2_storesValue()
-    {
-        WidgetModel m;
-        m.setWidgets({ makeRowDepth2(0x15) });
-        m.setValue(0x15, true);
-
-        /* Navigate: props["items"][0]["props"]["items"][0]["value"] */
-        QVariantList outerItems =
-            roleAt(m, 0, WidgetModel::PropsRole).toMap()[QStringLiteral("items")].toList();
-        QCOMPARE(outerItems.size(), 1); /* inner row */
-        QVariantList innerItems =
-            outerItems.at(0).toMap()[QStringLiteral("props")].toMap()
-                             [QStringLiteral("items")].toList();
-        QCOMPARE(innerItems.size(), 1); /* toggle */
-        QCOMPARE(innerItems.at(0).toMap()[QStringLiteral("value")].toBool(), true);
-    }
-
-    /* setValue on a depth-2 widget emits PropsRole on the top-level row (row 0). */
-    void setValue_depth2_emitsPropsRoleOnTopLevel()
-    {
-        WidgetModel m;
-        m.setWidgets({ makeRowDepth2(0x15) });
+        m.setWidgets(makeRowDepth2(0x15));
         QSignalSpy spy(&m, &WidgetModel::dataChanged);
         m.setValue(0x15, true);
 
         QCOMPARE(spy.count(), 1);
-        /* Signal must reference row 0 (top-level outer row) */
-        QCOMPARE(spy.at(0).at(0).value<QModelIndex>(), m.index(0));
+        /* Signal targets the toggle's OWN row (2), not the top-level outer row (0). */
+        QCOMPARE(spy.at(0).at(0).value<QModelIndex>(), m.index(2));
         QVector<int> roles = spy.at(0).at(2).value<QVector<int>>();
-        QVERIFY(roles.contains(WidgetModel::PropsRole));
-        QVERIFY(!roles.contains(WidgetModel::ValueRole));
+        QVERIFY(roles.contains(WidgetModel::ValueRole));
+        QCOMPARE(roleAt(m, 2, WidgetModel::ValueRole).toBool(), true);
     }
 
-    /* setProperty PROP_ENABLED correctly reaches a depth-2 widget. */
     void setProperty_depth2_enabled()
     {
         WidgetModel m;
-        m.setWidgets({ makeRowDepth2(0x15) });
-
-        /* Toggle starts enabled */
-        QVariantList outerItems =
-            roleAt(m, 0, WidgetModel::PropsRole).toMap()[QStringLiteral("items")].toList();
-        bool startEnabled = outerItems.at(0).toMap()[QStringLiteral("props")].toMap()
-                                          [QStringLiteral("items")].toList()
-                                          .at(0).toMap()[QStringLiteral("enabled")].toBool();
-        QVERIFY(startEnabled);
-
+        m.setWidgets(makeRowDepth2(0x15));
+        QVERIFY(roleAt(m, 2, WidgetModel::EnabledRole).toBool());
         m.setProperty(0x15, Proto::PROP_ENABLED, 0);
-
-        outerItems = roleAt(m, 0, WidgetModel::PropsRole).toMap()
-                        [QStringLiteral("items")].toList();
-        bool nowEnabled = outerItems.at(0).toMap()[QStringLiteral("props")].toMap()
-                                         [QStringLiteral("items")].toList()
-                                         .at(0).toMap()[QStringLiteral("enabled")].toBool();
-        QVERIFY(!nowEnabled);
+        QVERIFY(!roleAt(m, 2, WidgetModel::EnabledRole).toBool());
     }
 
-    /* resetProperty PROP_ENABLED correctly restores a depth-2 widget. */
     void resetProperty_depth2_restoresEnabled()
     {
         WidgetModel m;
-        m.setWidgets({ makeRowDepth2(0x15) });
+        m.setWidgets(makeRowDepth2(0x15));
         m.setProperty(0x15, Proto::PROP_ENABLED, 0);
         m.resetProperty(0x15, Proto::PROP_ENABLED);
-
-        QVariantList outerItems =
-            roleAt(m, 0, WidgetModel::PropsRole).toMap()[QStringLiteral("items")].toList();
-        bool enabled = outerItems.at(0).toMap()[QStringLiteral("props")].toMap()
-                                       [QStringLiteral("items")].toList()
-                                       .at(0).toMap()[QStringLiteral("enabled")].toBool();
-        QVERIFY(enabled);
+        QVERIFY(roleAt(m, 2, WidgetModel::EnabledRole).toBool());
     }
 
     /* 3-level nesting: outer row → inner row → innermost row → toggle(0x16). */
-    void setWidgets_depth3_childIndexed()
+    void setValue_depth3_emitsValueRoleOnOwnRow()
     {
-        WidgetDef innermostRow;
-        innermostRow.keyPath  = QStringLiteral("lv3");
-        innermostRow.widgetId = 0;
-        innermostRow.type     = WidgetType::Row;
-        innermostRow.children.append(makeToggle(0x16, QStringLiteral("deep3")));
-
-        WidgetDef innerRow;
-        innerRow.keyPath  = QStringLiteral("lv2");
-        innerRow.widgetId = 0;
-        innerRow.type     = WidgetType::Row;
-        innerRow.children.append(innermostRow);
-
         WidgetDef outerRow;
-        outerRow.keyPath  = QStringLiteral("lv1");
-        outerRow.widgetId = 0;
-        outerRow.type     = WidgetType::Row;
-        outerRow.children.append(innerRow);
+        outerRow.keyPath = QStringLiteral("lv1"); outerRow.widgetId = 0; outerRow.type = WidgetType::Row;
+        WidgetDef innerRow;
+        innerRow.keyPath = QStringLiteral("lv2"); innerRow.widgetId = 0; innerRow.type = WidgetType::Row;
+        innerRow.parentId = 0;
+        WidgetDef innermostRow;
+        innermostRow.keyPath = QStringLiteral("lv3"); innermostRow.widgetId = 0; innermostRow.type = WidgetType::Row;
+        innermostRow.parentId = 1;
+        WidgetDef toggle = makeToggle(0x16, QStringLiteral("deep3"), 2);
 
         WidgetModel m;
-        m.setWidgets({ outerRow });
+        m.setWidgets({ outerRow, innerRow, innermostRow, toggle });
 
-        /* setValue on the depth-3 toggle must route to top-level row 0 */
         QSignalSpy spy(&m, &WidgetModel::dataChanged);
         m.setValue(0x16, true);
         QCOMPARE(spy.count(), 1);
-        QCOMPARE(spy.at(0).at(0).value<QModelIndex>(), m.index(0));
+        QCOMPARE(spy.at(0).at(0).value<QModelIndex>(), m.index(3));
         QVector<int> roles = spy.at(0).at(2).value<QVector<int>>();
-        QVERIFY(roles.contains(WidgetModel::PropsRole));
+        QVERIFY(roles.contains(WidgetModel::ValueRole));
     }
 
-    /* ── TODO-020: LED PropsRole includes color ────────────────────────── */
+    /* ── LED PropsRole includes color ───────────────────────────────────── */
 
     void data_propsRole_led_includesColor()
     {
@@ -1071,7 +1105,7 @@ private slots:
         w.widgetId = 0x10;
         w.type     = WidgetType::Led;
         w.label    = QStringLiteral("Status");
-        w.color    = QStringLiteral("#ff0000");
+        w.props[QStringLiteral("color")] = QStringLiteral("#ff0000");
 
         WidgetModel m;
         m.setWidgets({ w });
@@ -1084,13 +1118,14 @@ private slots:
     void data_propsRole_label_includesLabelAlign()
     {
         /* A label's own text alignment serializes under "labelAlign" —
-         * "align" is reserved for row/grid position (see eefe866's rename;
-         * WidgetModel.cpp only sets props["align"] for Row/Grid types). */
+         * "align" (a common WidgetDef field) is reserved for row/grid
+         * content alignment and child override, exposed via its own
+         * AlignRole, not PropsRole. */
         WidgetDef w;
-        w.keyPath    = QStringLiteral("caption");
-        w.type       = WidgetType::Label;
-        w.labelText  = QStringLiteral("Hi");
-        w.labelAlign = QStringLiteral("center");
+        w.keyPath = QStringLiteral("caption");
+        w.type    = WidgetType::Label;
+        w.props[QStringLiteral("text")]       = QStringLiteral("Hi");
+        w.props[QStringLiteral("labelAlign")] = QStringLiteral("center");
 
         WidgetModel m;
         m.setWidgets({ w });
@@ -1098,36 +1133,36 @@ private slots:
         QCOMPARE(props[QStringLiteral("labelAlign")].toString(), QStringLiteral("center"));
     }
 
-    void data_propsRole_row_includesContainerAndChildAlign()
+    void data_rowGrid_ownAlign_andChildAlign_viaAlignRole()
     {
-        WidgetDef relay;
-        relay.keyPath = QStringLiteral("relay");
-        relay.type    = WidgetType::Toggle;
-        relay.align   = QStringLiteral("right"); /* own override */
-
-        WidgetDef fan;
-        fan.keyPath = QStringLiteral("fan");
-        fan.type    = WidgetType::Toggle;
-        /* fan.align left at default (empty) — inherits container */
-
         WidgetDef row;
         row.keyPath = QStringLiteral("ctrl_row");
         row.type    = WidgetType::Row;
         row.align   = QStringLiteral("center");
-        row.children = { relay, fan };
+
+        WidgetDef relay;
+        relay.keyPath  = QStringLiteral("relay");
+        relay.type     = WidgetType::Toggle;
+        relay.align    = QStringLiteral("right"); /* own override */
+        relay.parentId = 0;
+
+        WidgetDef fan;
+        fan.keyPath  = QStringLiteral("fan");
+        fan.type     = WidgetType::Toggle;
+        fan.parentId = 0;
+        /* fan.align left at default (empty) — inherits container */
 
         WidgetModel m;
-        m.setWidgets({ row });
-        QVariantMap props = roleAt(m, 0, WidgetModel::PropsRole).toMap();
-        QCOMPARE(props[QStringLiteral("align")].toString(), QStringLiteral("center"));
+        m.setWidgets({ row, relay, fan });
 
-        QVariantList items = props[QStringLiteral("items")].toList();
-        QCOMPARE(items.size(), 2);
-        QCOMPARE(items[0].toMap()[QStringLiteral("align")].toString(), QStringLiteral("right"));
-        QVERIFY(items[1].toMap()[QStringLiteral("align")].toString().isEmpty());
+        /* The row's own content-alignment default is a common field,
+         * exposed via AlignRole (NOT nested in props). */
+        QCOMPARE(roleAt(m, 0, WidgetModel::AlignRole).toString(), QStringLiteral("center"));
+        QCOMPARE(roleAt(m, 1, WidgetModel::AlignRole).toString(), QStringLiteral("right"));
+        QVERIFY(roleAt(m, 2, WidgetModel::AlignRole).toString().isEmpty());
     }
 
-    /* ── TODO-021: RgbLed value round-trips as int ─────────────────────── */
+    /* ── RgbLed value round-trips as int ─────────────────────────────── */
 
     void data_rgbled_valueRoundTripsInt()
     {

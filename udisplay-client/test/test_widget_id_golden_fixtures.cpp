@@ -28,18 +28,12 @@ namespace {
 
 void collectIds(const QList<WidgetDef>& widgets, QMap<QString, uint8_t>& out)
 {
+    /* widgets is a flat list now — every widget, any nesting depth
+     * (including former button-group items and dpad items), is its own
+     * entry, so no recursion is needed. */
     for (const auto& w : widgets) {
         if (w.widgetId != 0)
             out[w.keyPath] = w.widgetId;
-        collectIds(w.children, out);
-        if (w.type == WidgetType::ButtonGroup) {
-            for (const auto& item : w.groupItems)
-                out[item.keyPath] = item.widgetId;
-        }
-        if (w.type == WidgetType::Dpad) {
-            for (const auto& item : w.dpadItems)
-                out[item.keyPath] = item.widgetId;
-        }
     }
 }
 
