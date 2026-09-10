@@ -18,6 +18,12 @@ import "../../qml/widgets" as W
  *  - Row-level `align` default + a child's own `align` override (D6/D13).
  *  - Label `align` maps to the correct Text.AlignLeft/Right/HCenter/Justify.
  *
+ * WidgetModel is a flat list now — a row's children come from
+ * WidgetModel::childModel(), not a props.items array (see WidgetModel.h,
+ * RowWidget.qml). These tests build a ListModel per row and feed it via
+ * childModel: instead — see FakeWidgetModel.qml's header comment for why a
+ * `controller.widgetModel` stand-in is needed at all.
+ *
  * Run headless: `qml -platform offscreen test_row_flex_align.qml`.
  * Exits 0 on pass, 1 (with a console.error) on fail — CTest reads the exit code.
  */
@@ -32,6 +38,7 @@ Item {
             property string text_muted:   "#888888"
             property string text:         "#c0c0c0"
         }
+        property var widgetModel: FakeWidgetModel {}
     }
 
     function fail(msg) {
@@ -62,40 +69,46 @@ Item {
     }
 
     /* ── Row 1: flex-weighted stretch (flex:1, flex:2, flex:0) ─────────── */
-    property var weightedRowProps: {
-        "align": "left",
-        "items": [
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 1, align: "",
-              props: { text: "A", style: "body" } },
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 2, align: "",
-              props: { text: "B", style: "body" } },
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "",
-              props: { text: "C", style: "body" } }
-        ]
+    ListModel {
+        id: weightedRowItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 1, align: "", props: { text: "A", style: "body" } })
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 2, align: "", props: { text: "B", style: "body" } })
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: { text: "C", style: "body" } })
+            ready = true
+        }
     }
     W.RowWidget {
         id: weightedRow
         anchors.left: parent.left
         anchors.right: parent.right
-        props: weightedRowProps
+        props: ({ align: "left" })
+        childModel: weightedRowItems.ready ? weightedRowItems : null
     }
 
     /* ── Row 2: container align default + child override ───────────────── */
-    property var alignRowProps: {
-        "align": "center",
-        "items": [
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "",
-              props: { text: "Inherits", style: "body" } },
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "right",
-              props: { text: "Overrides", style: "body" } }
-        ]
+    ListModel {
+        id: alignRowItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: { text: "Inherits", style: "body" } })
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "right", props: { text: "Overrides", style: "body" } })
+            ready = true
+        }
     }
     W.RowWidget {
         id: alignRow
         y: 100
         anchors.left: parent.left
         anchors.right: parent.right
-        props: alignRowProps
+        props: ({ align: "center" })
+        childModel: alignRowItems.ready ? alignRowItems : null
     }
 
     /* ── Standalone LabelWidget: align mapping ──────────────────────────── */

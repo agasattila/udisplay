@@ -7,7 +7,10 @@ import QtQuick.Layouts
 import "./"
 
 /* Horizontal layout container.
- * props.items: [{type, widgetId, label, enabled, visible, value, props, flex, align}, ...]
+ * childModel: every child widget of this row, as a real model (see
+ * WidgetModel::childModel()) — each row exposes the same roles as
+ * WidgetModel itself (widgetId, type, label, enabled, widgetVisible, value,
+ * props, flex, align, parentId).
  * props.align: "left"|"right"|"center" — default content alignment for
  * children that can't stretch (flex: 0/omitted); a child's own `align`
  * overrides this for that one child.
@@ -29,7 +32,13 @@ import "./"
 Rectangle {
     id: root
     property string label: ""   /* optional; not rendered for layout containers */
-    property var    props: ({})  /* { items: [...] } — non-required so Loader.source can bind it */
+    property var    props: ({})  /* { align } — non-required so Loader.source can bind it */
+    /* Every child widget of this row, as a real model — non-required for the
+     * same reason props is: WidgetDelegate.qml's rowComp sets it via a live
+     * binding in onLoaded after this item is created (dynamic Loader.source
+     * instantiation, not a static `RowWidget { }` reference — see
+     * WidgetDelegate.qml's header comment on why). */
+    property var    childModel: null
     /* Compact rendering — non-required (same reason as props above: set via
      * live binding when loaded through a dynamic Loader.source, e.g.
      * WidgetDelegate.qml's rowComp). Forwarded to every child's own
@@ -62,9 +71,9 @@ Rectangle {
     color: "transparent"
 
     property real contentImplicitWidth: {
-        var items = props.items || []
+        var n = childModel ? childModel.rowCount() : 0
         var sum = 0
-        for (var i = 0; i < items.length; i++) {
+        for (var i = 0; i < n; i++) {
             var d = repeater.itemAt(i)
             /* d is a WidgetDelegate (itself a Loader). d.implicitWidth is
              * the Loader's own auto-mirror, which is reliable for leaf
@@ -84,7 +93,7 @@ Rectangle {
              * feed back into itself. */
             sum += (d && d.item) ? d.item.implicitWidth : 0
         }
-        return sum + Math.max(0, items.length - 1) * row.spacing
+        return sum + Math.max(0, n - 1) * row.spacing
     }
 
     Layout.fillWidth: true
@@ -98,10 +107,10 @@ Rectangle {
         /* Sum of every child's flex weight. flex: 0/omitted children
          * contribute 0 (no effect on the ratio given to their siblings). */
         property int totalFlex: {
-            var items = props.items || []
+            var n = root.childModel ? root.childModel.rowCount() : 0
             var sum = 0
-            for (var i = 0; i < items.length; i++)
-                sum += (items[i].flex || 0)
+            for (var i = 0; i < n; i++)
+                sum += (root.childModel.get(i).flex || 0)
             return sum
         }
 
@@ -118,10 +127,10 @@ Rectangle {
          * children; .item.implicitWidth drills into the loaded content and
          * is reliable for both leaf and container children. */
         property real nonFlexWidth: {
-            var items = props.items || []
+            var n = root.childModel ? root.childModel.rowCount() : 0
             var sum = 0
-            for (var i = 0; i < items.length; i++) {
-                if (!(items[i].flex > 0)) {
+            for (var i = 0; i < n; i++) {
+                if (!(root.childModel.get(i).flex > 0)) {
                     var d = repeater.itemAt(i)
                     sum += (d && d.item) ? d.item.implicitWidth : 0
                 }
@@ -129,8 +138,8 @@ Rectangle {
             return sum
         }
 
-        function alignFor(modelData) {
-            var a = modelData.align || props.align || "left"
+        function alignFor(m) {
+            var a = m.align || root.props.align || "left"
             return a === "right" ? Qt.AlignRight
                  : a === "center" ? Qt.AlignHCenter
                  : Qt.AlignLeft
@@ -138,12 +147,12 @@ Rectangle {
 
         Repeater {
             id: repeater
-            model: props.items || []
+            model: root.childModel
 
             delegate: WidgetDelegate {
-                required property var modelData
+                required property var model
                 compact: root.compact
-                Layout.fillWidth: modelData.flex > 0
+                Layout.fillWidth: model.flex > 0
                 /* item.implicitWidth, not bare implicitWidth: this binding
                  * is set at the instantiation site, which overrides the
                  * `Layout.preferredWidth: item ? item.implicitWidth : 0` fix
@@ -154,9 +163,9 @@ Rectangle {
                 Layout.minimumWidth: item ? item.implicitWidth : 0
                 Layout.preferredWidth: Math.max(item ? item.implicitWidth : 0,
                     row.totalFlex > 0
-                        ? Math.max(0, row.width - row.nonFlexWidth) * modelData.flex / row.totalFlex
+                        ? Math.max(0, row.width - row.nonFlexWidth) * model.flex / row.totalFlex
                         : 0)
-                Layout.alignment: row.alignFor(modelData)
+                Layout.alignment: row.alignFor(model)
             }
         }
     }

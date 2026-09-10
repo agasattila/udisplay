@@ -13,6 +13,12 @@ import "../../qml/widgets" as W
  *    permissive-parsing behavior (any type is accepted with zero
  *    diagnostics, per test_yaml_parser.cpp's buttonChild_nonLedType_accepted).
  *
+ * WidgetModel is a flat list now — a button's face children come from
+ * WidgetModel::childModel(), not a props.items array (see ButtonWidget.qml).
+ * This test builds a ListModel per face and feeds it via childModel: instead
+ * — see FakeWidgetModel.qml's header comment for why a
+ * `controller.widgetModel` stand-in is needed at all.
+ *
  * Run headless: `qml -platform offscreen test_button_face_children.qml`.
  * Exits 0 on pass, 1 (with a console.error) on fail — CTest reads the exit code.
  */
@@ -34,6 +40,7 @@ Item {
             property string button:       "#00d4aa"
             property string button_text:  "#0d0d1a"
         }
+        property var widgetModel: FakeWidgetModel {}
         function sendButtonPress(id) {}
         function sendButtonRelease(id) {}
         function sendButtonClick(id) {}
@@ -44,23 +51,46 @@ Item {
         Qt.exit(1)
     }
 
+    ListModel {
+        id: fullFaceItems
+        property bool ready: false
+        Component.onCompleted: {
+            /* value role must stay a consistent type across every append()
+             * in this ListModel — QML ListModel infers a role's type from
+             * its first row and silently rejects later appends of a
+             * different type for that same role. led's "on" state is
+             * truthy-checked (see LedWidget.qml's `value ? ... : ...`), so
+             * 1/0 works identically to true/false here. */
+            append({ widgetId: 2, type: "led",     label: "",  enabled: true, widgetVisible: true, value: 1,
+                     flex: 0, align: "", props: {} })
+            append({ widgetId: 3, type: "rgbled",  label: "",  enabled: true, widgetVisible: true, value: 0x00ff00,
+                     flex: 0, align: "", props: {} })
+            append({ widgetId: 4, type: "display", label: "V", enabled: true, widgetVisible: true, value: 3.3,
+                     flex: 0, align: "", props: { unit: "V", format: "%.1f" } })
+            append({ widgetId: 0, type: "label",   label: "",  enabled: true, widgetVisible: true, value: 0,
+                     flex: 0, align: "", props: { text: "Hi", style: "body" } })
+            ready = true
+        }
+    }
     /* All 4 supported leaf types on one face. */
     W.ButtonWidget {
         id: fullFace
         widgetId: 1
         label: "Power"
         enabled: true
-        props: ({
-            shape: "rect",
-            items: [
-                { type: "led",     widgetId: 2, label: "",  enabled: true, value: true, props: {} },
-                { type: "rgbled",  widgetId: 3, label: "",  enabled: true, value: 0x00ff00, props: {} },
-                { type: "display", widgetId: 4, label: "V", enabled: true, value: 3.3, props: { unit: "V", format: "%.1f" } },
-                { type: "label",   widgetId: 0, label: "",  enabled: true, value: null, props: { text: "Hi", style: "body" } }
-            ]
-        })
+        props: ({ shape: "rect" })
+        childModel: fullFaceItems.ready ? fullFaceItems : null
     }
 
+    ListModel {
+        id: unknownChildItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 6, type: "some_future_type", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: {} })
+            ready = true
+        }
+    }
     /* Unrecognized child type — must not crash, must render nothing for
      * that item (sourceComponent: null in ButtonWidget.qml's dispatch). */
     W.ButtonWidget {
@@ -69,12 +99,8 @@ Item {
         widgetId: 5
         label: "Unknown"
         enabled: true
-        props: ({
-            shape: "rect",
-            items: [
-                { type: "some_future_type", widgetId: 6, label: "", enabled: true, value: null, props: {} }
-            ]
-        })
+        props: ({ shape: "rect" })
+        childModel: unknownChildItems.ready ? unknownChildItems : null
     }
 
     Timer {

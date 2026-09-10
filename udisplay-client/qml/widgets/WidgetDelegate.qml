@@ -4,8 +4,8 @@ import QtQuick.Layouts
 import "./"
 
 /* Shared child widget dispatcher for RowWidget and GridWidget Repeaters.
- * Selects the correct widget component from modelData.type and forwards all
- * standard widget properties to the instantiated child.
+ * Selects the correct widget component from the current row's `type` role
+ * and forwards all standard widget properties to the instantiated child.
  *
  * Uses import "./" (NOT the module URI) — Android qmlcachegen requirement.
  *
@@ -16,14 +16,21 @@ import "./"
  * bilateral static type usage. Qt.resolvedUrl is a runtime string dependency
  * that the cycle detector does not follow.
  *
- * modelData is intentionally NOT declared on this base type. It is declared as
- * `required property var modelData` on the WidgetDelegate instance itself in
- * RowWidget.qml/GridWidget.qml's Repeater delegate. Redeclaring it here too
- * (even without `required`, even with no default value) shadows the
- * Repeater's injection — the local declaration silently wins and modelData
- * never receives the actual model item, so every row/grid child renders with
+ * `model` is intentionally NOT declared on this base type. It is declared as
+ * `required property var model` on the WidgetDelegate instance itself in
+ * RowWidget.qml/GridWidget.qml's Repeater delegate — Qt Quick's own
+ * aggregating context property for a QAbstractItemModel-backed delegate,
+ * giving `model.widgetId`, `model.type`, etc. for every role in
+ * WidgetModel::roleNames() (WidgetModel is now a flat list — every widget,
+ * any nesting depth, is a real row with real roles; there is no more
+ * separate "props.items" JS-array shape to consume). Redeclaring `model`
+ * here too (even without `required`, even with no default value) shadows
+ * the Repeater's injection — the local declaration silently wins and model
+ * never receives the actual row data, so every row/grid child renders with
  * an empty type and nothing shows up. Verified empirically with a minimal
- * Repeater+delegate reproduction; do not re-add this property here.
+ * Repeater+delegate reproduction (the same failure mode the old `modelData`
+ * version of this file already documented) — do not re-add this property
+ * here.
  *
  * section children are not supported yet
  */
@@ -56,14 +63,51 @@ Loader {
      * any space and they all render at x=0 — exactly on top of each other. */
     Layout.preferredWidth: item ? item.implicitWidth : 0
 
-    property string _type:     modelData.type      || ""
-    property int    _widgetId: modelData.widgetId  || 0
-    property string _label:    modelData.label     || ""
-    property bool   _enabled:  modelData.enabled   !== false
-    property var    _value:    modelData.value
-    property var    _props:    modelData.props      || {}
+    property string _type:     model.type          || ""
+    property int    _widgetId: model.widgetId      || 0
+    property string _label:    model.label         || ""
+    property bool   _enabled:  model.enabled       !== false
+    property var    _value:    model.value
+    property var    _props:    model.props          || {}
+    /* Only container types actually consume a childModel below (buttonComp/
+     * buttonGroupComp/rowComp/gridComp/dpadComp) — every leaf type
+     * (display/led/rgbled/slider/toggle/text/dropdown/label/separator)
+     * ignores it. Gating construction on _isContainer matters: each
+     * uncached childModel() call does a full O(N) scan of WidgetModel's flat
+     * list to build its row index (WidgetModel.cpp's ChildModel
+     * constructor), so evaluating this unconditionally for every leaf row
+     * too — as an earlier version of this binding did — made a full
+     * setWidgets() reset (e.g. every live design-mode reload) cost O(N²)
+     * for N flat widgets, the overwhelming majority of which are leaves
+     * whose throwaway ChildModel is never read. */
+    property bool   _isContainer: _type === "row" || _type === "grid" || _type === "button"
+                                 || _type === "button-group" || _type === "dpad"
 
-    visible: modelData.visible !== false
+    /* Every widget's own children, scoped by its FLAT ROW index — NOT
+     * widgetId: row/grid/section/dpad containers all have widgetId 0 (only
+     * ID-bearing leaf/button-ish widgets get a real id), so keying on
+     * widgetId would collide every top-level container sharing id 0 into
+     * one shared child model. `model.row` (WidgetModel::RowRole) is this
+     * row's own unique flat-list index, always distinct. This is the one
+     * place a QML container reaches the global WidgetModel singleton —
+     * every container component itself receives childModel as a plain
+     * property instead, preserving their existing standalone-testability
+     * (see test/qml/*.qml, which instantiate containers directly with no
+     * `controller` in scope). */
+    /* controller.widgetModel.generation is read but unused — it's a NOTIFYing
+     * property that only exists to give this binding a reactive dependency.
+     * childModel() itself is a plain Q_INVOKABLE with no NOTIFY, so without
+     * this the binding would evaluate once and never again: every previously
+     * vended ChildModel is deleted on the next setWidgets()/clear() reset
+     * (e.g. a live design-mode file reload), leaving `_childModel` pointing
+     * at a destroyed object forever. See WidgetModel.h's `generation` doc. */
+    property var    _childModel: {
+        if (!_isContainer) return null
+        controller.widgetModel.generation
+        return controller.widgetModel.childModel(model.row)
+    }
+
+    visible: model.widgetVisible !== false
 
     sourceComponent: _type === "display"      ? displayComp
                    : _type === "led"          ? ledComp
@@ -85,14 +129,14 @@ Loader {
     Component { id: displayComp;     DisplayWidget     { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; compact: root.compact } }
     Component { id: ledComp;         LedWidget         { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; compact: root.compact } }
     Component { id: rgbledComp;      RgbLedWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; compact: root.compact } }
-    Component { id: buttonComp;      ButtonWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; props: _props } }
-    Component { id: buttonGroupComp; ButtonGroupWidget { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
+    Component { id: buttonComp;      ButtonWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; props: _props; childModel: root._childModel } }
+    Component { id: buttonGroupComp; ButtonGroupWidget { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; childModel: root._childModel } }
     Component { id: sliderComp;      SliderWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
     Component { id: toggleComp;      ToggleWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value } }
     Component { id: textComp;        TextWidget        { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
     Component { id: dropdownComp;    DropdownWidget    { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
     Component { id: labelComp;       LabelWidget       { props: _props; compact: root.compact } }
-    Component { id: dpadComp;        DpadWidget        { label: _label; props: _props } }
+    Component { id: dpadComp;        DpadWidget        { label: _label; props: _props; childModel: root._childModel } }
     Component { id: separatorComp;   SeparatorWidget   {} }
 
     /* Container components — dynamic URL loading breaks the bilateral cycle.
@@ -100,8 +144,9 @@ Loader {
      * reference from their side), so WidgetDelegate must NOT reference them by
      * type name in return.  Using Qt.resolvedUrl produces a runtime string; Qt's
      * cycle detector does not follow string arguments.
-     * Requires RowWidget.props and GridWidget.props to be non-required (set via
-     * live binding in onLoaded after the item is created). */
+     * Requires RowWidget.props/childModel and GridWidget.props/childModel to be
+     * non-required (set via live binding in onLoaded after the item is
+     * created). */
     Component {
         id: rowComp
         Loader {
@@ -110,6 +155,7 @@ Loader {
             onLoaded: {
                 item.label = Qt.binding(function() { return root._label })
                 item.props = Qt.binding(function() { return root._props })
+                item.childModel = Qt.binding(function() { return root._childModel })
                 item.compact = Qt.binding(function() { return root.compact })
             }
             Layout.fillWidth: true
@@ -123,6 +169,7 @@ Loader {
             onLoaded: {
                 item.label = Qt.binding(function() { return root._label })
                 item.props = Qt.binding(function() { return root._props })
+                item.childModel = Qt.binding(function() { return root._childModel })
                 item.compact = Qt.binding(function() { return root.compact })
             }
             /* Without this, a grid nested inside another row/grid gets

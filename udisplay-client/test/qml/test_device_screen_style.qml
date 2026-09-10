@@ -34,7 +34,13 @@ Item {
         property string deviceName: "Sentinel Device"
         property string state: "running"
         property string designErrorString: ""
-        property var widgetModel: []
+        /* Real WidgetModel exposes generation/childModel(); an empty array
+         * doesn't, so DeviceScreen.qml's `controller.widgetModel.childModel(-1)`
+         * throws a TypeError on every run — silently, since this test only
+         * asserts on background/header colors via a Timer and never checks
+         * console output for errors. FakeWidgetModel.qml (this directory)
+         * is the same minimal stand-in the other migrated QML tests use. */
+        property var widgetModel: FakeWidgetModel {}
         property var activeStyle: QtObject {
             property string background:   "#123456"
             property string surface:      "#abcdef"

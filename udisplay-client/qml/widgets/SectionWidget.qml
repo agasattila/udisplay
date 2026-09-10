@@ -5,56 +5,97 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import "./"
 
-/* Section header — renders a labelled group divider.
- * Children appear as normal items in the flat Repeater after this widget.
+/* Section header, followed by its own children stacked full-width below it.
+ *
+ * Pre-flattening, a section's children were genuinely flat top-level
+ * siblings in WidgetModel's own list — a separate `sectionOwnerRow` field
+ * (not the tree's own parent/child shape) tracked collapse-visibility
+ * ownership independently of rendering position. This flattening refactor
+ * folded both into one `parentId` (children now structurally nest under
+ * their section's own row, matching every other container), which fixed
+ * collapse-visibility but silently broke rendering: nothing walked
+ * `childModel(sectionRow)` to actually display those children, since
+ * SectionWidget previously had none. Fixed by giving SectionWidget the same
+ * childModel + WidgetDelegate-Repeater shape RowWidget.qml uses, just
+ * stacked vertically instead of horizontally, matching the original
+ * full-width "normal item" appearance.
+ *
+ * Collapse itself needs no filtering here — each child's own `visible`
+ * binding (WidgetDelegate.qml → `model.widgetVisible`) already reflects
+ * WidgetModel's parentId-chain ancestor walk (WidgetModel.cpp's VisibleRole),
+ * so simply instantiating every childModel row and letting its own
+ * visibility binding do the hiding is correct.
+ *
  * props.collapsible: bool — show chevron toggle
- * props.collapsed:   bool — current collapsed state (runtime, from model) */
+ * props.collapsed:   bool — current collapsed state (runtime, from model)
+ * childModel: every child of this section, as a real model (see
+ * WidgetModel::childModel()) — supplied by DeviceScreen.qml's sectionComp. */
 Rectangle {
     id: root
     required property string label
     property var props: ({})
+    property var childModel: null
 
     signal toggleClicked()
 
-    /* The divider Rectangle below is a fillWidth spacer with no natural
-     * size; 40 covers spacing + the optional chevron's width. Section isn't
-     * currently supported as a row/grid child (TODO-032), so this mostly
-     * matters for consistency with the rest of the widget set. */
     implicitWidth: sectionLabel.implicitWidth + 40 + 32
-    implicitHeight: 36
-    color: controller.activeStyle.surface
+    implicitHeight: col.implicitHeight
+    color: "transparent"
 
-    RowLayout {
-        anchors { fill: parent; leftMargin: 16; rightMargin: 16 }
-        spacing: 8
-
-        Label {
-            id: sectionLabel
-            text: label.toUpperCase()
-            color: controller.activeStyle.accent
-            font.pixelSize: 11
-            font.letterSpacing: 1.5
-            font.bold: true
-        }
+    ColumnLayout {
+        id: col
+        anchors { left: parent.left; right: parent.right }
+        spacing: 0
 
         Rectangle {
             Layout.fillWidth: true
-            height: 1
-            color: controller.activeStyle.line
+            implicitHeight: 36
+            color: controller.activeStyle.surface
+
+            RowLayout {
+                anchors { fill: parent; leftMargin: 16; rightMargin: 16 }
+                spacing: 8
+
+                Label {
+                    id: sectionLabel
+                    text: root.label.toUpperCase()
+                    color: controller.activeStyle.accent
+                    font.pixelSize: 11
+                    font.letterSpacing: 1.5
+                    font.bold: true
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: controller.activeStyle.line
+                }
+
+                Label {
+                    visible: root.props.collapsible === true
+                    text: root.props.collapsed === true ? "▶" : "▼"
+                    color: controller.activeStyle.accent
+                    font.pixelSize: 11
+                }
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                enabled: root.props.collapsible === true
+                onClicked: root.toggleClicked()
+            }
         }
 
-        Label {
-            visible: props.collapsible === true
-            text: props.collapsed === true ? "▶" : "▼"
-            color: controller.activeStyle.accent
-            font.pixelSize: 11
-        }
-    }
+        Repeater {
+            id: repeater
+            model: root.childModel
 
-    MouseArea {
-        anchors.fill: parent
-        enabled: props.collapsible === true
-        onClicked: root.toggleClicked()
+            delegate: WidgetDelegate {
+                required property var model
+                Layout.fillWidth: true
+            }
+        }
     }
 }

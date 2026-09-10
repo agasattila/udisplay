@@ -12,6 +12,12 @@ import "../../qml/widgets" as W
  * not a fill difference), and disabled opacity must match button's 0.3
  * (previously 0.35).
  *
+ * WidgetModel is a flat list now — a button-group's items come from
+ * WidgetModel::childModel(), not a props.items array (see
+ * ButtonGroupWidget.qml). This test builds a ListModel and feeds it via
+ * childModel: instead — see FakeWidgetModel.qml's header comment for why a
+ * `controller.widgetModel` stand-in is needed at all.
+ *
  * Run headless: `qml -platform offscreen test_button_group_face.qml`.
  * Exits 0 on pass, 1 (with a console.error) on fail — CTest reads the exit code.
  */
@@ -36,6 +42,7 @@ Item {
             property string button:       "#00d4aa"
             property string button_text:  "#0d0d1a"
         }
+        property var widgetModel: FakeWidgetModel {}
         property int lastPressId: -1
         property int lastReleaseId: -1
         property int lastClickId: -1
@@ -74,13 +81,17 @@ Item {
         return labels.length > 0 ? labels[0] : null
     }
 
-    property var groupProps: ({
-        layout: "grid",
-        items: [
-            { widgetId: 0x10, label: "Fast" },
-            { widgetId: 0x11, label: "Slow" }
-        ]
-    })
+    ListModel {
+        id: groupItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0x10, type: "button", label: "Fast", enabled: true, widgetVisible: true, value: 0,
+                     flex: 0, align: "", props: { position: 0 } })
+            append({ widgetId: 0x11, type: "button", label: "Slow", enabled: true, widgetVisible: true, value: 0,
+                     flex: 0, align: "", props: { position: 1 } })
+            ready = true
+        }
+    }
 
     W.ButtonGroupWidget {
         id: group
@@ -88,7 +99,8 @@ Item {
         label: "Mode"
         enabled: true
         value: 0x10   /* first item "selected" */
-        props: groupProps
+        props: ({})
+        childModel: groupItems.ready ? groupItems : null
     }
 
     W.ButtonGroupWidget {
@@ -98,7 +110,8 @@ Item {
         label: "Mode"
         enabled: false
         value: null
-        props: groupProps
+        props: ({})
+        childModel: groupItems.ready ? groupItems : null
     }
 
     Timer {
@@ -117,7 +130,7 @@ Item {
 
             var selected = null, unselected = null
             for (var j = 0; j < faces.length; j++) {
-                if (faces[j].modelData.widgetId === 0x10) selected = faces[j]
+                if (faces[j].model.widgetId === 0x10) selected = faces[j]
                 else unselected = faces[j]
             }
             if (!selected || !unselected) { fail("could not identify selected/unselected items"); return }

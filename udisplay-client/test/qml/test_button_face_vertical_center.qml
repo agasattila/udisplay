@@ -13,6 +13,12 @@ import "../../qml/widgets" as W
  * pinned to row.y=0 (the top), leaving face content visually top-aligned
  * instead of centered.
  *
+ * WidgetModel is a flat list now — a button's face children come from
+ * WidgetModel::childModel(), not a props.items array (see ButtonWidget.qml).
+ * This test builds a ListModel and feeds it via childModel: instead — see
+ * FakeWidgetModel.qml's header comment for why a `controller.widgetModel`
+ * stand-in is needed at all.
+ *
  * Run headless: `qml -platform offscreen test_button_face_vertical_center.qml`.
  * Exits 0 on pass, 1 (with a console.error) on fail — CTest reads the exit code.
  */
@@ -34,6 +40,7 @@ Item {
             property string button:       "#00d4aa"
             property string button_text:  "#0d0d1a"
         }
+        property var widgetModel: FakeWidgetModel {}
         function sendButtonPress(id) {}
         function sendButtonRelease(id) {}
         function sendButtonClick(id) {}
@@ -42,6 +49,16 @@ Item {
     function fail(msg) {
         console.error("FAIL: " + msg)
         Qt.exit(1)
+    }
+
+    ListModel {
+        id: faceItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 2, type: "led", label: "PWR", enabled: true, widgetVisible: true, value: true,
+                     flex: 0, align: "", props: {} })
+            ready = true
+        }
     }
 
     /* Square shape forces a tall button (min 64px, see ButtonWidget.qml's
@@ -54,12 +71,8 @@ Item {
         enabled: true
         width: 160
         height: 160
-        props: ({
-            shape: "square",
-            items: [
-                { type: "led", widgetId: 2, label: "PWR", enabled: true, value: true, props: {} }
-            ]
-        })
+        props: ({ shape: "square" })
+        childModel: faceItems.ready ? faceItems : null
     }
 
     Timer {

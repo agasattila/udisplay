@@ -6,15 +6,18 @@ import QtQuick.Controls
 import "./"
 
 /* Momentary push button. Sends button_press EVENT on tap.
- * If props.items is non-empty, child widgets are rendered on the button face
+ * If childModel is non-empty, child widgets are rendered on the button face
  * (label is hidden). If empty, the label text is shown as the face text.
  *
  * Fill color, press-darken, shape-driven radius, and disabled opacity live in
  * the shared ButtonFace.qml component so button-group items can look and
  * behave identically — see ButtonFace.qml's header comment.
  *
- * Face content is ONE embedded compact RowWidget bound to props.items —
- * unconditionally, no shape-sniffing, no face:/children: distinction.
+ * Face content is ONE embedded compact RowWidget bound to childModel —
+ * unconditionally, no shape-sniffing, no face:/children: distinction. A
+ * dpad button's own face children are not supported (DpadWidget.qml
+ * instantiates ButtonWidget without a childModel) — matches the original
+ * (pre-flattening) dpad item shape, which never had face children either.
  *
  * The face RowWidget is loaded via Qt.resolvedUrl (a dynamic Loader{source:},
  * NOT a static `RowWidget { ... }` instantiation) for the same reason
@@ -35,10 +38,14 @@ Rectangle {
     required property string label
     required property bool   enabled
     required property var    props
+    /* Non-required: DpadWidget.qml instantiates ButtonWidget without one
+     * (dpad buttons don't support their own face children — see header
+     * comment). Every other call site (WidgetDelegate.qml's buttonComp)
+     * always supplies one. */
+    property var    childModel: null
 
     property string btnShape:    props["shape"] !== undefined ? props["shape"] : "rect"
-    property var    childItems:  props["items"] || []
-    property bool   hasChildren: childItems.length > 0
+    property bool   hasChildren: childModel ? childModel.rowCount() > 0 : false
 
     implicitWidth: Math.max(root.hasChildren && facesRowLoader.item ? facesRowLoader.item.implicitWidth + 12: face.labelImplicitWidth + 12, 64)
     implicitHeight: Math.max(root.hasChildren && facesRowLoader.item ? facesRowLoader.item.implicitHeight + 12: face.labelImplicitHeight + 12 , root.btnShape === "rect" ? 40 : 64)
@@ -74,7 +81,7 @@ Rectangle {
             source: Qt.resolvedUrl("RowWidget.qml")
             onLoaded: {
                 item.compact = true
-                item.props = Qt.binding(function() { return { "items": root.childItems } })
+                item.childModel = Qt.binding(function() { return root.childModel })
             }
         }
     }
