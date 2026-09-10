@@ -37,7 +37,7 @@
           "maxLength": 255
         },
         "capabilities": {
-          "description": "Optional list of capability hint strings. Reserved for future use — the client currently accepts any capability string (kKnownCapabilities is empty; check is a no-op). Will gate features requiring a minimum client version once the first official release ships.",
+          "description": "Optional list of capability hint strings. Reserved for future use — the client's kKnownCapabilities list is currently empty, so it REJECTS any device that sends a non-empty capabilities list (unknown capability => handshake rejected), not the other way around. Omit this field entirely until the client ships a known-capabilities list to check against. Will gate features requiring a minimum client version once the first official release ships.",
           "type": "array",
           "items": {
             "type": "string",
