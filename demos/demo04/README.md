@@ -43,6 +43,18 @@ never hand-edited (see `ui.py`'s own header comment).
   precompiled to `.mpy`) — see the design doc's Success Criteria for the
   full numbers and caveats (Unix port is a proxy, not real ESP8266
   hardware).
+- Hardened since that first pass, via adversarial review (Claude + Codex)
+  against the live server: idle unauthenticated connections are now reaped
+  after 3 missed heartbeats (~15s) instead of permanently occupying the
+  server's one `listen()` slot — a trivial DoS in the original v0, since
+  there's no auth to gate a connection attempt; `main.py` now sends framed
+  messages through `tcp_send_all()` instead of a raw `conn.send()`, so a
+  partial write on a slow link can no longer desync the stream;
+  `udisplay_runtime.py`'s `TcpRx.feed()` compacts its buffer before
+  dispatching a message rather than after, so a callback exception can't
+  wedge the connection on a poisoned frame forever; and outgoing strings
+  that exceed the wire format's 255-byte length field are now truncated on
+  a UTF-8 character boundary instead of raising or emitting invalid UTF-8.
 
 ## Not yet implemented
 

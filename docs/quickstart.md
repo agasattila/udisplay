@@ -80,7 +80,7 @@ error instead of a silent misrender):
 udisplay-gen validate device.yaml
 ```
 
-Then build. `udisplay-gen build` supports three output modes, selected by `--lang` and
+Then build. `udisplay-gen build` supports four output modes, selected by `--lang` and
 `--modern`:
 
 | Command | Output files | Handler style |
@@ -88,12 +88,14 @@ Then build. `udisplay-gen build` supports three output modes, selected by `--lan
 | `udisplay-gen build device.yaml` | `udisplay_ui.h`, `udisplay_ui.c`, `udisplay_ui.bin` | C function pointers in a `udisplay_ui_handlers_t` struct |
 | `udisplay-gen build device.yaml --lang cpp` | `udisplay_ui.hpp`, `udisplay_ui.bin` | C++ raw function pointers (`void (*on_change)(...)`) |
 | `udisplay-gen build device.yaml --lang cpp --modern` | `udisplay_ui.hpp`, `udisplay_ui.bin` | C++ `std::function` — enables lambda handlers |
+| `udisplay-gen build device.yaml --lang micropython` | `ui.py`, `udisplay_runtime.py` | Python callbacks; TCP transport only, no auth (v0) — see [demos/demo04](../demos/demo04/) |
 
-All three modes embed the same compiled UI blob (widget IDs, Merkle root, compressed
+All four modes embed the same compiled UI blob (widget IDs, Merkle root, compressed
 YAML) — `--lang` only changes the *shape of the API you call from firmware*, not the
 wire format the client sees. `udisplay_ui.bin` is a byte-for-byte copy of the blob for
 workflows that flash it separately; the C++ header embeds the same bytes inline as
-static arrays, so `udisplay_ui.bin` isn't actually needed to build against `.hpp`.
+static arrays, so `udisplay_ui.bin` isn't actually needed to build against `.hpp`. The
+MicroPython mode embeds the blob directly in generated `ui.py` instead.
 
 For this quickstart, generate the modern C++ variant — it's what step 4 uses:
 
