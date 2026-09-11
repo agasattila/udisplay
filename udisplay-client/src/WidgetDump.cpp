@@ -99,6 +99,8 @@ void dumpWidget(QTextStream& out, const QList<WidgetDef>& all, int row, int dept
         out << pad << QStringLiteral("  flex: %1\n").arg(w.flex);
         out << pad << QStringLiteral("  align: %1\n").arg(formatValue(w.align));
         break;
+    case WidgetType::Toggle:
+        break;
     case WidgetType::Unknown:
         break;
     }
