@@ -36,6 +36,7 @@ import sys
 import time
 
 import ui as ui_module
+from udisplay_runtime import tcp_send_all
 
 TICK_S = 0.1
 HEARTBEAT_S = 5.0
@@ -67,9 +68,19 @@ def _temp_display_update(u):
         u.temp_display.set(temp)
 
 
-def _make_ui(conn):
-    """Build a UI bound to this connection, with demo01-equivalent handlers."""
-    u = ui_module.UI(send=conn.send)
+def _make_ui(conn, comms_dead):
+    """Build a UI bound to this connection, with demo01-equivalent handlers.
+    `comms_dead` is a single-element list used as an out-of-band flag: v0 has
+    no auth, so an idle peer that never answers heartbeats must be reaped,
+    not left occupying the demo's one listen() slot forever (adversarial
+    review finding, 2026-09-11)."""
+    u = ui_module.UI(send=lambda data: tcp_send_all(conn, data))
+
+    def on_comms_error():
+        print("[COMMS] heartbeat miss limit reached, dropping connection")
+        comms_dead[0] = True
+
+    u.on_comms_error = on_comms_error
 
     def on_client_ready():
         print("[EVENT] client_ready")
@@ -161,7 +172,8 @@ def _serve_one_connection(conn):
     global _sim_time, _tick, _initial_sent
 
     conn.settimeout(TICK_S)
-    u = _make_ui(conn)
+    comms_dead = [False]
+    u = _make_ui(conn, comms_dead)
     u.on_connect()
     _initial_sent = False
     hb_acc = 0.0
@@ -173,6 +185,9 @@ def _serve_one_connection(conn):
             data = _recv_or_none(conn)
             if data:
                 u.feed(data)
+
+            if comms_dead[0]:
+                break
 
             now = time.time()
             dt = now - last
