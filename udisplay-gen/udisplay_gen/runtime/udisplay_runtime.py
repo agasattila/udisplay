@@ -103,8 +103,40 @@ def proto_state_uint8(widget_id, value):
     return bytes([MSG_STATE_UPDATE, widget_id, 0x03, value])
 
 
+def _utf8_safe_truncate(b, maxlen):
+    """Truncate `b` (assumed valid UTF-8) to at most `maxlen` bytes without
+    splitting a multi-byte codepoint. A raw byte cut can only land inside
+    the LAST codepoint (everything before it was already valid), so back
+    off up to 3 bytes -- the longest UTF-8 sequence -- until it decodes
+    clean. Found via adversarial review, 2026-09-11: a raw b[:255] cut
+    emitted invalid UTF-8 on the wire for e.g. "e-acute"*128."""
+    if len(b) <= maxlen:
+        return b
+    b = b[:maxlen]
+    for _ in range(4):
+        try:
+            b.decode("utf-8")
+            return b
+        except UnicodeError:
+            # CPython raises UnicodeDecodeError (a UnicodeError subclass);
+            # MicroPython raises plain UnicodeError -- catch the common
+            # base so this runs unmodified on both (verified against a
+            # real MicroPython 1.24.1 build, 2026-09-11).
+            b = b[:-1]
+    return b
+
+
 def proto_state_string(widget_id, s):
     b = s.encode() if isinstance(s, str) else bytes(s)
+    if len(b) > 255:
+        # The wire format's length field is one byte (matches the C
+        # reference's `uint8_t len` parameter, which truncates implicitly
+        # at the call site) -- truncate here instead of crashing on
+        # bytes([...]) below. Found via red-team review, 2026-09-11:
+        # proto_state_string(widget_id, "x"*300) raised ValueError before
+        # this fix, crashing device-controlled code (a long label or
+        # accumulated sensor string), not just attacker-supplied input.
+        b = _utf8_safe_truncate(b, 255)
     return bytes([MSG_STATE_UPDATE, widget_id, 0x04, len(b)]) + b
 
 
@@ -254,11 +286,18 @@ class TcpRx:
             msg, consumed = tcp_unframe(memoryview(self.buf)[:self.used])
             if msg is None:
                 break
-            on_message(msg)
+            # Compact BEFORE dispatching: if on_message raises (a bug in a
+            # decode path or a user callback), the buffer must already be
+            # past this frame, or the connection gets permanently wedged --
+            # every future feed() would re-parse and re-raise on the same
+            # poisoned frame forever (found via red-team review, 2026-09-11:
+            # confirmed this way with a real malformed-UTF-8 TEXT_SUBMIT
+            # frame followed by an unrelated, well-formed HEARTBEAT frame).
             remaining = self.used - consumed
             if remaining:
                 self.buf[0:remaining] = self.buf[consumed:self.used]
             self.used = remaining
+            on_message(msg)
         return False
 
 
@@ -416,7 +455,14 @@ class UDisplayDevice:
         elif event_type == UDISPLAY_EVENT_TEXT_SUBMIT:
             if len(payload) >= 1:
                 length = payload[0]
-                value = bytes(payload[1:1 + length]).decode() if length > 0 else ""
+                # errors="replace", not strict decode: payload bytes come
+                # directly from an unauthenticated TCP peer (v0 has no
+                # auth). A single invalid UTF-8 byte must not raise --
+                # this module's own contract (see docstring, and
+                # proto_parse's malformed-input handling) is that bad
+                # input is handled gracefully, never crashes the caller.
+                # Found via specialist + red-team review, 2026-09-11.
+                value = bytes(payload[1:1 + length]).decode("utf-8", "replace") if length > 0 else ""
             else:
                 value = ""
         elif event_type == UDISPLAY_EVENT_SELECTION_CHANGE:
