@@ -287,6 +287,33 @@ shape of two bugs already logged against this codebase.
   reuse and avoiding per-message allocation churn as v0 work, not a
   post-hoc fix if the budget is missed.
 
+  **Measured (2026-09-11), MicroPython 1.24.1 Unix port, built from source
+  in this session, against `demo04.yaml`'s fixture (11 ID-bearing widgets,
+  including a button+LED child and a button-group+3-items composite):**
+  - Raw `.py` source (`ui.py` + `udisplay_runtime.py`, as `python_backend.py`
+    generates today): minimum viable `-X heapsize` is **~67-68KB** — fails
+    at 66K, succeeds at 68K. That leaves only ~12-13KB of headroom under
+    the 80KB target on this fixture, on the Unix port specifically.
+  - Precompiled `.mpy` bytecode (`mpy-cross ui.py -o ui.mpy`, same for the
+    runtime — the "future optimization" already named in Distribution
+    Plan): minimum viable heap drops to **~32-33KB** — roughly half.
+    Confirms the dominant cost is on-the-fly *source compilation* at
+    import time, not steady-state object footprint, exactly as flagged in
+    Cross-Model Perspective above.
+  - Steady-state footprint (post-bootstrap, via `gc.mem_alloc()`) is small
+    and bounded: ~4KB for `UI()` construction, **no growth** across 200
+    simulated event/send/heartbeat cycles — no leak in the runtime itself.
+  - **This changes the risk picture for ESP8266 specifically:** ~67KB
+    minimum (raw source) leaves little margin against the unix port's own
+    baseline being a poor proxy for ESP8266's actual free heap (WiFi stack
+    overhead, MicroPython port differences) — worth treating `.mpy`
+    precompilation as a real ESP8266 mitigation to reach for early, not a
+    someday nicety, if real hardware (`demo06`) shows the raw-source
+    number doesn't leave enough margin. Not re-scoped into v0 based on
+    this alone — this is Unix-port evidence, not hardware evidence — but
+    the Distribution Plan's "future optimization" framing may prove too
+    casual once `demo06` has real numbers.
+
 ## Test Plan (v0)
 
 Traced against every planned `udisplay_runtime.py` codepath (`/plan-eng-review`,
@@ -383,10 +410,13 @@ Traced against every planned `udisplay_runtime.py` codepath (`/plan-eng-review`,
    backend's tests run under Unix MicroPython in CI, not just CPython/pytest
    — the whole point of this backend is MicroPython compatibility, so CI
    should exercise the interpreter that actually matters.
-10. Validate the 80KB RAM fixture on Unix MicroPython with a constrained heap
-   (per Codex's suggested methodology), applying pre-sized buffer reuse as
-   v0 design rather than a post-hoc fix, before attempting real ESP8266
-   hardware in `demo06`.
+10. **Done for the Unix-port proxy (2026-09-11)** — validated against
+    `demo04.yaml`'s fixture, see Success Criteria for the measured numbers
+    (~67-68KB raw source / ~32-33KB precompiled `.mpy`, both well inside
+    80KB, but raw source leaves thin margin). Still open: the *worst-case*
+    fixture (up to `MAX_WIDGETS`=240) is unmeasured, and none of this
+    substitutes for real ESP8266 hardware validation in `demo06` — the
+    Unix port's baseline is not the same as ESP8266's actual free heap.
 
 ## NOT in Scope (v0)
 

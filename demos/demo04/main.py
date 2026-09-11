@@ -40,6 +40,16 @@ import ui as ui_module
 TICK_S = 0.1
 HEARTBEAT_S = 5.0
 
+# MicroPython 1.24.1's errno module doesn't define EWOULDBLOCK (only
+# ETIMEDOUT and EAGAIN) -- confirmed against a real build. getattr with a
+# fallback avoids an AttributeError that would otherwise crash the whole
+# process the first time a recv() timeout is hit under MicroPython.
+_TIMEOUT_ERRNOS = (
+    errno.ETIMEDOUT,
+    errno.EAGAIN,
+    getattr(errno, "EWOULDBLOCK", errno.EAGAIN),
+)
+
 # ── Simulation state (module-level: mirrors demo01/main.c's static globals;
 #    MicroPython doesn't need a mutex here since this is single-threaded) ──
 _base_rate_hz = 1.0
@@ -139,7 +149,7 @@ def _recv_or_none(conn):
         # (Confirmed empirically against CPython 3.12 -- an earlier version
         # of this check compared args[0] only against errno ints and so
         # treated every single CPython timeout as a fatal disconnect.)
-        if args0 == "timed out" or args0 in (errno.ETIMEDOUT, errno.EAGAIN, errno.EWOULDBLOCK):
+        if args0 == "timed out" or args0 in _TIMEOUT_ERRNOS:
             return None
         raise
     if not data:
@@ -202,7 +212,12 @@ def _serve_one_connection(conn):
 def run(port):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("0.0.0.0", port))
+    # MicroPython's socket.bind() requires a resolved sockaddr, not a plain
+    # (host, port) tuple with a string host the way CPython accepts directly
+    # -- confirmed against a real MicroPython 1.24.1 build (raises TypeError:
+    # "object with buffer protocol required" otherwise). getaddrinfo() works
+    # identically on both runtimes.
+    server.bind(socket.getaddrinfo("0.0.0.0", port)[0][-1])
     server.listen(1)
     print("[demo04] listening on port %d" % port)
     print("[demo04] connect with:  udisplay-client tcp://127.0.0.1:%d" % port)
@@ -210,7 +225,11 @@ def run(port):
 
     while True:
         conn, addr = server.accept()
-        print("[CONN] %s connected." % (addr,))
+        # MicroPython's accept() returns the peer address as a raw sockaddr
+        # bytearray, not a (host, port) tuple like CPython -- print it as-is
+        # rather than assuming tuple structure (confirmed against a real
+        # MicroPython 1.24.1 build).
+        print("[CONN] client connected:", addr)
         try:
             _serve_one_connection(conn)
         except OSError:
