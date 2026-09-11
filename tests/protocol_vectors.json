@@ -380,24 +380,26 @@
       "total_bytes": 4
     },
     "BLE_fragment_first": {
-      "description": "First ATT notification fragment of CHUNK_HEADER_RESPONSE_full at MTU=23. Flags byte 0x80: more_fragments=1, seq=0. Payload = first 22 bytes of CHUNK_HEADER_RESPONSE_full.",
+      "description": "First ATT notification fragment of CHUNK_HEADER_RESPONSE_full, v2.2 offset+packet_id scheme (udisplay_ble_fragment, framing.c), mtu_payload=23, packet_id=0. Header: [u16 offset=0][u8 packet_id][u16 msg_len][u8 flags=0]. Payload = first 17 bytes of CHUNK_HEADER_RESPONSE_full (mtu_payload - 6-byte header). Regenerated 2026-09-11 -- the previous fixture used the superseded v1 1-byte more_fragments-flag scheme and no longer matched this test's own v2.2 decode logic.",
       "input": {
         "source_message": "CHUNK_HEADER_RESPONSE_full",
-        "mtu": 23,
+        "mtu_payload": 23,
+        "packet_id": 0,
         "fragment": "first"
       },
-      "bytes": "80 11 83 41 cf d5 9a 9f 9b 4c ed 5e 23 df 0b 06 8f 5d eb 11 20 40 f3",
+      "bytes": "00 00 00 22 00 00 11 83 41 cf d5 9a 9f 9b 4c ed 5e 23 df 0b 06 8f 5d",
       "total_bytes": 23
     },
     "BLE_fragment_last": {
-      "description": "Last ATT notification fragment of CHUNK_HEADER_RESPONSE_full at MTU=23. Flags byte 0x00: more_fragments=0. Payload = remaining 12 bytes.",
+      "description": "Second (continuation, and final) ATT notification fragment of CHUNK_HEADER_RESPONSE_full, v2.2 scheme, mtu_payload=23, packet_id=0. Header: [u16 offset=17][u8 packet_id]. Payload = remaining 17 bytes -- fits in one continuation fragment (mtu_payload - 3-byte header = 20 >= 17 remaining), so exactly 2 fragments total for this 34-byte message. Regenerated 2026-09-11, see BLE_fragment_first.",
       "input": {
         "source_message": "CHUNK_HEADER_RESPONSE_full",
-        "mtu": 23,
+        "mtu_payload": 23,
+        "packet_id": 0,
         "fragment": "last"
       },
-      "bytes": "00 c4 41 b4 5a 49 95 2b 3b b9 c1 09 00",
-      "total_bytes": 13
+      "bytes": "11 00 00 eb 11 20 40 f3 c4 41 b4 5a 49 95 2b 3b b9 c1 09 00",
+      "total_bytes": 20
     },
     "TCP_framed_STATE_float32": {
       "description": "TCP framing: u16_le length prefix (7) + STATE_UPDATE_float32 payload.",
