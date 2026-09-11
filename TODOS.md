@@ -77,6 +77,41 @@ while, and CI time/reliability becoming a real friction point.
 
 ## P2 — Deferred Features
 
+### TODO-054: MicroPython protocol-port spec (`docs/micropython-port.md`)
+**What:** A written spec for `libudisplay`'s protocol *behavior* — connection
+lifecycle, heartbeat timing (`HB_MISS_MAX`, when misses reset vs. accumulate),
+TCP reassembly semantics, and Merkle chunk-verification order — that both the
+Python port (`udisplay-gen`'s new `udisplay_runtime.py`) and any future
+change to `libudisplay.c` check against. Same pattern as `docs/merkle.md`
+(TODO-001), but for state-machine behavior instead of byte layout.
+**Why:** This repo already has a documented, cross-model-flagged risk pattern
+(`dual_derivation_widget_ids_no_shared_manifest`, 2026-07-26): two independent
+implementations of the same protocol-critical logic, agreement enforced only
+by matching code comments, closed only after a golden-fixture test caught
+drift. The MicroPython backend (design: `docs/designs/micropython-backend.md`)
+is about to add a second independent implementation of framing, heartbeat,
+and Merkle verification — `tests/protocol_vectors.json` already covers
+message *bytes* for this, but not *behavior over time* (when does a heartbeat
+miss get forgiven vs. counted, what's the exact reassembly-buffer-overflow
+contract).
+**Pros:** Closes the same risk class TODO-001 already closed for byte layout,
+for the piece that class doesn't cover. Makes `libudisplay.c` the documented
+reference instead of tribal C-reading knowledge for the next port (or the
+next contributor touching the heartbeat logic).
+**Cons:** Real scope — a behavior/timing spec is harder to keep accurate than
+a byte-layout spec, and can go stale if only one implementation changes
+without the doc being updated alongside it.
+**Context:** Raised during `/plan-eng-review` of the MicroPython backend
+design (2026-09-11). The C source is already correct and battle-tested
+(verified during this review: no lingering function-local `static` state from
+the 2026-07-30 multi-instance refactor) — this TODO is about writing down
+what's already true, not fixing anything broken.
+**Effort:** M (human: ~1 day / CC: ~1-2 hours)
+**Priority:** P2 — valuable before or during the MicroPython port, not
+blocking the design itself.
+**Depends on:** None — can start any time; most useful if written before or
+alongside the protocol port (Next Steps item 3 in the MicroPython design doc).
+
 ## P2 — Post-Launch Distribution & Quality
 
 ### TODO-004: Package manager distribution (v1.1)
