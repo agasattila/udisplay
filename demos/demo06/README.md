@@ -1,6 +1,8 @@
 # demo06 — ESP8266 MicroPython
 
-**Status: PLACEHOLDER** — blocked on MicroPython backend and hardware availability.
+**Status: PLACEHOLDER** — blocked on hardware availability. The MicroPython
+codegen backend itself is done (see [demo04](../demo04/), its PC-emulator
+counterpart) — this demo is purely gated on the remaining items below.
 
 ## Goal
 
@@ -9,9 +11,13 @@ target; validates that the protocol and UI can run within 80 KB of usable RAM.
 
 ## Blockers
 
-- `udisplay-gen --lang micropython` backend not yet implemented (v2 scope item)
-- MicroPython C extension for libudisplay not yet written
 - No ESP8266 hardware available for validation
+- The 80KB RAM fixture and target MicroPython firmware/version baseline are
+  still open (see `docs/designs/micropython-backend.md`'s Open Questions)
+- `udisplay_runtime.py`'s RAM footprint on real ESP8266 hardware is
+  unvalidated — the design doc's pre-sized-buffer approach targets this
+  budget but hasn't been measured on the constrained-heap Unix MicroPython
+  port yet, let alone real hardware
 
 ## Planned usage
 
