@@ -150,6 +150,70 @@ class TestGeneratedContent:
         assert "main.py" in ui_py
 
 
+class TestWrapperClassSelection:
+    """The _WRAPPER_CLASS mapping (display/led/rgbled/toggle/slider/
+    text-rw/dropdown/button) was only ever exercised indirectly -- no
+    existing test asserted which wrapper class gets instantiated for the
+    non-button types. A wrong lookup here (e.g. rgbled silently falling
+    back to ButtonWidget's default) would compile fine and only misbehave
+    at runtime."""
+
+    def test_each_leaf_type_gets_its_own_wrapper_class(self, full_vocab_yaml):
+        ctx = _make_ctx(full_vocab_yaml)
+        ui_py = next(f for f in python_backend.generate(ctx) if f.name == "ui.py").content
+        assert "self.slider_rate = SliderWidget(self._device, WIDGET_ID_SLIDER_RATE)" in ui_py
+        assert "self.toggle_relay = ToggleWidget(self._device, WIDGET_ID_TOGGLE_RELAY)" in ui_py
+        assert "self.display_volt = DisplayWidget(self._device, WIDGET_ID_DISPLAY_VOLT)" in ui_py
+        assert "self.power_led = LedWidget(self._device, WIDGET_ID_POWER_LED)" in ui_py
+        assert "self.status_rgb = RgbLedWidget(self._device, WIDGET_ID_STATUS_RGB)" in ui_py
+        assert "self.ssid_field = TextRwWidget(self._device, WIDGET_ID_SSID_FIELD)" in ui_py
+
+
+class TestGeneratedOutputEndToEndOtherEventTypes:
+    """test_generated_output_actually_imports_and_runs (below) only drives a
+    BUTTON_CLICK through the generated dispatch. The elif-chain in
+    _py_dispatch_cases has separate branches per widget type (toggle,
+    slider, text-rw, dropdown, ...) that a button-only round trip cannot
+    catch a mis-ordering bug in."""
+
+    def test_toggle_and_slider_events_reach_their_on_change_handlers(self, full_vocab_yaml, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["build", str(full_vocab_yaml), "-o", str(tmp_path),
+                                      "--lang", "micropython"])
+        assert result.exit_code == 0, result.output
+
+        sys.path.insert(0, str(tmp_path))
+        try:
+            for mod in ("ui", "udisplay_runtime"):
+                sys.modules.pop(mod, None)
+            import ui as generated_ui
+            from udisplay_runtime import tcp_frame, MSG_CLIENT_READY, MSG_EVENT
+            from udisplay_runtime import UDISPLAY_EVENT_TOGGLE_CHANGE, UDISPLAY_EVENT_SLIDER_CHANGE
+            import struct
+
+            sent = []
+            u = generated_ui.UI(send=sent.append)
+            u.on_connect()
+            u.feed(tcp_frame(bytes([MSG_CLIENT_READY])))
+
+            toggled = []
+            u.toggle_relay.on_change = lambda v: toggled.append(v)
+            u.feed(tcp_frame(bytes([MSG_EVENT, generated_ui.WIDGET_ID_TOGGLE_RELAY,
+                                     UDISPLAY_EVENT_TOGGLE_CHANGE, 0x01])))
+            assert toggled == [1]
+
+            slid = []
+            u.slider_rate.on_change = lambda v: slid.append(v)
+            payload = (bytes([MSG_EVENT, generated_ui.WIDGET_ID_SLIDER_RATE, UDISPLAY_EVENT_SLIDER_CHANGE])
+                       + struct.pack("<f", 42.0))
+            u.feed(tcp_frame(payload))
+            assert len(slid) == 1 and abs(slid[0] - 42.0) < 1e-4
+        finally:
+            sys.path.remove(str(tmp_path))
+            for mod in ("ui", "udisplay_runtime"):
+                sys.modules.pop(mod, None)
+
+
 class TestCliIntegration:
     def test_cli_lang_micropython_produces_two_files(self, minimal_yaml, tmp_path):
         runner = CliRunner()

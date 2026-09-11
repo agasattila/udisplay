@@ -47,9 +47,6 @@ _WRAPPER_CLASS = {
     "button-group-item": "ButtonItem",
 }
 
-# Types with a .set() setter (matches _shared.py's _SETTER_TYPES for c/cpp).
-_HAS_SETTER = {"display", "slider", "led", "rgbled", "toggle", "text-rw", "text-ro", "dropdown"}
-
 
 def generate(ctx: BuildContext) -> List[OutputFile]:
     if ctx.namespace:
@@ -196,13 +193,11 @@ class ButtonWidget:
         self.on_click = None
 
 
-class ButtonItem:
-    def __init__(self, device, widget_id):
-        self._device = device
-        self._widget_id = widget_id
-        self.on_press = None
-        self.on_release = None
-        self.on_click = None
+# button-group items have the identical shape to a top-level button (no
+# setter, three press/release/click callbacks) -- ButtonItem is the same
+# class under the name generated code uses for button-group children, not
+# a second implementation to keep in sync (maintainability review, 2026-09-11).
+ButtonItem = ButtonWidget
 
 
 class ButtonGroupWidget:
