@@ -16,6 +16,11 @@ Rectangle {
     required property bool   enabled
     required property var    value    /* string, null until first update */
     required property var    props
+    /* Resolved style tokens for this row (see WidgetDelegate.qml's
+     * _effectiveStyle). Non-required, defaulting to {} — standalone QML
+     * tests instantiate this widget directly with no controller/resolver in
+     * scope, so color bindings below read undefined fields gracefully (no crash). */
+    property var effectiveStyle: ({})
 
     /* rwField/value are input controls stretched to fill whatever width
      * they're given (width: parent.width below) — there's no "current text
@@ -37,7 +42,7 @@ Rectangle {
         Label {
             id: labelText
             text: root.label
-            color: controller.activeStyle.text_muted
+            color: effectiveStyle.text_muted
             font.pixelSize: 12
             font.capitalization: Font.AllUppercase
             font.letterSpacing: 1
@@ -49,7 +54,7 @@ Rectangle {
             width: parent.width
             text: root.value !== null && root.value !== undefined
                   ? String(root.value) : "—"
-            color: controller.activeStyle.text_heading
+            color: effectiveStyle.text_heading
             font.pixelSize: 15
             elide: Text.ElideRight
             visible: (props.mode || "readonly") === "readonly"
@@ -63,17 +68,17 @@ Rectangle {
             text: root.value !== null && root.value !== undefined
                   ? String(root.value) : ""
             maximumLength: props.maxlength || 255
-            color: controller.activeStyle.text_heading
-            Material.accent: controller.activeStyle.accent
+            color: effectiveStyle.text_heading
+            Material.accent: effectiveStyle.accent
             visible: (props.mode || "readonly") === "rw"
             enabled: root.enabled
 
             background: Rectangle {
-                color: controller.activeStyle.surface
+                color: effectiveStyle.surface
                 radius: 6
                 border.color: rwField.activeFocus
-                              ? controller.activeStyle.accent
-                              : controller.activeStyle.border
+                              ? effectiveStyle.accent
+                              : effectiveStyle.border
                 border.width: 1
             }
 

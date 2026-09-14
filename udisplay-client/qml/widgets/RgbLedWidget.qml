@@ -16,6 +16,11 @@ Rectangle {
     required property bool   enabled
     required property var    value
     property bool compact: false
+    /* Resolved style tokens for this row (see WidgetDelegate.qml's
+     * _effectiveStyle). Non-required, defaulting to {} — standalone QML
+     * tests instantiate this widget directly with no controller/resolver in
+     * scope, so color bindings below read undefined fields gracefully (no crash). */
+    property var effectiveStyle: ({})
 
     implicitWidth: rgbLedLabel.implicitWidth + 12 + 12 + 32  /* 12 dot + 12 spacing + margins */
     implicitHeight: Math.max(rgbLedLabel.implicitHeight, 48)
@@ -49,7 +54,7 @@ Rectangle {
         Label {
             id: rgbLedLabel
             text: root.label
-            color: controller.activeStyle.text
+            color: effectiveStyle.text
             font.pixelSize: 14
             Layout.fillWidth: true
         }

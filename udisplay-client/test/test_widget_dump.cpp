@@ -30,7 +30,7 @@ static int appendDisplay(QList<WidgetDef>& out, uint8_t id, int parentId = -1)
     w.parentId = parentId;
     w.props[QStringLiteral("unit")]   = QStringLiteral("C");
     w.props[QStringLiteral("format")] = QStringLiteral("%.1f");
-    w.props[QStringLiteral("style")]  = QStringLiteral("large");
+    w.props[QStringLiteral("displayStyle")]  = QStringLiteral("large");
     out.append(w);
     return out.size() - 1;
 }
@@ -56,7 +56,7 @@ static int appendLabel(QList<WidgetDef>& out, int parentId = -1)
     w.type     = WidgetType::Label;
     w.parentId = parentId;
     w.props[QStringLiteral("text")]  = QStringLiteral("Section Heading");
-    w.props[QStringLiteral("style")] = QStringLiteral("heading");
+    w.props[QStringLiteral("labelStyle")] = QStringLiteral("heading");
     out.append(w);
     return out.size() - 1;
 }
@@ -151,7 +151,7 @@ private slots:
         QVERIFY(out.contains(QStringLiteral("[0x10] display")));
         QVERIFY(out.contains(QStringLiteral("unit: \"C\"")));
         QVERIFY(out.contains(QStringLiteral("format: \"%.1f\"")));
-        QVERIFY(out.contains(QStringLiteral("style: \"large\"")));
+        QVERIFY(out.contains(QStringLiteral("displayStyle: \"large\"")));
     }
 
     void leafWidget_led_printsColor()

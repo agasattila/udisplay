@@ -21,7 +21,7 @@ _WIDGET_PROMPTS: dict[str, list[tuple[str, str, object]]] = {
         ("Label (shown above the value)", "label", ""),
         ("Unit (e.g. V, °C, Hz — blank to skip)", "unit", ""),
         ("Format string (e.g. %.2f — blank for default)", "format", ""),
-        ("Style [default/large]", "style", "default"),
+        ("Style [default/large]", "displayStyle", "default"),
     ],
     "led": [
         ("Label (shown beside the dot)", "label", ""),

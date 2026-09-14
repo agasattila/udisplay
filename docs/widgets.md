@@ -144,7 +144,8 @@ Device ──STATE_UPDATE(float)──► Client renders value
 | `label` | string | no | — | Shown above or beside the value. Max 32 chars. |
 | `unit` | string | no | — | Unit suffix (e.g. `"V"`, `"°C"`, `"Hz"`). Max 16 chars. |
 | `format` | string | no | `"%.2f"` | printf-style format applied to the raw float before display. Max 32 chars. |
-| `style` | `"default"` \| `"large"` | no | `"default"` | `"large"` renders as a full-width hero block with 32px bold value — for primary instrument readings. |
+| `displayStyle` | `"default"` \| `"large"` | no | `"default"` | `"large"` renders as a full-width hero block with 32px bold value — for primary instrument readings. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). This widget renders with that theme's colors instead of the app-wide active theme. |
 
 **Example:**
 
@@ -154,7 +155,7 @@ temp_display:
   label: "Temperature"
   unit: "°C"
   format: "%.1f"
-  style: large
+  displayStyle: large
 ```
 
 **Generated C API:**
@@ -218,6 +219,7 @@ Device ──STATE_UPDATE(bool)──► Client renders dot ON/OFF
 | `type` | `"led"` | yes | — | |
 | `label` | string | no | — | Shown beside the dot (standalone) or on the button face (child). Max 32 chars. |
 | `color` | string (hex) | no | `#00d4aa` | Active/on color of the dot. Must be `#rrggbb`. Off-state is always `#2a2a4a`. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). |
 
 **Example (standalone):**
 
@@ -297,6 +299,7 @@ low 24 bits (R, G, B) are used.
 |---|---|---|---|---|
 | `type` | `"rgbled"` | yes | — | |
 | `label` | string | no | — | Shown beside the dot. Max 32 chars. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). |
 
 **Example:**
 
@@ -422,7 +425,7 @@ power_btn:
         power_label:
           type: label
           text: "PWR"
-          style: caption
+          labelStyle: caption
         power_led:
           type: led
 ```
@@ -513,6 +516,7 @@ Client selects item ──BUTTON_PRESS(item_id)──► Device
 | `label` | string | no | — | Optional group label shown above the group. Max 32 chars. |
 | `layout` | `"grid"` | no | `"grid"` | Items laid out in a wrapping grid. Only `"grid"` is supported. |
 | `items` | object | yes | — | Named items; minimum 2. Each item gets its own widget ID. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). Colors this group's own selection chrome (border, label). |
 
 **`button-group-item` sub-attributes:**
 
@@ -606,6 +610,7 @@ Device ──────────────STATE_UPDATE(float)────
 | `max` | number | yes | — | Maximum value (inclusive). Must be > `min`. |
 | `step` | number | no | `1` | Step increment. Must be positive. |
 | `unit` | string | no | — | Unit suffix beside the current value. Max 16 chars. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). |
 
 **Example:**
 
@@ -687,6 +692,7 @@ Device ──────STATE_UPDATE(bool)───► Client (confirmed state)
 |---|---|---|---|---|
 | `type` | `"toggle"` | yes | — | |
 | `label` | string | no | — | Shown beside the toggle. Max 32 chars. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). |
 
 **Example:**
 
@@ -771,6 +777,7 @@ rw: Client submit ──TEXT_SUBMIT(string)──► Device
 | `mode` | `"ro"` \| `"rw"` | no | `"ro"` | `"ro"` = display-only; `"rw"` = editable. |
 | `placeholder` | string | no | — | Placeholder in empty field (`rw` only). Max 64 chars. |
 | `maxlength` | integer | no | `255` | Max chars user can enter (`rw` only). Range 1–255. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). |
 
 **Example (read-write):**
 
@@ -873,6 +880,7 @@ works without it.
 | `type` | `"dropdown"` | yes | — | |
 | `label` | string | no | — | Shown above the collapsed row. Max 32 chars. |
 | `items` | object | yes | — | Ordered map of `key: "Display Label"` pairs. Minimum 2 items. Keys must be lowercase snake_case. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). |
 
 Items are listed as key/value pairs where the value is the display label:
 
@@ -967,7 +975,8 @@ works without it.
 |---|---|---|---|---|
 | `type` | `"label"` | yes | — | |
 | `text` | string | yes | — | The static text to render. Max 255 chars. |
-| `style` | `"heading"` \| `"body"` \| `"caption"` | no | `"body"` | `heading` = bold, larger. `caption` = small, muted. |
+| `labelStyle` | `"heading"` \| `"body"` \| `"caption"` | no | `"body"` | `heading` = bold, larger. `caption` = small, muted. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). This widget renders with that theme's colors instead of the app-wide active theme. |
 | `flex` | integer | no | — | Layout weight when used as a row/grid child. Same semantics as any other widget's `flex` — see [`row`](#row). |
 | `align` | `"left"` \| `"right"` \| `"center"` | no | — | Position within a row/grid cell when used as a child. Same semantics as any other widget's `align` — see [`row`](#row). Not text alignment; use `textAlign` for that. |
 | `textAlign` | `"left"` \| `"right"` \| `"center"` \| `"justify"` | no | `"left"` | Text alignment within the label itself. |
@@ -978,7 +987,7 @@ works without it.
 network_section_label:
   type: label
   text: "Network Settings"
-  style: heading
+  labelStyle: heading
 ```
 
 **Generated C API:** None — label has no ID and no protocol exchange.
@@ -989,8 +998,8 @@ network_section_label:
 
 ### `separator`
 
-Horizontal visual divider. No attributes, no widget ID, no protocol exchange.
-Codegen skips it entirely.
+Horizontal visual divider. No widget ID, no protocol exchange. Codegen skips it
+entirely.
 
 **Capability token:** `label` — reserved for future use, see
 [capabilities field](#capabilities-field). Omit `capabilities:` for now; the widget
@@ -1001,6 +1010,7 @@ works without it.
 | Attribute | Type | Required | Notes |
 |---|---|---|---|
 | `type` | `"separator"` | yes | |
+| `style` | string | no | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). |
 
 **Example:**
 
@@ -1036,6 +1046,7 @@ works without it.
 | `label` | string | no | — | Section header label. Max 64 chars. |
 | `collapsible` | boolean | no | `false` | Whether the user can collapse the section. |
 | `widgets` | object | yes | — | Named child widgets. Same format as the top-level `widgets:` block. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). Colors this section's own header/border — does **not** cascade to children; an unstyled child still follows the app-wide active theme. |
 
 **Example:**
 
@@ -1332,3 +1343,44 @@ switching is **client-side only** — there is no protocol message for the devic
 to trigger a theme change. A device YAML can declare
 multiple themes today, but only client-initiated switching (e.g. a future
 settings UI) can select anything other than `default`.
+
+### Per-widget style reference
+
+Any widget except `row`, `grid`, `dpad`, and `button` (those render no chrome of
+their own — a reference would be a no-op) accepts an optional `style:` property
+naming one of the themes declared in the top-level `style:` block:
+
+```yaml
+style:
+  default:
+    accent: "#00d4aa"
+  alarm:
+    accent: "#e05555"
+
+widgets:
+  fault_display:
+    type: display
+    label: "Fault Code"
+    style: alarm      # always renders with the "alarm" theme's colors
+  status_display:
+    type: display
+    label: "Status"   # no style: — follows the app-wide active theme
+```
+
+`fault_display` always renders with `alarm`'s colors, regardless of which theme
+is currently active app-wide. `status_display` has no explicit `style:`, so it
+follows `controller.activeStyle` like any widget did before this feature —
+switching the active theme changes it live, but never affects `fault_display`.
+
+`style:` must name a theme actually declared in the `style:` block (or the
+implicit `"default"`, which always exists even with no `style:` block at all) —
+`udisplay-gen validate` rejects an unknown name, and the client rejects it at
+parse time too. This is a different property from `display`'s `displayStyle` or
+`label`'s `labelStyle` (see their own sections above) — those pick a *rendering
+variant*, this picks a *color theme*; the two are independent and can be
+combined freely.
+
+Note that `style:` on a widget only colors that widget's own chrome — it does
+not cascade to a container's children. A `section` styled `alarm` colors its
+own header/border; children inside it that have no `style:` of their own still
+follow the app-wide active theme, not the section's.
