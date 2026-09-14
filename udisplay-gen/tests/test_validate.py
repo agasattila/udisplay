@@ -7,7 +7,7 @@ import pytest
 import udisplay_gen.validate as validate_module
 from udisplay_gen.validate import (
     load_schema, semantic_errors, schema_errors, validate,
-    _yaml_line_map, parse_yaml,
+    _yaml_line_map, parse_yaml, parse_yaml_text,
 )
 
 SCHEMA = load_schema()
@@ -901,10 +901,31 @@ def test_load_schema_friendly_error_on_corrupt_file(tmp_path, monkeypatch):
     assert "core.symlinks" in str(exc_info.value)
 
 
-def test_debug_yaml_validates_against_root_schema():
+def test_debug_state_validates_against_root_schema():
     """Regression test for TODO-035's content merge: debug_state (used by
     udisplay-client's design-mode preview) must validate against the schema
-    SCHEMA now resolves to (the root file, via the symlink)."""
-    debug_yaml = REPO_ROOT / "udisplay-client" / "debug.yaml"
-    doc = parse_yaml(debug_yaml)
+    SCHEMA now resolves to (the root file, via the symlink).
+
+    Previously depended on udisplay-client/debug.yaml, an external sample
+    file with no test-suite ownership -- it was deleted (2026-09-10,
+    "Remove debug.yaml") without updating this test, silently breaking
+    coverage for a feature (design-mode preview) that is still very much
+    alive in udisplay-client (DeviceController::startDesignMode(),
+    WidgetDef.h's debug-mode preview value). Inlined so this test owns its
+    own fixture and can't be broken by an unrelated file deletion again."""
+    doc = parse_yaml_text(
+        "device:\n"
+        "  name: debug state fixture\n"
+        "widgets:\n"
+        "  volt:\n"
+        "    type: display\n"
+        "    label: Voltage\n"
+        "    debug_state: 3.3\n"
+        "  power_led:\n"
+        "    type: led\n"
+        "    debug_state: true\n"
+        "  status_rgb:\n"
+        "    type: rgbled\n"
+        "    debug_state: 65280\n"
+    )
     assert schema_errors(doc, SCHEMA) == []

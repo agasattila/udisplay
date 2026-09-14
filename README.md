@@ -93,6 +93,7 @@ Copyright (c) 2026 Attila Agas
 |-----------|---------|------|
 | **libudisplay** | Apache 2.0 | `Apache-2.0` |
 | **udisplay-gen** | MPL 2.0 | `MPL-2.0` |
+| **udisplay-gen's MicroPython runtime** (`udisplay_runtime.py` — the device-side protocol runtime for `--lang micropython`, copied verbatim into generated projects; the MicroPython counterpart to libudisplay) | Apache 2.0 | `Apache-2.0` |
 | **generated code** (output of udisplay-gen) | MIT | `MIT` |
 | **udisplay-client** | LGPL v3 | `LGPL-3.0-only` |
 | **demos** | MIT | `MIT` |

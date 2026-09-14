@@ -14,12 +14,12 @@ from . import __version__
 from .validate import load_schema, parse_yaml_text, validate
 from .build import validate_blob_size
 from .backends import BuildContext
-from .backends import c_backend, cpp_backend
+from .backends import c_backend, cpp_backend, python_backend
 from .merkle import compute, CHUNK_SIZE
 from .widget_ids import assign, collect_types
 from .init_wizard import run_wizard
 
-_BACKENDS = {"c": c_backend, "cpp": cpp_backend}
+_BACKENDS = {"c": c_backend, "cpp": cpp_backend, "micropython": python_backend}
 
 
 @click.group()
@@ -67,7 +67,7 @@ cli.add_command(validate_cmd, name="validate")
     "--lang",
     default="c",
     show_default=True,
-    type=click.Choice(["c", "cpp"]),
+    type=click.Choice(["c", "cpp", "micropython"]),
     help="Output language.",
 )
 @click.option(
@@ -97,6 +97,17 @@ def build(yaml_file: str, output_dir: str, lang: str, modern: bool, namespace: s
       --lang cpp:
         udisplay_ui.hpp  — header-only C++ class hierarchy
         udisplay_ui.bin  — raw compressed YAML blob (flash to device ROM)
+
+      --lang micropython:
+        ui.py                — generated glue: widget IDs, embedded blob,
+                                per-widget wrapper classes (never hand-edit;
+                                write your own main.py that imports it)
+        udisplay_runtime.py  — hand-written protocol library, copied
+                                verbatim (TCP transport only, no auth in v0)
+
+        Runs unmodified under MicroPython (ESP8266/ESP32/Unix port) and
+        desktop CPython. BLE transport, HMAC auth, and --namespace
+        (multi-instance) are not yet supported for this backend.
     """
     if modern and lang != "cpp":
         click.echo("Error: --modern requires --lang cpp.", err=True)
