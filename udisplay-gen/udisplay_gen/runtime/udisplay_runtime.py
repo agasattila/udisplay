@@ -1,12 +1,18 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Attila Agas
 
 """
 uDisplay device-side protocol runtime, pure Python.
 
-Ported from libudisplay/src/{udisplay,protocol,chunk_server,framing}.c —
-those files are the reference spec; this module must stay behaviorally
-identical to them for the pieces it covers.
+Implements the wire protocol specified in docs/protocol.md and the
+canonical protocol vectors (tests/protocol_vectors.json) — those are the
+authoritative source of truth, not any single implementation. libudisplay
+(libudisplay/src/{udisplay,protocol,chunk_server,framing}.c) is the
+corresponding C implementation of the same spec, useful here as a
+compatibility/cross-check reference for the pieces this module covers, but
+this module is an independent implementation, not required to reproduce a
+libudisplay bug — see the CLIENT_READY/HANDSHAKE_ACK ordering issue tracked
+separately in issue #12.
 
 v0 scope (see docs/designs/micropython-backend.md, Approach A):
   - TCP transport only. BLE fragmentation is not implemented here.

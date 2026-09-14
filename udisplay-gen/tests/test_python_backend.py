@@ -274,3 +274,132 @@ class TestCliIntegration:
             sys.path.remove(str(tmp_path))
             for mod in ("ui", "udisplay_runtime"):
                 sys.modules.pop(mod, None)
+
+
+def _ctx_from_yaml_text(tmp_path, yaml_text: str) -> BuildContext:
+    p = tmp_path / "gen.yaml"
+    p.write_text(yaml_text)
+    return _make_ctx(p)
+
+
+class TestIdentifierValidation:
+    """TODO-056/TODO-057, per PR10 review: a schema-valid YAML must not be
+    able to produce invalid or ambiguously generated Python code."""
+
+    def test_python_keyword_widget_name_rejected(self, tmp_path):
+        ctx = _ctx_from_yaml_text(tmp_path, """
+widgets:
+  class:
+    type: toggle
+""")
+        with pytest.raises(ValueError, match="keyword"):
+            python_backend.generate(ctx)
+
+    def test_reserved_ui_api_name_rejected(self, tmp_path):
+        ctx = _ctx_from_yaml_text(tmp_path, """
+widgets:
+  feed:
+    type: toggle
+""")
+        with pytest.raises(ValueError, match="reserved"):
+            python_backend.generate(ctx)
+
+    def test_reserved_ui_callback_slot_name_rejected(self, tmp_path):
+        """on_client_ready is a settable callback attribute on UI, not just
+        a method -- a widget of the same name silently replaces the slot
+        itself, not just shadowing a method."""
+        ctx = _ctx_from_yaml_text(tmp_path, """
+widgets:
+  on_client_ready:
+    type: toggle
+""")
+        with pytest.raises(ValueError, match="reserved"):
+            python_backend.generate(ctx)
+
+    def test_button_face_child_reserved_name_rejected(self, tmp_path):
+        """A button face child named on_press collides with ButtonWidget's
+        own callback attribute -- ButtonWidget has no __slots__, so this
+        assignment would otherwise succeed silently."""
+        ctx = _ctx_from_yaml_text(tmp_path, """
+widgets:
+  fire_btn:
+    type: button
+    widgets:
+      on_press:
+        type: led
+""")
+        with pytest.raises(ValueError, match="reserved"):
+            python_backend.generate(ctx)
+
+    def test_button_group_item_reserved_name_rejected(self, tmp_path):
+        ctx = _ctx_from_yaml_text(tmp_path, """
+widgets:
+  mode_sel:
+    type: button-group
+    items:
+      _widget_id:
+        label: Bad
+      ok:
+        label: OK
+""")
+        with pytest.raises(ValueError, match="reserved"):
+            python_backend.generate(ctx)
+
+    def test_macro_name_collision_rejected(self, tmp_path):
+        """pump_rate and pump__rate both normalize to WIDGET_ID_PUMP_RATE —
+        must be rejected, not silently let one definition win."""
+        ctx = _ctx_from_yaml_text(tmp_path, """
+widgets:
+  pump_rate:
+    type: toggle
+  pump__rate:
+    type: toggle
+""")
+        with pytest.raises(ValueError, match="WIDGET_ID_PUMP_RATE"):
+            python_backend.generate(ctx)
+
+    def test_dropdown_option_macro_collision_rejected(self, tmp_path):
+        """s_ta and s__ta (single vs. double underscore) both normalize to
+        the same OPTION_S_TA constant -- _macro_name() collapses any RUN of
+        non-alphanumeric characters to one underscore."""
+        ctx = _ctx_from_yaml_text(tmp_path, """
+widgets:
+  net_sel:
+    type: dropdown
+    items:
+      s_ta: Station
+      s__ta: Also Station
+""")
+        with pytest.raises(ValueError, match="item collision"):
+            python_backend.generate(ctx)
+
+    def test_ordinary_names_pass_validation(self, tmp_path):
+        """Sanity check: normal, non-colliding names generate without error."""
+        ctx = _ctx_from_yaml_text(tmp_path, """
+widgets:
+  pump_rate:
+    type: toggle
+  fire_btn:
+    type: button
+    widgets:
+      status_led:
+        type: led
+""")
+        files = python_backend.generate(ctx)
+        assert [f.name for f in files] == ["ui.py", "udisplay_runtime.py"]
+
+    def test_error_message_lists_multiple_violations(self, tmp_path):
+        """Every violation should be reported in one pass, not just the
+        first -- a single fix-and-rerun cycle should catch everything."""
+        ctx = _ctx_from_yaml_text(tmp_path, """
+widgets:
+  class:
+    type: toggle
+  feed:
+    type: toggle
+""")
+        with pytest.raises(ValueError) as exc_info:
+            python_backend.generate(ctx)
+        message = str(exc_info.value)
+        assert "class" in message
+        assert "feed" in message

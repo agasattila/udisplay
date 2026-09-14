@@ -17,6 +17,7 @@ absence here too — see below).
 """
 from __future__ import annotations
 
+import keyword
 import pathlib
 from typing import List
 
@@ -47,6 +48,112 @@ _WRAPPER_CLASS = {
     "button-group-item": "ButtonItem",
 }
 
+# Reserved-name sets for TODO-056/TODO-057: a widget path segment that lands
+# in one of these scopes as a Python attribute name (self.<name>) must not
+# collide with a fixed name already used in that same scope, or the later
+# definition silently overwrites the earlier one — see
+# _validate_python_identifiers() below.
+#
+# Top level: every entry in _py_ordered_toplevel() becomes `self.<path>` on
+# the generated UI class (_generate_ui_py below) — cross-reference against
+# every fixed attribute/method UI.__init__ and the class body assign there.
+_UI_RESERVED_NAMES = {
+    "_device", "on_client_ready", "on_comms_error",
+    "on_connect", "on_disconnect", "feed", "heartbeat",
+    "_on_client_ready", "_on_comms_error", "_on_event",
+    "__init__", "self",
+}
+
+# Button face children (_py_sub_members under a `button`) become
+# `self.<path>.<sub_key>` on a ButtonWidget instance — cross-reference
+# against ButtonWidget's own __init__ body above (no __slots__, so any
+# attribute name is silently accepted, colliding or not).
+_BUTTON_RESERVED_NAMES = {"_device", "_widget_id", "on_press", "on_release", "on_click"}
+
+# button-group items become `self.<path>.<item_key>` on a ButtonGroupWidget
+# instance — cross-reference against ButtonGroupWidget's own __init__ body.
+_BUTTON_GROUP_RESERVED_NAMES = {"_device", "_widget_id"}
+
+
+def _validate_python_identifiers(ctx: BuildContext) -> None:
+    """Reject schema-valid YAML that would produce invalid or ambiguously
+    generated Python code (TODO-056, TODO-057). Detects, for every widget
+    name that becomes a generated Python identifier:
+      - Python keywords (produce a SyntaxError in the generated file);
+      - collisions with names reserved by the generated UI/runtime API
+        (silently overwrite a lifecycle method or callback slot);
+      - collisions with each other after WIDGET_ID_* macro-name
+        normalization (two differently-punctuated names silently alias
+        onto one wire ID and one event-dispatch branch).
+    Raises ValueError listing every violation found, not just the first,
+    so one fix-and-rerun cycle catches everything."""
+    widget_ids = ctx.widget_ids
+    widget_types = ctx.widget_types or {}
+    widgets_yaml = ctx.widgets_yaml or {}
+    errors: List[str] = []
+
+    def check_segment(name: str, reserved: set, where: str) -> None:
+        if keyword.iskeyword(name):
+            errors.append(
+                f"{where}: '{name}' is a Python keyword — cannot be used as a "
+                f"generated attribute name"
+            )
+        elif name in reserved:
+            errors.append(
+                f"{where}: '{name}' collides with a name reserved by the "
+                f"generated UI/runtime API"
+            )
+
+    ordered = _py_ordered_toplevel(widgets_yaml, widget_types)
+
+    for path in ordered:
+        check_segment(path, _UI_RESERVED_NAMES, f"widget '{path}'")
+
+        wtype = widget_types.get(path, "")
+        sub_reserved = (
+            _BUTTON_GROUP_RESERVED_NAMES if wtype == "button-group"
+            else _BUTTON_RESERVED_NAMES
+        )
+        for sub_key, _sub_type, _sub_id in _py_sub_members(path, widget_types, widget_ids):
+            check_segment(sub_key, sub_reserved, f"widget '{path}.{sub_key}'")
+
+    # WIDGET_ID_* macro-name collisions (TODO-056) — every widget_ids key
+    # (top-level AND nested, since widget_ids is keyed by full dotted path)
+    # must normalize to a distinct constant name.
+    by_macro: dict = {}
+    for path in widget_ids:
+        by_macro.setdefault(_macro_name(path), []).append(path)
+    for macro, paths in sorted(by_macro.items()):
+        if len(paths) > 1:
+            errors.append(
+                "widget name collision: "
+                + ", ".join(repr(p) for p in sorted(paths))
+                + f" all normalize to the same generated constant WIDGET_ID_{macro}"
+            )
+
+    # Same mechanism, scoped per dropdown, for the <NAME>_OPTION_<item> constants.
+    from ..widget_ids import collect_dropdown_items
+    for path, items in collect_dropdown_items(widgets_yaml).items():
+        if path not in widget_ids:
+            continue
+        by_item_macro: dict = {}
+        for item_key, _label in items:
+            by_item_macro.setdefault(_macro_name(item_key), []).append(item_key)
+        for macro, keys in sorted(by_item_macro.items()):
+            if len(keys) > 1:
+                errors.append(
+                    f"dropdown '{path}' item collision: "
+                    + ", ".join(repr(k) for k in sorted(keys))
+                    + f" all normalize to the same generated constant "
+                    f"{_macro_name(path)}_OPTION_{macro}"
+                )
+
+    if errors:
+        raise ValueError(
+            "Cannot generate valid Python code from this YAML:\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
+
 
 def generate(ctx: BuildContext) -> List[OutputFile]:
     if ctx.namespace:
@@ -55,6 +162,7 @@ def generate(ctx: BuildContext) -> List[OutputFile]:
             "(multi-instance output is Approach B scope, deferred — see "
             "docs/designs/micropython-backend.md)."
         )
+    _validate_python_identifiers(ctx)
     return [
         OutputFile("ui.py", _generate_ui_py(ctx)),
         OutputFile("udisplay_runtime.py", _RUNTIME_SOURCE.read_text()),

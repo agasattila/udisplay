@@ -150,12 +150,11 @@ this branch (shared with `cpp_backend.py`'s naming), but `python_backend.py`
 is the first consumer that builds a widget-ID namespace directly keyed by
 its output and relies on uniqueness — the C++ backend doesn't generate
 `WIDGET_ID_*` constants the same way.
-**Context:** Deferred rather than fixed inline during `/ship` — the right
-fix (reject normalized-name collisions at validate-time, or move to an
-injective encoding) is a design call about where in the pipeline
-(`validate.py` vs. codegen) to enforce it, not a one-line change.
-**Effort:** S (human: ~2-3h / CC: ~20-30 min)
-**Priority:** P2
+**Status:** ✅ DONE — per PR10 review (agasattila, 2026-09-14), not deferred.
+`python_backend.py`'s `_validate_python_identifiers()` now rejects any two
+widget/dropdown-item names (including nested paths) that normalize to the
+same generated constant, with a clear error naming both. Regression tests in
+`test_python_backend.py::TestIdentifierValidation`.
 **Depends on:** Nothing blocking.
 
 ---
@@ -171,12 +170,12 @@ itself, making the generated forwarding method call a non-callable widget.
 **Why:** Found by Codex during `/ship`'s adversarial review of
 `feature/micropython-backend` (2026-09-11). These names are all schema-valid
 today — `validate.py` has no keyword/API-name check for widget paths.
-**Context:** Deferred rather than fixed inline — needs either reserved-name
-validation at every generated attribute scope, or separating widget
-attributes from the lifecycle API namespace (e.g. a nested accessor), which
-is a real design decision, not mechanical.
-**Effort:** S (human: ~2-3h / CC: ~20-30 min)
-**Priority:** P2
+**Status:** ✅ DONE — per PR10 review (agasattila, 2026-09-14), not deferred.
+`_validate_python_identifiers()` rejects Python keywords and names reserved
+by the generated `UI`/`ButtonWidget`/`ButtonGroupWidget` API surface, at both
+the top-level (`self.<path>` on `UI`) and sub-member (`self.<path>.<sub_key>`
+on a button/button-group instance) scopes. Regression tests in
+`test_python_backend.py::TestIdentifierValidation`.
 **Depends on:** Nothing blocking.
 
 ---
