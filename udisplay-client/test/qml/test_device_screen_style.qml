@@ -34,6 +34,7 @@ Item {
         property string deviceName: "Sentinel Device"
         property string state: "running"
         property string designErrorString: ""
+        property var parseWarnings: []
         /* Real WidgetModel exposes generation/childModel(); an empty array
          * doesn't, so DeviceScreen.qml's `controller.widgetModel.childModel(-1)`
          * throws a TypeError on every run — silently, since this test only

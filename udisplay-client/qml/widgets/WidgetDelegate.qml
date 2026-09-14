@@ -116,6 +116,27 @@ Loader {
         return controller.widgetModel.childModel(model.row)
     }
 
+    /* This row's resolved style tokens — its own props.style stylesheet if
+     * set, else the app-wide active style (DeviceController::
+     * effectiveStyleFor()). Computed ONCE here and threaded down as a plain
+     * property, mirroring _childModel/_props/compact above, so leaf widgets
+     * do a one-line property read instead of each independently calling the
+     * resolver and managing their own reactivity wiring.
+     *
+     * Depends on BOTH controller.activeStyle (fires on setActiveStyle()/
+     * reconnect) AND controller.widgetModel.generation (fires on
+     * setWidgets()/clear() — row indices are not stable across a reparse,
+     * see WidgetDef.h) — binding on activeStyle alone would leave this
+     * stale after a full YAML reload, the same qml-invokable-no-notify
+     * staleness class PR9's adversarial review already caught once for
+     * _childModel above. See
+     * docs/designs/unify-widget-style-handling.md. */
+    property var    _effectiveStyle: {
+        controller.activeStyle
+        controller.widgetModel.generation
+        return controller.effectiveStyleFor(model.row)
+    }
+
     visible: model.widgetVisible !== false
 
     sourceComponent: _type === "display"      ? displayComp
@@ -135,19 +156,25 @@ Loader {
                    : _type === "section"      ? sectionComp
                    : null
 
-    /* Leaf widget components — no cycle: none of these files reference WidgetDelegate */
-    Component { id: displayComp;     DisplayWidget     { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; compact: root.compact } }
-    Component { id: ledComp;         LedWidget         { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; compact: root.compact } }
-    Component { id: rgbledComp;      RgbLedWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; compact: root.compact } }
+    /* Leaf widget components — no cycle: none of these files reference WidgetDelegate.
+     * effectiveStyle is threaded only to components whose .qml file actually
+     * reads controller.activeStyle today (verified via grep) — buttonComp/
+     * dpadComp render color:"transparent" with no chrome of their own (see
+     * docs/designs/unify-widget-style-handling.md's Open Questions on why
+     * row/grid/dpad/button reject style: entirely), so threading it there
+     * would be dead, unread plumbing. */
+    Component { id: displayComp;     DisplayWidget     { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; compact: root.compact; effectiveStyle: root._effectiveStyle } }
+    Component { id: ledComp;         LedWidget         { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; compact: root.compact; effectiveStyle: root._effectiveStyle } }
+    Component { id: rgbledComp;      RgbLedWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; compact: root.compact; effectiveStyle: root._effectiveStyle } }
     Component { id: buttonComp;      ButtonWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; props: _props; childModel: root._childModel } }
-    Component { id: buttonGroupComp; ButtonGroupWidget { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; childModel: root._childModel } }
-    Component { id: sliderComp;      SliderWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
-    Component { id: toggleComp;      ToggleWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value } }
-    Component { id: textComp;        TextWidget        { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
-    Component { id: dropdownComp;    DropdownWidget    { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props } }
-    Component { id: labelComp;       LabelWidget       { props: _props; compact: root.compact } }
+    Component { id: buttonGroupComp; ButtonGroupWidget { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; childModel: root._childModel; effectiveStyle: root._effectiveStyle } }
+    Component { id: sliderComp;      SliderWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; effectiveStyle: root._effectiveStyle } }
+    Component { id: toggleComp;      ToggleWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; effectiveStyle: root._effectiveStyle } }
+    Component { id: textComp;        TextWidget        { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; effectiveStyle: root._effectiveStyle } }
+    Component { id: dropdownComp;    DropdownWidget    { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; effectiveStyle: root._effectiveStyle } }
+    Component { id: labelComp;       LabelWidget       { props: _props; compact: root.compact; effectiveStyle: root._effectiveStyle } }
     Component { id: dpadComp;        DpadWidget        { label: _label; props: _props; childModel: root._childModel } }
-    Component { id: separatorComp;   SeparatorWidget   {} }
+    Component { id: separatorComp;   SeparatorWidget   { effectiveStyle: root._effectiveStyle } }
 
     /* Container components — dynamic URL loading breaks the bilateral cycle.
      * RowWidget/GridWidget use WidgetDelegate as their Repeater delegate (static
@@ -198,6 +225,7 @@ Loader {
                 item.label = Qt.binding(function() { return root._label })
                 item.props = Qt.binding(function() { return root._props })
                 item.childModel = Qt.binding(function() { return root._childModel })
+                item.effectiveStyle = Qt.binding(function() { return root._effectiveStyle })
                 /* toggleSection() takes the flat-model row this section
                  * itself occupies (model.row), not widgetId — sections
                  * always have widgetId 0 (see this file's own _childModel

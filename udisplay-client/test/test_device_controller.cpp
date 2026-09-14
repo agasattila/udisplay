@@ -489,6 +489,188 @@ private slots:
                   "parseWarningsChanged must fire even though the connection "
                   "was ultimately rejected (TODO-034 D6)");
     }
+
+    /* ── parseWarnings property (TODO-040) ───────────────────────────── */
+
+    void parseWarnings_readableAfterParse_withoutListeningLive()
+    {
+        /* No Connections/lambda attached before the parse — this is exactly
+         * the "constructed after the fact" scenario the property exists
+         * for: reading controller.parseWarnings must show the current
+         * state even though nothing was listening when the signal fired. */
+        const char* yaml =
+            "widgets:\n"
+            "  led:\n"
+            "    type: led\n"
+            "    color: not_a_hex_color\n";
+
+        DeviceController dc;
+        injectBootstrap(dc, yaml);
+
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+        const QVariantList warnings = dc.parseWarnings();
+        QCOMPARE(warnings.size(), 1);
+        const QVariantMap w = warnings.first().toMap();
+        QCOMPARE(w.value(QStringLiteral("severity")).toString(), QStringLiteral("warning"));
+        QCOMPARE(w.value(QStringLiteral("widgetKey")).toString(), QStringLiteral("led"));
+        QCOMPARE(w.value(QStringLiteral("field")).toString(), QStringLiteral("color"));
+        QVERIFY(w.value(QStringLiteral("message")).toString().contains(QStringLiteral("hex")));
+    }
+
+    void parseWarnings_clearOnCleanReparse_signalFiresOnTransition()
+    {
+        const char* warningYaml =
+            "widgets:\n"
+            "  led:\n"
+            "    type: led\n"
+            "    color: not_a_hex_color\n";
+        const char* cleanYaml =
+            "widgets:\n"
+            "  led:\n"
+            "    type: led\n";
+
+        DeviceController dc;
+        injectBootstrap(dc, warningYaml);
+        QCOMPARE(dc.parseWarnings().size(), 1);
+
+        bool signalReceived = false;
+        connect(&dc, &DeviceController::parseWarningsChanged,
+                [&](const QList<YamlParser::ParseDiagnostic>&) { signalReceived = true; });
+
+        injectBootstrap(dc, cleanYaml);
+
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+        QVERIFY(dc.parseWarnings().isEmpty());
+        QVERIFY2(signalReceived,
+                  "clearing prior warnings on a clean reparse must still notify, "
+                  "or a UI bound to parseWarnings goes stale after the fix "
+                  "(the qml-invokable-no-notify-binding-staleness pitfall class)");
+    }
+
+    /* ── effectiveStyleFor() — docs/designs/unify-widget-style-handling.md ── */
+
+    void effectiveStyleFor_noStyleProp_fallsBackToActiveStyle()
+    {
+        const char* yaml =
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "widgets:\n"
+            "  a:\n"
+            "    type: toggle\n";
+        DeviceController dc;
+        injectBootstrap(dc, yaml);
+        QCOMPARE(dc.effectiveStyleFor(0).value(QStringLiteral("accent")).toString(),
+                  dc.activeStyle().value(QStringLiteral("accent")).toString());
+    }
+
+    void effectiveStyleFor_validStyleName_returnsThatStylesheet()
+    {
+        const char* yaml =
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  alarm:\n"
+            "    accent: \"#e05555\"\n"
+            "widgets:\n"
+            "  d:\n"
+            "    type: section\n"
+            "    style: alarm\n";
+        DeviceController dc;
+        injectBootstrap(dc, yaml);
+        QCOMPARE(dc.effectiveStyleFor(0).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#e05555"));
+    }
+
+    void effectiveStyleFor_outOfRangeRow_fallsBackNoCrash()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  a:\n"
+            "    type: toggle\n";
+        DeviceController dc;
+        injectBootstrap(dc, yaml);
+        QCOMPARE(dc.effectiveStyleFor(999), dc.activeStyle());
+        QCOMPARE(dc.effectiveStyleFor(-1),  dc.activeStyle());
+    }
+
+    /* CRITICAL — same staleness bug class PR9's adversarial review already
+     * caught once for childModel(): a full reparse reassigns row indices,
+     * so the resolver must reflect the NEW row's data at a given index, not
+     * data left over from the row that used to occupy it. */
+    void effectiveStyleFor_afterReparse_reflectsNewRowData()
+    {
+        DeviceController dc;
+        injectBootstrap(dc,
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  alarm:\n"
+            "    accent: \"#e05555\"\n"
+            "widgets:\n"
+            "  a:\n"
+            "    type: toggle\n");
+        QCOMPARE(dc.effectiveStyleFor(0).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#00d4aa"));
+
+        /* Reparse: row 0 is now a different widget, explicitly styled. */
+        injectBootstrap(dc,
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  alarm:\n"
+            "    accent: \"#e05555\"\n"
+            "widgets:\n"
+            "  b:\n"
+            "    type: section\n"
+            "    style: alarm\n");
+        QCOMPARE(dc.effectiveStyleFor(0).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#e05555"));
+    }
+
+    /* Resolves the former "runtime stylesheet redefinition" open question:
+     * a reparse with unchanged widgets but a redefined stylesheet updates
+     * both a pinned and an unpinned widget's resolved colors correctly. */
+    void effectiveStyleFor_redefinedStylesheet_updatesPinnedAndUnpinned()
+    {
+        const char* yamlBefore =
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  alarm:\n"
+            "    accent: \"#e05555\"\n"
+            "widgets:\n"
+            "  unpinned:\n"
+            "    type: toggle\n"
+            "  pinned:\n"
+            "    type: section\n"
+            "    style: alarm\n";
+        DeviceController dc;
+        injectBootstrap(dc, yamlBefore);
+        QCOMPARE(dc.effectiveStyleFor(0).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#00d4aa"));
+        QCOMPARE(dc.effectiveStyleFor(1).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#e05555"));
+
+        /* Same widgets, redefined "alarm" (and "default") accent colors. */
+        const char* yamlAfter =
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#111111\"\n"
+            "  alarm:\n"
+            "    accent: \"#222222\"\n"
+            "widgets:\n"
+            "  unpinned:\n"
+            "    type: toggle\n"
+            "  pinned:\n"
+            "    type: section\n"
+            "    style: alarm\n";
+        injectBootstrap(dc, yamlAfter);
+        QCOMPARE(dc.effectiveStyleFor(0).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#111111"));
+        QCOMPARE(dc.effectiveStyleFor(1).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#222222"));
+    }
 };
 
 QTEST_MAIN(TestDeviceController)

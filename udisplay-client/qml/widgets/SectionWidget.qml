@@ -48,6 +48,13 @@ Rectangle {
     property string label: ""
     property var props: ({})
     property var childModel: null
+    /* Resolved style tokens for this row (see WidgetDelegate.qml's
+     * _effectiveStyle). Non-required, defaulting to {} — matches props/
+     * childModel above (set via live onLoaded binding, same dynamic-Loader
+     * reasoning). Colors this section's OWN header/border chrome — does
+     * NOT cascade to children (out of scope for this pass, see
+     * docs/designs/unify-widget-style-handling.md). */
+    property var effectiveStyle: ({})
 
     signal toggleClicked()
 
@@ -63,7 +70,7 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: 36
-            color: controller.activeStyle.surface
+            color: effectiveStyle.surface
 
             RowLayout {
                 anchors { fill: parent; leftMargin: 16; rightMargin: 16 }
@@ -72,7 +79,7 @@ Rectangle {
                 Label {
                     id: sectionLabel
                     text: root.label.toUpperCase()
-                    color: controller.activeStyle.accent
+                    color: effectiveStyle.accent
                     font.pixelSize: 11
                     font.letterSpacing: 1.5
                     font.bold: true
@@ -81,13 +88,13 @@ Rectangle {
                 Rectangle {
                     Layout.fillWidth: true
                     height: 1
-                    color: controller.activeStyle.line
+                    color: effectiveStyle.line
                 }
 
                 Label {
                     visible: root.props.collapsible === true
                     text: root.props.collapsed === true ? "▶" : "▼"
-                    color: controller.activeStyle.accent
+                    color: effectiveStyle.accent
                     font.pixelSize: 11
                 }
             }

@@ -16,6 +16,11 @@ Rectangle {
     required property var    value
     required property var    props
     property bool compact: false
+    /* Resolved style tokens for this row (see WidgetDelegate.qml's
+     * _effectiveStyle). Non-required, defaulting to {} — standalone QML
+     * tests instantiate this widget directly with no controller/resolver in
+     * scope, so color bindings below read undefined fields gracefully (no crash). */
+    property var effectiveStyle: ({})
 
     implicitWidth: ledLabel.implicitWidth + 12 + 12 + 32  /* 12 dot + 12 spacing + margins */
     implicitHeight: Math.max(ledLabel.implicitHeight, 48)
@@ -23,7 +28,7 @@ Rectangle {
     opacity: enabled ? 1.0 : 0.4
 
     /* Border is intentionally brighter than fill for a subtle ring glow when on. */
-    readonly property color _activeColor: props.color !== undefined ? props.color : controller.activeStyle.accent
+    readonly property color _activeColor: props.color !== undefined ? props.color : effectiveStyle.accent
     readonly property color _dotFillColor:   value ? _activeColor : "#2a2a4a"
     readonly property color _dotBorderColor: value ? _activeColor : "#444"
 
@@ -42,7 +47,7 @@ Rectangle {
         Label {
             id: ledLabel
             text: root.label
-            color: compact ? controller.activeStyle.button_text : controller.activeStyle.text
+            color: compact ? effectiveStyle.button_text : effectiveStyle.text
             font.pixelSize: 14
             Layout.fillWidth: true
         }

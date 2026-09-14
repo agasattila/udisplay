@@ -101,6 +101,7 @@ Item {
         value: 0x10   /* first item "selected" */
         props: ({})
         childModel: groupItems.ready ? groupItems : null
+        effectiveStyle: controller.activeStyle
     }
 
     W.ButtonGroupWidget {
@@ -112,6 +113,7 @@ Item {
         value: null
         props: ({})
         childModel: groupItems.ready ? groupItems : null
+        effectiveStyle: controller.activeStyle
     }
 
     Timer {

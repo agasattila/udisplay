@@ -5,12 +5,17 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 
-/* Static text label. props.style: "heading" | "body" | "caption".
+/* Static text label. props.labelStyle: "heading" | "body" | "caption".
  * props.labelAlign: "left" | "right" | "center" | "justify" — default "left".
  * compact: true Historically it was shrinked for use on a button face. Now only color is changed */
 Rectangle {
-    required property var props   /* { text, style, labelAlign } */
+    required property var props   /* { text, labelStyle, labelAlign } */
     property bool compact: false
+    /* Resolved style tokens for this row (see WidgetDelegate.qml's
+     * _effectiveStyle). Non-required, defaulting to {} — standalone QML
+     * tests instantiate this widget directly with no controller/resolver in
+     * scope, so color bindings below read undefined fields gracefully (no crash). */
+    property var effectiveStyle: ({})
 
     implicitWidth: lbl.implicitWidth + 32
     implicitHeight: lbl.implicitHeight + 12
@@ -24,15 +29,15 @@ Rectangle {
                   topMargin: 6 }
         text: props.text || ""
         wrapMode: Text.Wrap
-        color: compact ? controller.activeStyle.button_text
-             : props.style === "heading" ? controller.activeStyle.text_heading
-             : props.style === "caption" ? controller.activeStyle.text_muted
-             : controller.activeStyle.text
-        font.pixelSize: props.style === "heading" ? 18
-                      : props.style === "caption" ? 11
+        color: compact ? effectiveStyle.button_text
+             : props.labelStyle === "heading" ? effectiveStyle.text_heading
+             : props.labelStyle === "caption" ? effectiveStyle.text_muted
+             : effectiveStyle.text
+        font.pixelSize: props.labelStyle === "heading" ? 18
+                      : props.labelStyle === "caption" ? 11
                       : 14
-        font.bold: props.style === "heading"
-        font.letterSpacing: props.style === "heading" ? 0.5 : 0
+        font.bold: props.labelStyle === "heading"
+        font.letterSpacing: props.labelStyle === "heading" ? 0.5 : 0
         horizontalAlignment: props.labelAlign === "right"   ? Text.AlignRight
                             : props.labelAlign === "center"  ? Text.AlignHCenter
                             : props.labelAlign === "justify" ? Text.AlignJustify

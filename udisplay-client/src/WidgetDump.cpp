@@ -34,12 +34,14 @@ void dumpWidget(QTextStream& out, const QList<WidgetDef>& all, int row, int dept
     out << pad << QStringLiteral("  parentId: %1\n").arg(w.parentId);
     out << pad << QStringLiteral("  value: %1\n").arg(formatValue(w.value));
     out << pad << QStringLiteral("  debugValue: %1\n").arg(formatValue(w.debugValue));
+    if (w.props.contains(QStringLiteral("style")))
+        out << pad << QStringLiteral("  style: %1\n").arg(formatValue(w.props.value(QStringLiteral("style"))));
 
     switch (w.type) {
     case WidgetType::Display:
         out << pad << QStringLiteral("  unit: %1\n").arg(formatValue(w.props.value(QStringLiteral("unit"))));
         out << pad << QStringLiteral("  format: %1\n").arg(formatValue(w.props.value(QStringLiteral("format"))));
-        out << pad << QStringLiteral("  style: %1\n").arg(formatValue(w.props.value(QStringLiteral("style"))));
+        out << pad << QStringLiteral("  displayStyle: %1\n").arg(formatValue(w.props.value(QStringLiteral("displayStyle"))));
         break;
     case WidgetType::Led:
         out << pad << QStringLiteral("  color: %1\n").arg(formatValue(w.props.value(QStringLiteral("color"))));
@@ -76,7 +78,7 @@ void dumpWidget(QTextStream& out, const QList<WidgetDef>& all, int row, int dept
         break;
     case WidgetType::Label:
         out << pad << QStringLiteral("  text: %1\n").arg(formatValue(w.props.value(QStringLiteral("text"))));
-        out << pad << QStringLiteral("  style: %1\n").arg(formatValue(w.props.value(QStringLiteral("style"))));
+        out << pad << QStringLiteral("  labelStyle: %1\n").arg(formatValue(w.props.value(QStringLiteral("labelStyle"))));
         out << pad << QStringLiteral("  textAlign: %1\n").arg(formatValue(w.props.value(QStringLiteral("labelAlign"))));
         break;
     case WidgetType::Separator:
