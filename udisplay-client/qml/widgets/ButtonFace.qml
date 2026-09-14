@@ -14,7 +14,7 @@ import QtQuick
  * Purely visual + interaction: emits buttonPressed/Released/Clicked signals
  * rather than calling controller.sendButtonPress/Release/Click directly, so
  * each caller wires the signals to whichever widget_id is appropriate
- * (root.widgetId for a standalone button, modelData.widgetId for a
+ * (root.widgetId for a standalone button, model.widgetId for a
  * button-group item). */
 Rectangle {
     id: face

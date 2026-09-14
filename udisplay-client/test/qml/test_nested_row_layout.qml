@@ -19,6 +19,13 @@ import "../../qml/widgets" as W
  * Layout.preferredWidth binding, bypassing Loader's broken internal mirroring
  * — same pattern already used for height (Layout.preferredHeight: item.height).
  *
+ * WidgetModel is a flat list now — a row's children come from
+ * WidgetModel::childModel(), not a props.items array. This test builds a
+ * ListModel per container and registers the inner row under a key that the
+ * outer row's own fixture data references via its `row` field — see
+ * FakeWidgetModel.qml's header comment for why a `controller.widgetModel`
+ * stand-in is needed at all.
+ *
  * Model below mirrors the reported bug's YAML: a row containing a label and a
  * nested row of 3 labels. Run headless: `qml -platform offscreen
  * test_nested_row_layout.qml`. Exits 0 on pass, 1 (with a console.error) on
@@ -28,9 +35,6 @@ Item {
     width: 480
     height: 200
 
-    // Minimal stub for the `controller` context property LabelWidget.qml reads
-    // for text color. Not set by main.cpp/DeviceController in this standalone
-    // harness — only main.qml wires that up.
     QtObject {
         id: controller
         property var activeStyle: QtObject {
@@ -38,26 +42,7 @@ Item {
             property string text_muted:   "#888888"
             property string text:         "#c0c0c0"
         }
-    }
-
-    property var myRowProps: {
-        "items": [
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0,
-              props: { text: "Hello", style: "body" } },
-            { type: "row", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0,
-              props: { items: [
-                  { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, props: { text: "Label1", style: "body" } },
-                  { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, props: { text: "Label2", style: "body" } },
-                  { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, props: { text: "Label3", style: "body" } }
-              ] } }
-        ]
-    }
-
-    W.RowWidget {
-        id: myrow
-        anchors.left: parent.left
-        anchors.right: parent.right
-        props: myRowProps
+        property var widgetModel: FakeWidgetModel {}
     }
 
     function fail(msg) {
@@ -65,8 +50,6 @@ Item {
         Qt.exit(1)
     }
 
-    /* Item.children is a QQmlListProperty, not a real JS Array — no .find()/
-     * .filter()/.map(). Convert to a plain array first. */
     function toArray(qmlList) {
         var out = []
         for (var i = 0; i < qmlList.length; i++)
@@ -87,6 +70,38 @@ Item {
             if (items[i].toString().indexOf(needle) === 0)
                 out.push(items[i])
         return out
+    }
+
+    ListModel {
+        id: innerRowItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: { text: "Label1", style: "body" } })
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: { text: "Label2", style: "body" } })
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: { text: "Label3", style: "body" } })
+            controller.widgetModel.register("innerRow", innerRowItems)
+            ready = true
+        }
+    }
+    ListModel {
+        id: outerRowItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: { text: "Hello", style: "body" } })
+            append({ widgetId: 0, type: "row", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", row: "innerRow", props: {} })
+            ready = true
+        }
+    }
+    W.RowWidget {
+        id: myrow
+        anchors.left: parent.left
+        anchors.right: parent.right
+        childModel: (outerRowItems.ready && innerRowItems.ready) ? outerRowItems : null
     }
 
     Timer {

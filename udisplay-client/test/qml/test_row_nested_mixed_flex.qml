@@ -33,6 +33,13 @@ import "../../qml/widgets" as W
  * /investigate (2026-07-13) from YAML shaped exactly like the model below
  * (a row containing a flex:1 button and a plain label).
  *
+ * WidgetModel is a flat list now — a row's children come from
+ * WidgetModel::childModel(), not a props.items array. This test builds a
+ * ListModel per container and registers the nested row under a key that
+ * the outer row's own fixture data references via its `row` field — see
+ * FakeWidgetModel.qml's header comment for why a `controller.widgetModel`
+ * stand-in is needed at all.
+ *
  * Run headless: `qml -platform offscreen test_row_nested_mixed_flex.qml`.
  * CTest's own TIMEOUT catches a real hang (this test does not need its
  * own watchdog timer — if the bug regresses, the process simply never
@@ -53,31 +60,43 @@ Item {
             property string button_text:  "#0d0d1a"
             property string line:         "#1e1e3a"
         }
+        property var widgetModel: FakeWidgetModel {}
         function sendButtonPress() {}
         function sendButtonRelease() {}
         function sendButtonClick() {}
     }
 
+    /* nested row: button1 (flex:1) + label (flex:0), no face children */
+    ListModel {
+        id: nestedRowItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0x10, type: "button", label: "button1", enabled: true, widgetVisible: true, value: "",
+                     flex: 1, align: "", props: { shape: "rect" } })
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: { text: "Hello, world!", style: "body" } })
+            controller.widgetModel.register("nestedRow", nestedRowItems)
+            ready = true
+        }
+    }
     /* outer row: [nested row (button1 flex:1 + label, no flex), sibling label] */
-    property var outerProps: {
-        "items": [
-            { type: "row", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "",
-              props: { items: [
-                  { type: "button", widgetId: 0x10, label: "button1", enabled: true, visible: true, value: null, flex: 1, align: "",
-                    props: { shape: "rect" } },
-                  { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "",
-                    props: { text: "Hello, world!", style: "body" } }
-              ] } },
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "",
-              props: { text: "sibling", style: "body" } }
-        ]
+    ListModel {
+        id: outerRowItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "row", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", row: "nestedRow", props: {} })
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: { text: "sibling", style: "body" } })
+            ready = true
+        }
     }
 
     W.RowWidget {
         id: outerRow
         anchors.left: parent.left
         anchors.right: parent.right
-        props: outerProps
+        childModel: (outerRowItems.ready && nestedRowItems.ready) ? outerRowItems : null
     }
 
     function fail(msg) {

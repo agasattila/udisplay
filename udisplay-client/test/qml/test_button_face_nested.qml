@@ -39,6 +39,14 @@ import "../../qml/widgets" as W
  *    parses and renders — the client stays permissive; only
  *    `udisplay-gen validate` hard-rejects it (schema-gates, client-warns).
  *
+ * WidgetModel is a flat list now — a button's face children, and any
+ * row/grid nested inside that face, come from WidgetModel::childModel(),
+ * not a props.items array. This test builds one ListModel per container
+ * and registers nested ones under a key that the parent container's own
+ * fixture data references via its `row` field — see FakeWidgetModel.qml's
+ * header comment for why a `controller.widgetModel` stand-in is needed at
+ * all.
+ *
  * Run headless: `qml -platform offscreen test_button_face_nested.qml`.
  * Exits 0 on pass, 1 (with a console.error) on fail — CTest reads the exit code.
  */
@@ -60,6 +68,7 @@ Item {
             property string button:       "#00d4aa"
             property string button_text:  "#0d0d1a"
         }
+        property var widgetModel: FakeWidgetModel {}
         function sendButtonPress(id) {}
         function sendButtonRelease(id) {}
         function sendButtonClick(id) {}
@@ -158,31 +167,35 @@ Item {
 
     /* ── Section C: nested grid (columns: 1) face — label + LED stacked ── */
 
-    property var nestedGridProps: ({
-        shape: "rect",
-        items: [
-            {
-                type: "grid", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "",
-                props: {
-                    columns: 1,
-                    align: "left",
-                    items: [
-                        { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "center",
-                          props: { text: "PWR", style: "caption" } },
-                        { type: "led", widgetId: 0x20, label: "", enabled: true, visible: true, value: true, flex: 0, align: "",
-                          props: { color: "#ff0000" } }
-                    ]
-                }
-            }
-        ]
-    })
+    ListModel {
+        id: nestedGridChildren
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: 0,
+                     flex: 0, align: "center", props: { text: "PWR", style: "caption" } })
+            append({ widgetId: 0x20, type: "led", label: "", enabled: true, widgetVisible: true, value: 1,
+                     flex: 0, align: "", props: { color: "#ff0000" } })
+            controller.widgetModel.register("nestedGridChildren", nestedGridChildren)
+            ready = true
+        }
+    }
+    ListModel {
+        id: nestedGridFaceItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "grid", label: "", enabled: true, widgetVisible: true, value: 0,
+                     flex: 0, align: "", row: "nestedGridChildren", props: { columns: 1, align: "left" } })
+            ready = true
+        }
+    }
     W.ButtonWidget {
         id: nestedGridButton
         x: 300
         widgetId: 0x10
         label: "Power"
         enabled: true
-        props: nestedGridProps
+        props: ({ shape: "rect" })
+        childModel: (nestedGridFaceItems.ready && nestedGridChildren.ready) ? nestedGridFaceItems : null
     }
 
     /* ── Section E: compact propagates through 2 Loader{source:} hops ─── */
@@ -194,28 +207,35 @@ Item {
      * assertion rather than trusting 1-level coverage (Section C) to imply
      * 2-level correctness. */
 
-    property var doubleNestedProps: ({
-        shape: "rect",
-        items: [
-            {
-                type: "row", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "",
-                props: {
-                    items: [
-                        {
-                            type: "grid", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "",
-                            props: {
-                                columns: 1,
-                                items: [
-                                    { type: "led", widgetId: 0x22, label: "", enabled: true, visible: true, value: true, flex: 0, align: "",
-                                      props: { color: "#00ff00" } }
-                                ]
-                            }
-                        }
-                    ]
-                }
-            }
-        ]
-    })
+    ListModel {
+        id: doubleNestedGridChildren
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0x22, type: "led", label: "", enabled: true, widgetVisible: true, value: 1,
+                     flex: 0, align: "", props: { color: "#00ff00" } })
+            controller.widgetModel.register("doubleNestedGridChildren", doubleNestedGridChildren)
+            ready = true
+        }
+    }
+    ListModel {
+        id: doubleNestedRowChildren
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "grid", label: "", enabled: true, widgetVisible: true, value: 0,
+                     flex: 0, align: "", row: "doubleNestedGridChildren", props: { columns: 1 } })
+            controller.widgetModel.register("doubleNestedRowChildren", doubleNestedRowChildren)
+            ready = true
+        }
+    }
+    ListModel {
+        id: doubleNestedFaceItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "row", label: "", enabled: true, widgetVisible: true, value: 0,
+                     flex: 0, align: "", row: "doubleNestedRowChildren", props: {} })
+            ready = true
+        }
+    }
     W.ButtonWidget {
         id: doubleNestedButton
         x: 300
@@ -223,18 +243,21 @@ Item {
         widgetId: 0x12
         label: "Deep"
         enabled: true
-        props: doubleNestedProps
+        props: ({ shape: "rect" })
+        childModel: (doubleNestedFaceItems.ready && doubleNestedRowChildren.ready && doubleNestedGridChildren.ready) ? doubleNestedFaceItems : null
     }
 
     /* ── Section D: excluded interactive type stays permissive ──────── */
 
-    property var toggleFaceProps: ({
-        shape: "rect",
-        items: [
-            { type: "toggle", widgetId: 0x21, label: "", enabled: true, visible: true, value: false, flex: 0, align: "",
-              props: {} }
-        ]
-    })
+    ListModel {
+        id: toggleFaceItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0x21, type: "toggle", label: "", enabled: true, widgetVisible: true, value: false,
+                     flex: 0, align: "", props: {} })
+            ready = true
+        }
+    }
     W.ButtonWidget {
         id: toggleFaceButton
         x: 300
@@ -242,7 +265,8 @@ Item {
         widgetId: 0x11
         label: "Ctrl"
         enabled: true
-        props: toggleFaceProps
+        props: ({ shape: "rect" })
+        childModel: toggleFaceItems.ready ? toggleFaceItems : null
     }
 
     Timer {

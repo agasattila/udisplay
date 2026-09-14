@@ -584,12 +584,11 @@ private slots:
         dc.startDesignMode(path);
 
         QVERIFY(dc.designErrorString().isEmpty());
-        /* Row is at row 0; its first container child should have value 5.0 */
-        QVariant props = dc.widgetModel()->data(dc.widgetModel()->index(0),
-                                                WidgetModel::PropsRole);
-        QVariantList items = props.toMap()[QStringLiteral("items")].toList();
-        QCOMPARE(items.size(), 1);
-        QCOMPARE(items[0].toMap()[QStringLiteral("value")].toDouble(), 5.0);
+        /* Row is at row 0; its child (temp, a flat row of its own now —
+         * see WidgetModel.h) is at row 1, with debug_state injected
+         * directly via ValueRole on its own row. */
+        QCOMPARE(dc.widgetModel()->data(dc.widgetModel()->index(1),
+                                        WidgetModel::ValueRole).toDouble(), 5.0);
     }
 
     /* CRITICAL: debug_state must NOT be injected when YAML comes from a real

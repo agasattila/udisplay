@@ -13,6 +13,13 @@ import "../../qml/widgets" as W
  * guard — see DpadWidget.qml's header comment), and the 44px minimum
  * touch-target clamp (T9).
  *
+ * WidgetModel is a flat list now — a dpad's items come from
+ * WidgetModel::childModel(), not a props.items array (see DpadWidget.qml);
+ * each item's cross-layout slot lives at props.position, not a bare
+ * top-level `position` field. This test builds a ListModel and feeds it via
+ * childModel: instead — see FakeWidgetModel.qml's header comment for why a
+ * `controller.widgetModel` stand-in is needed at all.
+ *
  * Run headless: `qml -platform offscreen test_dpad_widget.qml`.
  * Exits 0 on pass, 1 (with a console.error) on fail — CTest reads the exit code.
  */
@@ -34,6 +41,7 @@ Item {
             property string button:       "#00d4aa"
             property string button_text:  "#0d0d1a"
         }
+        property var widgetModel: FakeWidgetModel {}
         property int lastPressId: -1
         property int lastReleaseId: -1
         property int lastClickId: -1
@@ -51,25 +59,33 @@ Item {
      * gaps here, exercising the same null-guard path as the real 4-corner
      * spacers (cell.btnItem === null). "Down" is disabled to verify
      * per-item (not group-level) enable/disable. */
-    property var dpadProps: ({
-        items: [
-            { widgetId: 0x20, label: "Up",   position: "top",    enabled: true,  props: {} },
-            { widgetId: 0x21, label: "Down", position: "bottom", enabled: false, props: {} }
-        ]
-    })
+    ListModel {
+        id: dpadItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0x20, type: "button", label: "Up",   enabled: true,  widgetVisible: true, value: 0,
+                     flex: 0, align: "", props: { position: "top" } })
+            append({ widgetId: 0x21, type: "button", label: "Down", enabled: false, widgetVisible: true, value: 0,
+                     flex: 0, align: "", props: { position: "bottom" } })
+            ready = true
+        }
+    }
 
     W.DpadWidget {
         id: dpad
-        props: dpadProps
+        childModel: dpadItems.ready ? dpadItems : null
     }
 
     /* Empty dpad: exercises the Math.max(..., 44) floor in isolation — with
      * no real buttons, grid.cellSize never gets bumped past its initial
      * value, so it must resolve to exactly 44 (not some other constant). */
+    ListModel {
+        id: emptyDpadItems
+    }
     W.DpadWidget {
         id: emptyDpad
         y: 200
-        props: ({ items: [] })
+        childModel: emptyDpadItems
     }
 
     /* DpadWidget's root has exactly one child: the Grid. Its Repeater

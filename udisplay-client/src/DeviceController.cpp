@@ -418,18 +418,14 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
 
     m_model.setWidgets(widgets);
 
-    /* Inject debug_state preview values in design mode only. */
+    /* Inject debug_state preview values in design mode only. widgets is a
+     * flat list now (every widget, any depth, is its own entry) — no
+     * recursion needed. */
     if (designMode) {
-        std::function<void(const QList<WidgetDef>&)> injectDebugValues =
-            [&](const QList<WidgetDef>& list) {
-                for (const WidgetDef& w : list) {
-                    if (!w.debugValue.isNull())
-                        m_model.setValue(w.widgetId, w.debugValue);
-                    if (!w.children.isEmpty())
-                        injectDebugValues(w.children);
-                }
-            };
-        injectDebugValues(widgets);
+        for (const WidgetDef& w : widgets) {
+            if (!w.debugValue.isNull())
+                m_model.setValue(w.widgetId, w.debugValue);
+        }
     }
 
     printDebugDump(widgets, name, version, m_activeStyleName);

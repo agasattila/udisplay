@@ -398,25 +398,48 @@ design after V1 widget system expansion (TODO-016/017/018/009) is proven in prod
 
 ---
 
-### TODO-032: Section inside Row/Grid support
-**What:** Support `section` type as a child of Row/Grid containers in WidgetDelegate. Currently `WidgetDelegate.qml` maps `section` → null (zero-height placeholder, safe default).
-**Why:** The flat-model collapse mechanism (`SectionWidget` + `sectionOwnerRow`) was designed for top-level use only. A Section's children are separate rows in `m_widgets` with a visibility flag — they are NOT embedded in `props.items`. Supporting Section inside a Row/Grid requires either: (a) serializing Section children into `props.items` (architectural change to `buildPropsMap`), or (b) a new Section variant that works inline.
-**Context:** Explicitly deferred in TODO-031 PR 2 review. `WidgetDelegate` maps `section` → null to avoid the rendering confusion of showing a header with no children. Top-level Section behavior (flat model + collapse) is unaffected.
-**Effort:** M (human: ~2 days / CC: ~30 min)
-**Priority:** P3 — edge case; no known firmware use case for Section-inside-Row
+### TODO-032: Section inside Row/Grid/Dpad support
+**Status:** ⚠️ HALF DONE (2026-09-10, `/plan-eng-review` of the DeviceScreen.qml/WidgetDelegate.qml dispatch-dedup fix) — the QML-side half of this TODO is now closed: `WidgetDelegate.qml`'s `sourceComponent` ternary has a `section` case (added as part of consolidating `DeviceScreen.qml`'s own hand-rolled top-level dispatch into `WidgetDelegate.qml`, which needed section support to fully replace that dispatch). **The parser-side half is still open and is now the sole remaining blocker:** `YamlParser.cpp`'s `buildWidget()` still has no `WidgetType::Section` case in its nested-children switch (`YamlParser.cpp:497`, only Button/ButtonGroup/Dpad/Row/Grid are handled there) — a section nested inside a row/grid/dpad still loses its whole subtree silently at parse time, before ever reaching the now-fixed QML dispatch. Do not re-do the QML-side work — read `WidgetDelegate.qml`'s `sectionComp` (added this session) before touching this TODO again.
+**What:** Add a `WidgetType::Section` case to `YamlParser.cpp`'s `buildWidget()` nested-children switch (mirroring the `Row`/`Grid` case immediately below it at `YamlParser.cpp:586-605` — same recursive `widgets:` walk, same `idPrefix` threading, since Section is container-transparent like Row/Grid).
+**Why:** The flat-model collapse mechanism (`SectionWidget` + `parentId`) was designed for top-level use only. Post widget-model-flatten refactor, a section's children are real rows scoped by `WidgetModel::childModel(sectionRow)` exactly like every other container's children — but nothing constructs those rows when the section itself is reached via `buildWidget()`'s nested recursion (only via the top-level `buildAndAppendWidgets()` path).
+**Context:** Explicitly deferred in TODO-031 PR 2 review; reconfirmed still present during the widget-model-flatten refactor's adversarial/red-team review (2026-09-10). QML-side half closed incidentally (2026-09-10) as a side effect of the DeviceScreen.qml/WidgetDelegate.qml dispatch-dedup fix — not because this TODO was picked up directly. Top-level Section behavior (flat model + collapse + own-child rendering) is unaffected and fully supported.
+**Effort:** S now (down from M — only the parser-side case remains; the QML-side plumbing already exists and is tested via `sectionComp`)
+**Priority:** P3 — edge case; no known firmware use case for Section-inside-Row/Grid/Dpad
 **Depends on:** TODO-031 complete.
+
+---
+
+### TODO-054: Switch RowWidget/GridWidget/SectionWidget's dynamic-Loader containers to setSource() so label/props/childModel can stay `required`
+
+**What:** `WidgetDelegate.qml`'s `rowComp`/`gridComp`/`sectionComp` each load their target component dynamically via `Loader { source: Qt.resolvedUrl(...); onLoaded: { item.x = Qt.binding(...) } }` — a pattern chosen to avoid the WidgetDelegate<->container static-type cycle (see that file's header comment). Because `source:`-loaded objects get their properties set via live binding *after* construction, none of `RowWidget.qml`/`GridWidget.qml`/`SectionWidget.qml`'s `label`/`props`/`childModel` properties can be `required` — they all default instead (`property string label: ""`, etc.), giving up the compile/runtime safety net that catches a caller forgetting to set one. Investigate switching to `Loader.setSource(url, properties)` instead, which (per Qt docs) accepts an initial-properties object the same shape as `Component.createObject(parent, properties)` — including `Qt.binding(...)` values for live reactivity — and can satisfy `required` properties at construction time.
+
+**Why:** Raised by Codex's outside-voice review of the DeviceScreen.qml/WidgetDelegate.qml dispatch-dedup fix (2026-09-10): adding `sectionComp` to `WidgetDelegate.qml` required making `SectionWidget.label` non-required, matching the same pattern Row/Grid already used — Codex correctly pointed out `setSource()` could avoid weakening the property contract at all, for all three containers, not just the one this session touched.
+
+**Context:** Not applied inline during the dispatch-dedup fix because it would have meant also touching `RowWidget.qml`/`GridWidget.qml` (already-shipped, already-tested files) beyond that fix's actual scope, and needs its own verification that `setSource()`'s `properties` argument supports live `Qt.binding()` values identically to `createObject()` for the Loader-source-URL case specifically (Qt's documentation is not fully explicit on this for `setSource` vs `createObject`). Should be it's own small investigation-plus-verification pass, not a drive-by change.
+
+**Pros:** Restores `required` (a real safety net) on `label`/`props`/`childModel` across all three dynamically-loaded containers; self-documents each container's actual contract via the type system instead of a silent default.
+
+**Cons:** Touches three already-working, already-tested files for a safety-net improvement, not a bug fix; needs its own test verifying `setSource()`'s properties argument is genuinely live (not one-time) before relying on it — if it turns out not to support live bindings, this TODO closes as "not applicable, keep the existing pattern."
+
+**Effort:** S (human: ~1-2h / CC: ~20min)
+**Priority:** P3 — code-quality/safety-net improvement, no known bug caused by the current non-required pattern.
+**Depends on:** Nothing blocking.
 
 ---
 
 ### TODO-036: Cap recursion depth for nested row/grid/section/button-children
 **What:** Add a depth counter (parameter or thread-local) threaded through
-`YamlParser.cpp`'s `buildTopLevelWidget()`/`appendRowGridChild()`/
-`buildAndAppendWidgets()` recursion, `WidgetModel::indexDescendants()`, and
+`YamlParser.cpp`'s `buildWidget()`/`buildAndAppendWidgets()` recursion and
 `WidgetDump::dumpWidget()`, that errors out (not just warns) past a sane
-max nesting depth (e.g. 8-10 levels). The QML side (`WidgetDelegate.qml`'s
-`rowComp`/`gridComp` dynamic `Loader{source:...}` self-recursion) inherits
-whatever depth the parsed model reaches, so capping at parse time is
-sufficient — no separate QML-side guard needed.
+max nesting depth (e.g. 8-10 levels). Post widget-model-flatten refactor,
+there is no separate `WidgetModel::indexDescendants()` to also guard —
+depth-sensitive traversal now lives in the `parentId`-chain ancestor walks
+(`WidgetModel::data()`'s `VisibleRole` case, `WidgetModel::toggleSection()`),
+which are bounded by the SAME parse-time recursion depth this TODO caps, so
+no separate runtime guard is needed there either. The QML side
+(`WidgetDelegate.qml`'s `rowComp`/`gridComp` dynamic `Loader{source:...}`
+self-recursion) inherits whatever depth the parsed model reaches, so
+capping at parse time is sufficient — no separate QML-side guard needed.
 **Why:** Found during adversarial review of the row/grid alignment PR — `row`/`grid`/`section` are ID-transparent (`isContainer()`
 in YamlParser.cpp, consume no widget ID), so the existing `240`-widget
 safety cap only bounds *leaf* widget count, not container nesting depth.
@@ -458,7 +481,7 @@ device sends raw, unvalidated YAML with `type: row` or `type: grid` as a button 
 (schema-illegal via `buttonFaceChild`'s `oneOf`, but the client parses device YAML
 directly with no runtime schema validation), that container is treated as a flat leaf
 and its own nested children are never registered in `idMap` under any path. When
-`buildTopLevelWidget`'s `Row`/`Grid` case (`YamlParser.cpp:~397`) then looks up those
+`buildWidget`'s `Row`/`Grid` case (`YamlParser.cpp:~586`) then looks up those
 grandchildren via **bare, unprefixed key** (`idMap.count(ck)` — correct only for
 legitimate top-level/container-transparent nesting), a grandchild whose bare key
 happens to coincide with any other widget's name elsewhere in the same document
@@ -495,7 +518,7 @@ fixed as part of that redesign's Increment 1/2 work; this TODO is about preventi
 pattern from recurring, not about the instances themselves.
 **Increment 2 status:** All three concrete instances are now fixed —
 `collectPathsRecursive`'s button-child loop now recurses (`YamlParser.cpp`),
-`buildTopLevelWidget`'s Row/Grid case now threads an explicit `idPrefix` so nested
+`buildWidget`'s Row/Grid case now threads an explicit `idPrefix` so nested
 container ID lookups resolve correctly, and `widget_ids.py`'s `_collect()`/
 `collect_types()` both recurse the same way. The concrete cross-widget
 state-corruption path described above no longer exists. What remains open is this

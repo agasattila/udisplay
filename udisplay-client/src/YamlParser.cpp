@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <QStringList>
+#include <QVariantList>
+#include <QVariantMap>
 
 using Diags    = QList<YamlParser::ParseDiagnostic>;
 using Severity = YamlParser::Severity;
@@ -38,7 +40,7 @@ static bool inEnum(const QString& v, const Array& allowed)
     return false;
 }
 
-/* Row/grid child flex weight. Omitted (or non-scalar) -> 0, meaning
+/* Row/grid/dpad child flex weight. Omitted (or non-scalar) -> 0, meaning
  * auto-width (the child sizes to its own implicitWidth and does not
  * stretch — see RowWidget.qml/GridWidget.qml's
  * max(implicitWidth, available*flex/totalFlex) layout formula, where
@@ -186,14 +188,28 @@ static std::vector<PathEntry> collectPaths(const YAML::Node& widgets)
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
- *  Widget parsing
+ *  Widget parsing — flat model
+ *
+ *  buildWidget() appends exactly one WidgetDef row for `key`/`node` to `out`
+ *  (parentId = `parentId`), then — if the widget is a container type with
+ *  its own children (button face, row/grid/dpad members, button-group
+ *  items) — recurses to append each child immediately after, with
+ *  parentId set to the row index this call just appended. The tree is
+ *  walked top-down and flattened as it goes; nothing is built bottom-up and
+ *  attached to a parent's `.children` (there is no such field anymore).
+ *  Returns the row index this call appended, so callers can post-process
+ *  that specific row (flex/align/position overrides) after any nested
+ *  children have already been appended after it.
  * ══════════════════════════════════════════════════════════════════════════ */
 
-static void appendRowGridChild(WidgetDef& parent, const std::string& key,
-                               const YAML::Node& node, uint8_t widgetId,
-                               const std::string& idPrefix,
-                               const std::map<std::string, uint8_t>& idMap,
-                               Diags& diags);
+static int buildWidget(const std::string& key,
+                       const YAML::Node& node,
+                       uint8_t widgetId,
+                       const std::string& idPrefix,
+                       const std::map<std::string, uint8_t>& idMap,
+                       int parentId,
+                       QList<WidgetDef>& out,
+                       Diags& diags);
 
 /* Emits a Warning diagnostic for any excluded interactive type
  * (toggle/slider/text/dropdown/button/button-group) found anywhere in a
@@ -234,47 +250,52 @@ static void warnExcludedButtonFaceTypes(const YAML::Node& widgets,
 }
 
 /* idPrefix: the effective ID-path prefix to use when looking up this node's
- * OWN children in idMap, if this node turns out to be a container (row/grid)
- * — irrelevant otherwise, since every other widget type resolves its own
- * children's ID paths from `key` directly. Container types are transparent
- * to ID assignment (their own name is never a path segment — see
- * isContainer()), so idPrefix must be threaded explicitly rather than
+ * OWN children in idMap, if this node turns out to be a container (row/
+ * grid/dpad) — irrelevant otherwise, since every other widget type resolves
+ * its own children's ID paths from `key` directly. Container types are
+ * transparent to ID assignment (their own name is never a path segment —
+ * see isContainer()), so idPrefix must be threaded explicitly rather than
  * derived from `key`: a row/grid reached via a button's face (key =
  * "btn_key.container_key") needs idPrefix = "btn_key" (skipping the
  * container's own throwaway key), while a row/grid reached via ordinary
  * top-level/nested-container recursion needs idPrefix = "" (unchanged
  * through any number of container hops — see collectPathsRecursive's
  * matching isContainer() recursion, which also keeps prefix unchanged). */
-static WidgetDef buildTopLevelWidget(const std::string& key,
-                                     const YAML::Node& node,
-                                     uint8_t widgetId,
-                                     const std::string& idPrefix,
-                                     const std::map<std::string, uint8_t>& idMap,
-                                     Diags& diags)
+static int buildWidget(const std::string& key,
+                       const YAML::Node& node,
+                       uint8_t widgetId,
+                       const std::string& idPrefix,
+                       const std::map<std::string, uint8_t>& idMap,
+                       int parentId,
+                       QList<WidgetDef>& out,
+                       Diags& diags)
 {
     WidgetDef w;
     w.keyPath  = qs(key);
     w.widgetId = widgetId;
     w.type     = widgetTypeFromString(nodeStr(node, "type"));
     w.label    = nodeStr(node, "label");
+    w.parentId = parentId;
 
     if (w.type == WidgetType::Unknown) {
         diag(diags, Severity::Error, key, "type",
              QStringLiteral("unknown widget type: '%1'")
                  .arg(nodeStr(node, "type")));
-        return w;
+        out.append(w);
+        return out.size() - 1;
     }
 
     switch (w.type) {
     case WidgetType::Display: {
-        w.unit   = nodeStr(node, "unit");
-        w.format = nodeStr(node, "format", QStringLiteral("%.2f"));
-        w.displayStyle = nodeStr(node, "style", QStringLiteral("default"));
-        if (!inEnum(w.displayStyle, UDisplaySchema::kDisplayStyles)) {
+        w.props[QStringLiteral("unit")]   = nodeStr(node, "unit");
+        w.props[QStringLiteral("format")] = nodeStr(node, "format", QStringLiteral("%.2f"));
+        QString style = nodeStr(node, "style", QStringLiteral("default"));
+        if (!inEnum(style, UDisplaySchema::kDisplayStyles)) {
             diag(diags, Severity::Error, key, "style",
                  QStringLiteral("unknown display style '%1'; valid values: default, large")
-                     .arg(w.displayStyle));
+                     .arg(style));
         }
+        w.props[QStringLiteral("style")] = style;
         break;
     }
 
@@ -296,133 +317,64 @@ static WidgetDef buildTopLevelWidget(const std::string& key,
             diag(diags, Severity::Warning, key, "color",
                  QStringLiteral("invalid LED color '%1'; must be 6-digit hex (e.g. #ff0000)")
                      .arg(rawColor));
-            w.color = QStringLiteral("#00d4aa");
-        } else {
-            w.color = rawColor;
+            rawColor = QStringLiteral("#00d4aa");
         }
+        w.props[QStringLiteral("color")] = rawColor;
         break;
     }
 
+    case WidgetType::RgbLed:
+        break;
+
     case WidgetType::Button: {
-        w.shape = nodeStr(node, "shape", QStringLiteral("rect"));
-        if (!inEnum(w.shape, UDisplaySchema::kButtonShapes)) {
+        QString shape = nodeStr(node, "shape", QStringLiteral("rect"));
+        if (!inEnum(shape, UDisplaySchema::kButtonShapes)) {
             diag(diags, Severity::Error, key, "shape",
                  QStringLiteral("unknown button shape '%1'; valid values: rect, circle, square")
-                     .arg(w.shape));
+                     .arg(shape));
         }
-        if (node["widgets"] && node["widgets"].IsMap()) {
-            warnExcludedButtonFaceTypes(node["widgets"], key, diags);
-            for (auto ci = node["widgets"].begin();
-                 ci != node["widgets"].end(); ++ci) {
-                std::string ck = ci->first.as<std::string>();
-                std::string cp = key + "." + ck;
-                uint8_t cid = idMap.count(cp) ? idMap.at(cp) : 0;
-                /* idPrefix = key (the button's own path): if this face
-                 * child is itself a container (row/grid), ITS children's ID
-                 * lookups must skip the container's own throwaway key `ck`
-                 * and use the button's path instead — see buildTopLevelWidget's
-                 * idPrefix doc comment. */
-                WidgetDef child = buildTopLevelWidget(cp, ci->second, cid, key, idMap, diags);
-                child.flex = parseFlex(ci->second, key, diags);
-                child.align = parseAlign(ci->second, key, "align", kRowGridAligns, diags);
-                w.children.append(child);
-            }
-        } else if (node["children"] && node["children"].IsMap()) {
-            /* Legacy key, renamed to `widgets:` — warn instead of silently
-             * dropping the button's face content. The client parses
-             * device-supplied YAML directly (no schema validation at
-             * runtime), so stale/hand-authored firmware YAML using the old
-             * key must not lose data without a diagnostic. */
-            diag(diags, Severity::Warning, key, "children",
-                 QStringLiteral("'children:' is deprecated for button widgets; "
-                                 "use 'widgets:' instead — this button's face content "
-                                 "was not parsed"));
-        }
+        w.props[QStringLiteral("shape")] = shape;
         break;
     }
 
     case WidgetType::ButtonGroup: {
-        w.groupLayout = nodeStr(node, "layout", QStringLiteral("grid"));
-        if (!inEnum(w.groupLayout, UDisplaySchema::kButtonGroupLayouts)) {
+        QString layout = nodeStr(node, "layout", QStringLiteral("grid"));
+        if (!inEnum(layout, UDisplaySchema::kButtonGroupLayouts)) {
             diag(diags, Severity::Error, key, "layout",
                  QStringLiteral("unknown button-group layout '%1'; valid values: grid")
-                     .arg(w.groupLayout));
+                     .arg(layout));
         }
-        if (node["items"] && node["items"].IsMap()) {
-            int itemCount = 0;
-            for (auto ii = node["items"].begin();
-                 ii != node["items"].end(); ++ii) {
-                ++itemCount;
-                std::string ik = ii->first.as<std::string>();
-                std::string ip = key + "." + ik;
-                ButtonGroupItem item;
-                item.keyPath  = qs(ip);
-                item.widgetId = idMap.count(ip) ? idMap.at(ip) : 0;
-                item.label    = nodeStr(ii->second, "label");
-                item.position = nodeStr(ii->second, "position");
-                w.groupItems.append(item);
-            }
-            if (itemCount < 2) {
-                diag(diags, Severity::Warning, key, "items",
-                     QStringLiteral("button-group requires at least 2 items; found %1")
-                         .arg(itemCount));
-            }
-        }
+        w.props[QStringLiteral("layout")] = layout;
         break;
     }
 
-    case WidgetType::Dpad: {
-        if (node["widgets"] && node["widgets"].IsMap()) {
-            int itemCount = 0;
-            for (auto ii = node["widgets"].begin();
-                 ii != node["widgets"].end(); ++ii) {
-                ++itemCount;
-                std::string ik = ii->first.as<std::string>();
-                /* Container transparency: dpad is in isContainer() /
-                 * widget_ids.py's CONTAINER_TYPES, so its own key is never a
-                 * path segment — idPrefix carries through unchanged, same as
-                 * the Row/Grid case above. Looking this up by `key + "." + ik`
-                 * instead would silently miss idMap (which was built by the
-                 * transparent-container walk) and every dpad item would fall
-                 * back to widgetId 0. */
-                std::string idPath = idPrefix.empty() ? ik : idPrefix + "." + ik;
-                DpadItem item;
-                item.keyPath  = qs(ik);
-                item.widgetId = idMap.count(idPath) ? idMap.at(idPath) : 0;
-                item.label    = nodeStr(ii->second, "label");
-                item.position = nodeStr(ii->second, "position");
-                w.dpadItems.append(item);
-            }
-            if (itemCount < 1) {
-                diag(diags, Severity::Warning, key, "widgets",
-                     QStringLiteral("dpad requires at least 1 item; found %1")
-                         .arg(itemCount));
-            }
-        }
+    case WidgetType::Dpad:
         break;
-    }
-
 
     case WidgetType::Slider: {
+        double sliderMin = 0.0, sliderMax = 100.0, sliderStep = 1.0;
         if (node["min"] && node["min"].IsScalar())
-            w.sliderMin  = node["min"].as<double>();
+            sliderMin = node["min"].as<double>();
         if (node["max"] && node["max"].IsScalar())
-            w.sliderMax  = node["max"].as<double>();
+            sliderMax = node["max"].as<double>();
         if (node["step"] && node["step"].IsScalar()) {
-            w.sliderStep = node["step"].as<double>();
-            if (w.sliderStep <= 0.0) {
+            sliderStep = node["step"].as<double>();
+            if (sliderStep <= 0.0) {
                 diag(diags, Severity::Warning, key, "step",
                      QStringLiteral("slider step must be > 0; got %1; using 1")
-                         .arg(w.sliderStep));
-                w.sliderStep = 1.0;
+                         .arg(sliderStep));
+                sliderStep = 1.0;
             }
         }
-        if (w.sliderMax <= w.sliderMin) {
+        if (sliderMax <= sliderMin) {
             diag(diags, Severity::Warning, key, "max",
                  QStringLiteral("slider max (%1) must be greater than min (%2)")
-                     .arg(w.sliderMax).arg(w.sliderMin));
+                     .arg(sliderMax).arg(sliderMin));
         }
-        w.unit = nodeStr(node, "unit");
+        w.props[QStringLiteral("min")]  = sliderMin;
+        w.props[QStringLiteral("max")]  = sliderMax;
+        w.props[QStringLiteral("step")] = sliderStep;
+        w.props[QStringLiteral("unit")] = nodeStr(node, "unit");
         break;
     }
 
@@ -432,9 +384,11 @@ static WidgetDef buildTopLevelWidget(const std::string& key,
             diag(diags, Severity::Error, key, "mode",
                  QStringLiteral("unknown text mode '%1'; valid values: ro, rw").arg(rawMode));
         }
-        w.textMode        = (rawMode == u"ro") ? QStringLiteral("readonly") : rawMode;
-        w.defaultTextMode = w.textMode;
-        w.textPlaceholder = nodeStr(node, "placeholder");
+        QString textMode = (rawMode == u"ro") ? QStringLiteral("readonly") : rawMode;
+        w.props[QStringLiteral("mode")]        = textMode;
+        w.props[QStringLiteral("defaultMode")] = textMode;
+        w.props[QStringLiteral("placeholder")] = nodeStr(node, "placeholder");
+        int maxlen = 255;
         if (node["maxlength"] && node["maxlength"].IsScalar()) {
             int ml = node["maxlength"].as<int>();
             if (ml < 1 || ml > 255) {
@@ -442,54 +396,54 @@ static WidgetDef buildTopLevelWidget(const std::string& key,
                      QStringLiteral("maxlength %1 out of range [1, 255]").arg(ml));
                 ml = qBound(1, ml, 255);
             }
-            w.textMaxLength = ml;
+            maxlen = ml;
         }
+        w.props[QStringLiteral("maxlength")] = maxlen;
         break;
     }
 
-    case WidgetType::Dropdown:
+    case WidgetType::Dropdown: {
+        QVariantList items;
         if (node["items"] && node["items"].IsMap()) {
             for (auto ii = node["items"].begin();
                  ii != node["items"].end(); ++ii) {
-                DropdownItem item;
-                item.key   = qs(ii->first.as<std::string>());
-                item.label = qs(ii->second.IsScalar()
-                                ? ii->second.as<std::string>() : "");
-                w.dropdownItems.append(item);
+                QVariantMap m;
+                m[QStringLiteral("key")]   = qs(ii->first.as<std::string>());
+                m[QStringLiteral("label")] = qs(ii->second.IsScalar()
+                                                ? ii->second.as<std::string>() : "");
+                items.append(m);
             }
         }
+        w.props[QStringLiteral("items")] = items;
         break;
+    }
 
-    case WidgetType::Label:
-        w.labelText  = nodeStr(node, "text");
-        w.labelStyle = nodeStr(node, "style", QStringLiteral("body"));
-        if (!inEnum(w.labelStyle, UDisplaySchema::kLabelStyles)) {
+    case WidgetType::Label: {
+        w.props[QStringLiteral("text")] = nodeStr(node, "text");
+        QString style = nodeStr(node, "style", QStringLiteral("body"));
+        if (!inEnum(style, UDisplaySchema::kLabelStyles)) {
             diag(diags, Severity::Error, key, "style",
                  QStringLiteral("unknown label style '%1'; valid values: heading, body, caption")
-                     .arg(w.labelStyle));
+                     .arg(style));
         }
-        w.labelAlign = parseAlign(node, key, "textAlign", kLabelAligns, diags);
+        w.props[QStringLiteral("style")] = style;
+        w.props[QStringLiteral("labelAlign")] = parseAlign(node, key, "textAlign", kLabelAligns, diags);
         break;
+    }
+
+    case WidgetType::Section: {
+        bool collapsible = false;
+        if (node["collapsible"] && node["collapsible"].IsScalar())
+            collapsible = node["collapsible"].as<bool>();
+        w.props[QStringLiteral("collapsible")] = collapsible;
+        break;
+    }
 
     case WidgetType::Row:
     case WidgetType::Grid:
-        /* Nested row/grid: recurse so depth-2+ layouts parse their children.
-         * Mirrors the depth-1 handling in buildAndAppendWidgets. */
         if (w.type == WidgetType::Grid)
-            w.gridColumns = parseGridColumns(node, key, diags);
+            w.props[QStringLiteral("columns")] = parseGridColumns(node, key, diags);
         w.align = parseAlign(node, key, "align", kRowGridAligns, diags);
-        if (node["widgets"] && node["widgets"].IsMap()) {
-            for (auto ci = node["widgets"].begin();
-                 ci != node["widgets"].end(); ++ci) {
-                std::string ck = ci->first.as<std::string>();
-                /* Container transparency: idPrefix carries through unchanged
-                 * from whatever scope this row/grid was reached in — see
-                 * buildTopLevelWidget's idPrefix doc comment. */
-                std::string idPath = idPrefix.empty() ? ck : idPrefix + "." + ck;
-                uint8_t cid = idMap.count(idPath) ? idMap.at(idPath) : 0;
-                appendRowGridChild(w, ck, ci->second, cid, idPrefix, idMap, diags);
-            }
-        }
         break;
 
     default:
@@ -537,35 +491,134 @@ static WidgetDef buildTopLevelWidget(const std::string& key,
         }
     }
 
-    return w;
-}
+    out.append(w);
+    const int myRow = out.size() - 1;
 
-/* Parses one row/grid child (from `node`, keyed `key`) via
- * buildTopLevelWidget, then applies the child-level flex/align overrides.
- * Shared by both places a row/grid's `widgets:` map is walked: a top-level
- * row/grid in buildAndAppendWidgets, and a nested row/grid inside
- * buildTopLevelWidget's own Row/Grid case (depth-2+). Extracted after the
- * two call sites drifted out of sync once already (one had the Label
- * align guard, the other didn't) — single source of truth from here on. */
-static void appendRowGridChild(WidgetDef& parent, const std::string& key,
-                               const YAML::Node& node, uint8_t widgetId,
-                               const std::string& idPrefix,
-                               const std::map<std::string, uint8_t>& idMap,
-                               Diags& diags)
-{
-    WidgetDef child = buildTopLevelWidget(key, node, widgetId, idPrefix, idMap, diags);
-    child.flex = parseFlex(node, key, diags);
-    child.align = parseAlign(node, key, "align", kRowGridAligns, diags);
-    child.position = nodeStr(node, "position");
-    parent.children.append(child);
+    /* ── Children (appended flat, immediately after this row) ──────────── */
+    switch (w.type) {
+    case WidgetType::Button: {
+        if (node["widgets"] && node["widgets"].IsMap()) {
+            warnExcludedButtonFaceTypes(node["widgets"], key, diags);
+            for (auto ci = node["widgets"].begin();
+                 ci != node["widgets"].end(); ++ci) {
+                std::string ck = ci->first.as<std::string>();
+                std::string cp = key + "." + ck;
+                uint8_t cid = idMap.count(cp) ? idMap.at(cp) : 0;
+                /* idPrefix = key (the button's own path): if this face
+                 * child is itself a container (row/grid), ITS children's ID
+                 * lookups must skip the container's own throwaway key `ck`
+                 * and use the button's path instead. */
+                int idx = buildWidget(cp, ci->second, cid, key, idMap, myRow, out, diags);
+                out[idx].flex  = parseFlex(ci->second, key, diags);
+                out[idx].align = parseAlign(ci->second, key, "align", kRowGridAligns, diags);
+            }
+        } else if (node["children"] && node["children"].IsMap()) {
+            /* Legacy key, renamed to `widgets:` — warn instead of silently
+             * dropping the button's face content. The client parses
+             * device-supplied YAML directly (no schema validation at
+             * runtime), so stale/hand-authored firmware YAML using the old
+             * key must not lose data without a diagnostic. */
+            diag(diags, Severity::Warning, key, "children",
+                 QStringLiteral("'children:' is deprecated for button widgets; "
+                                 "use 'widgets:' instead — this button's face content "
+                                 "was not parsed"));
+        }
+        break;
+    }
+
+    case WidgetType::ButtonGroup: {
+        if (node["items"] && node["items"].IsMap()) {
+            int itemCount = 0;
+            for (auto ii = node["items"].begin();
+                 ii != node["items"].end(); ++ii) {
+                ++itemCount;
+                std::string ik = ii->first.as<std::string>();
+                std::string ip = key + "." + ik;
+                /* Button-group items have no `type:` field in YAML — they
+                 * are implicitly button-shaped click targets (BUTTON_PRESS/
+                 * RELEASE/CLICK), matching widget_ids.py's "button-group-item"
+                 * pseudo-type. Built directly rather than through
+                 * buildWidget(), which requires a `type:` key. */
+                WidgetDef item;
+                item.keyPath  = qs(ip);
+                item.widgetId = idMap.count(ip) ? idMap.at(ip) : 0;
+                item.type     = WidgetType::Button;
+                item.label    = nodeStr(ii->second, "label");
+                item.parentId = myRow;
+                item.props[QStringLiteral("position")] = nodeStr(ii->second, "position");
+                out.append(item);
+            }
+            if (itemCount < 2) {
+                diag(diags, Severity::Warning, key, "items",
+                     QStringLiteral("button-group requires at least 2 items; found %1")
+                         .arg(itemCount));
+            }
+        }
+        break;
+    }
+
+    case WidgetType::Dpad: {
+        if (node["widgets"] && node["widgets"].IsMap()) {
+            int itemCount = 0;
+            for (auto ii = node["widgets"].begin();
+                 ii != node["widgets"].end(); ++ii) {
+                ++itemCount;
+                std::string ik = ii->first.as<std::string>();
+                /* Container transparency: dpad is in isContainer() /
+                 * widget_ids.py's CONTAINER_TYPES, so its own key is never a
+                 * path segment — idPrefix carries through unchanged, same as
+                 * the Row/Grid case below. Dpad items now get full
+                 * type-specific parsing via buildWidget() (they always carry
+                 * an explicit `type:` in YAML, e.g. `type: button`). */
+                std::string idPath = idPrefix.empty() ? ik : idPrefix + "." + ik;
+                uint8_t cid = idMap.count(idPath) ? idMap.at(idPath) : 0;
+                int idx = buildWidget(ik, ii->second, cid, idPrefix, idMap, myRow, out, diags);
+                out[idx].props[QStringLiteral("position")] = nodeStr(ii->second, "position");
+            }
+            if (itemCount < 1) {
+                diag(diags, Severity::Warning, key, "widgets",
+                     QStringLiteral("dpad requires at least 1 item; found %1")
+                         .arg(itemCount));
+            }
+        }
+        break;
+    }
+
+    case WidgetType::Row:
+    case WidgetType::Grid: {
+        /* Nested row/grid: recurse so depth-2+ layouts parse their children.
+         * Mirrors the depth-1 handling in buildAndAppendWidgets. */
+        if (node["widgets"] && node["widgets"].IsMap()) {
+            for (auto ci = node["widgets"].begin();
+                 ci != node["widgets"].end(); ++ci) {
+                std::string ck = ci->first.as<std::string>();
+                /* Container transparency: idPrefix carries through unchanged
+                 * from whatever scope this row/grid was reached in. */
+                std::string idPath = idPrefix.empty() ? ck : idPrefix + "." + ck;
+                uint8_t cid = idMap.count(idPath) ? idMap.at(idPath) : 0;
+                int idx = buildWidget(ck, ci->second, cid, idPrefix, idMap, myRow, out, diags);
+                out[idx].flex  = parseFlex(ci->second, ck, diags);
+                out[idx].align = parseAlign(ci->second, ck, "align", kRowGridAligns, diags);
+                out[idx].props[QStringLiteral("position")] = nodeStr(ci->second, "position");
+            }
+        }
+        break;
+    }
+
+    default:
+        break;
+    }
+
+    return myRow;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
- *  Recursive widget list builder
+ *  Top-level list builder
  * ══════════════════════════════════════════════════════════════════════════ */
 
 static void buildAndAppendWidgets(const YAML::Node& widgets,
                                    const std::map<std::string, uint8_t>& idMap,
+                                   int parentId,
                                    QList<WidgetDef>& out,
                                    Diags& diags)
 {
@@ -588,43 +641,27 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
             s.widgetId = 0;
             s.type     = WidgetType::Section;
             s.label    = nodeStr(node, "label");
+            bool collapsible = false;
             if (node["collapsible"] && node["collapsible"].IsScalar())
-                s.collapsible = node["collapsible"].as<bool>();
-            int sectionRow = static_cast<int>(out.size());
+                collapsible = node["collapsible"].as<bool>();
+            s.props[QStringLiteral("collapsible")] = collapsible;
+            s.parentId = parentId;
             out.append(s);
-            int childrenStart = static_cast<int>(out.size());
+            int sectionRow = out.size() - 1;
             if (node["widgets"] && node["widgets"].IsMap())
-                buildAndAppendWidgets(node["widgets"], idMap, out, diags);
-            if (s.collapsible) {
-                for (int i = childrenStart; i < static_cast<int>(out.size()); ++i)
-                    if (out[i].sectionOwnerRow == -1)
-                        out[i].sectionOwnerRow = sectionRow;
-            }
+                buildAndAppendWidgets(node["widgets"], idMap, sectionRow, out, diags);
 
         } else if (type == "row" || type == "grid") {
-            WidgetDef w;
-            w.keyPath  = qs(key);
-            w.widgetId = 0;
-            w.type     = (type == "row") ? WidgetType::Row : WidgetType::Grid;
-            w.label    = nodeStr(node, "label");
-            if (type == "grid")
-                w.gridColumns = parseGridColumns(node, key, diags);
-            w.align = parseAlign(node, key, "align", kRowGridAligns, diags);
-            if (node["widgets"] && node["widgets"].IsMap()) {
-                for (auto ci = node["widgets"].begin();
-                     ci != node["widgets"].end(); ++ci) {
-                    std::string ck = ci->first.as<std::string>();
-                    uint8_t cid = idMap.count(ck) ? idMap.at(ck) : 0;
-                    appendRowGridChild(w, ck, ci->second, cid, /*idPrefix=*/{}, idMap, diags);
-                }
-            }
-            out.append(w);
+            /* Top-level row/grid: idPrefix stays empty for its children.
+             * Its own flex is never used (nothing above a top-level widget
+             * reads its flex weight) — matches original behavior, which
+             * never parsed flex for a top-level row/grid either. */
+            buildWidget(key, node, 0, /*idPrefix=*/{}, idMap, parentId, out, diags);
 
         } else {
             uint8_t wid = idMap.count(key) ? idMap.at(key) : 0;
-            WidgetDef w = buildTopLevelWidget(key, node, wid, /*idPrefix=*/{}, idMap, diags);
-            w.flex = parseFlex(node, key, diags);
-            out.append(w);
+            int idx = buildWidget(key, node, wid, /*idPrefix=*/{}, idMap, parentId, out, diags);
+            out[idx].flex = parseFlex(node, key, diags);
         }
     }
 }
@@ -800,7 +837,7 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
         idMap[e.path] = nextId++;
 
     widgetsOut.clear();
-    buildAndAppendWidgets(widgets, idMap, widgetsOut, m_diagnostics);
+    buildAndAppendWidgets(widgets, idMap, /*parentId=*/-1, widgetsOut, m_diagnostics);
 
     /* Any Error diagnostic is fatal — report the first one. */
     for (const auto& d : m_diagnostics) {

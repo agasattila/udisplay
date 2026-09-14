@@ -3,126 +3,7 @@
 
 #include "WidgetModel.h"
 #include "Protocol.h"
-#include <QVariantList>
 #include <QVariantMap>
-
-/* ── Shared child serialisation ─────────────────────────────────────────── */
-
-static QVariantMap buildPropsMap(const WidgetDef& w);
-
-static QVariantList serializeChildren(const QList<WidgetDef>& children)
-{
-    QVariantList items;
-    for (const auto& child : children) {
-        QVariantMap cm;
-        cm[QStringLiteral("type")]     = widgetTypeName(child.type);
-        cm[QStringLiteral("widgetId")] = static_cast<int>(child.widgetId);
-        cm[QStringLiteral("label")]    = child.label;
-        cm[QStringLiteral("enabled")]  = child.enabled;
-        cm[QStringLiteral("visible")]  = child.visible;
-        cm[QStringLiteral("value")]    = child.value;
-        cm[QStringLiteral("flex")]     = child.flex;
-        cm[QStringLiteral("align")]    = child.align;
-        cm[QStringLiteral("position")] = child.position;
-        cm[QStringLiteral("props")]    = buildPropsMap(child);
-        items.append(cm);
-    }
-    return items;
-}
-
-/* ── Props helper (shared by PropsRole and container child serialisation) ── */
-
-static QVariantMap buildPropsMap(const WidgetDef& w)
-{
-    QVariantMap props;
-    switch (w.type) {
-    case WidgetType::Display:
-        props[QStringLiteral("unit")]   = w.unit;
-        props[QStringLiteral("format")] = w.format;
-        props[QStringLiteral("style")]  = w.displayStyle;
-        break;
-    case WidgetType::Led:
-        props[QStringLiteral("color")] = w.color;
-        break;
-    case WidgetType::RgbLed:
-        break;
-    case WidgetType::Button:
-        props[QStringLiteral("shape")] = w.shape;
-        if (!w.children.isEmpty())
-            props[QStringLiteral("items")] = serializeChildren(w.children);
-        break;
-    case WidgetType::ButtonGroup: {
-        props[QStringLiteral("layout")] = w.groupLayout;
-        QVariantList items;
-        for (const auto& it : w.groupItems) {
-            QVariantMap m;
-            m[QStringLiteral("widgetId")] = static_cast<int>(it.widgetId);
-            m[QStringLiteral("label")]    = it.label;
-            m[QStringLiteral("position")] = it.position;
-            items.append(m);
-        }
-        props[QStringLiteral("items")] = items;
-        break;
-    }
-    case WidgetType::Slider:
-        props[QStringLiteral("min")]  = w.sliderMin;
-        props[QStringLiteral("max")]  = w.sliderMax;
-        props[QStringLiteral("step")] = w.sliderStep;
-        props[QStringLiteral("unit")] = w.unit;
-        break;
-    case WidgetType::Text:
-        props[QStringLiteral("mode")]        = w.textMode;
-        props[QStringLiteral("placeholder")] = w.textPlaceholder;
-        props[QStringLiteral("maxlength")]   = w.textMaxLength;
-        break;
-    case WidgetType::Dropdown: {
-        QVariantList items;
-        for (const auto& di : w.dropdownItems) {
-            QVariantMap m;
-            m[QStringLiteral("key")]   = di.key;
-            m[QStringLiteral("label")] = di.label;
-            items.append(m);
-        }
-        props[QStringLiteral("items")] = items;
-        break;
-    }
-    case WidgetType::Label:
-        props[QStringLiteral("text")]  = w.labelText;
-        props[QStringLiteral("style")] = w.labelStyle;
-        props[QStringLiteral("labelAlign")] = w.labelAlign;
-        break;
-    case WidgetType::Section:
-        props[QStringLiteral("collapsible")] = w.collapsible;
-        break;
-    case WidgetType::Row:
-    case WidgetType::Grid:
-        if (w.type == WidgetType::Grid)
-            props[QStringLiteral("columns")] = w.gridColumns;
-        props[QStringLiteral("align")] = w.align;
-        props[QStringLiteral("items")] = serializeChildren(w.children);
-        break;
-    case WidgetType::Dpad: {
-        QVariantList items;
-        for (const auto& it : w.dpadItems) {
-            QVariantMap m;
-            m[QStringLiteral("widgetId")] = static_cast<int>(it.widgetId);
-            m[QStringLiteral("label")]    = it.label;
-            m[QStringLiteral("position")] = it.position;
-            m[QStringLiteral("shape")] = QStringLiteral("rect");
-            QVariantMap props;
-            props[QStringLiteral("items")] = QVariantList();
-            m[QStringLiteral("props")] = props;
-
-            items.append(m);
-        }
-        props[QStringLiteral("items")] = items;
-        break;
-    }
-    default:
-        break;
-    }
-    return props;
-}
 
 /* ── WidgetModel ──────────────────────────────────────────────────────────── */
 
@@ -130,82 +11,46 @@ WidgetModel::WidgetModel(QObject* parent)
     : QAbstractListModel(parent)
 {}
 
-/* Recursively index all descendants of a top-level widget into m_childPath.
- * children: the child list being walked at this recursion level.
- * path: the current path prefix (path[0] = top-level row, rest = child indices).
- * Appends each child's index, records the path for widgets with a non-zero ID,
- * then recurses into grandchildren. */
-static void indexDescendants(
-    const QList<WidgetDef>& children,
-    QVector<int>& path,
-    QHash<uint8_t, QVector<int>>& out)
-{
-    for (int j = 0; j < children.size(); ++j) {
-        const auto& child = children[j];
-        path.append(j);
-        if (child.widgetId != 0)
-            out[child.widgetId] = path;
-        if (!child.children.isEmpty())
-            indexDescendants(child.children, path, out);
-        path.removeLast();
-    }
-}
-
 void WidgetModel::setWidgets(const QList<WidgetDef>& widgets)
 {
     beginResetModel();
+    clearChildModels();
     m_widgets = widgets;
     m_idToRow.clear();
-    m_childPath.clear();
     m_collapsedSections.clear();
+    m_childrenByParent.clear();
     for (int i = 0; i < m_widgets.size(); ++i) {
         /* widgetId=0 means decoration/container — skip flat id lookup */
         if (m_widgets[i].widgetId != 0)
             m_idToRow[m_widgets[i].widgetId] = i;
-        /* Index all descendants at every nesting depth */
-        QVector<int> path = { i };
-        indexDescendants(m_widgets[i].children, path, m_childPath);
+        m_childrenByParent[m_widgets[i].parentId].append(i);
     }
     endResetModel();
-}
-
-WidgetDef* WidgetModel::findDescendant(uint8_t id, int& outParentRow)
-{
-    auto it = m_childPath.find(id);
-    if (it == m_childPath.end()) return nullptr;
-    const QVector<int>& path = it.value();
-    if (path.isEmpty() || path[0] >= m_widgets.size()) return nullptr;
-    outParentRow = path[0];
-    WidgetDef* cur = &m_widgets[path[0]];
-    for (int k = 1; k < path.size(); ++k) {
-        if (path[k] >= cur->children.size()) return nullptr;
-        cur = &cur->children[path[k]];
-    }
-    return cur;
+    ++m_generation;
+    emit generationChanged();
 }
 
 void WidgetModel::clear()
 {
     beginResetModel();
+    clearChildModels();
     m_widgets.clear();
     m_idToRow.clear();
-    m_childPath.clear();
     m_collapsedSections.clear();
+    m_childrenByParent.clear();
     endResetModel();
+    ++m_generation;
+    emit generationChanged();
+}
+
+void WidgetModel::clearChildModels()
+{
+    qDeleteAll(m_childModels);
+    m_childModels.clear();
 }
 
 void WidgetModel::setValue(uint8_t widgetId, const QVariant& value)
 {
-    /* Descendant lookup — covers all nesting depths */
-    int parentRow = -1;
-    if (auto* child = findDescendant(widgetId, parentRow)) {
-        child->value = value;
-        QModelIndex parentQIdx = index(parentRow);
-        emit dataChanged(parentQIdx, parentQIdx, { PropsRole });
-        return;
-    }
-
-    /* Top-level widget */
     int row = indexForWidgetId(widgetId);
     if (row < 0) return;
     m_widgets[row].value = value;
@@ -215,27 +60,6 @@ void WidgetModel::setValue(uint8_t widgetId, const QVariant& value)
 
 void WidgetModel::setProperty(uint8_t targetId, uint8_t propertyId, uint8_t value)
 {
-    /* Descendant lookup — covers all nesting depths */
-    int parentRow = -1;
-    if (auto* child = findDescendant(targetId, parentRow)) {
-        bool changed = false;
-        switch (propertyId) {
-        case Proto::PROP_ENABLED:
-            if (child->enabled != (value != 0)) {
-                child->enabled = (value != 0); changed = true; }
-            break;
-        case Proto::PROP_VISIBLE:
-            if (child->visible != (value != 0)) {
-                child->visible = (value != 0); changed = true; }
-            break;
-        default: break;
-        }
-        if (changed)
-            emit dataChanged(index(parentRow), index(parentRow), { PropsRole });
-        return;
-    }
-
-    /* Top-level widget */
     int row = indexForWidgetId(targetId);
     if (row < 0) return;
     bool changed = false;
@@ -259,8 +83,8 @@ void WidgetModel::setProperty(uint8_t targetId, uint8_t propertyId, uint8_t valu
         if (m_widgets[row].type == WidgetType::Text) {
             QString newMode = (value == 0)
                 ? QStringLiteral("readonly") : QStringLiteral("rw");
-            if (m_widgets[row].textMode != newMode) {
-                m_widgets[row].textMode = newMode;
+            if (m_widgets[row].props.value(QStringLiteral("mode")).toString() != newMode) {
+                m_widgets[row].props[QStringLiteral("mode")] = newMode;
                 roles << PropsRole;
                 changed = true;
             }
@@ -275,23 +99,6 @@ void WidgetModel::setProperty(uint8_t targetId, uint8_t propertyId, uint8_t valu
 
 void WidgetModel::resetProperty(uint8_t targetId, uint8_t propertyId)
 {
-    /* Descendant lookup — covers all nesting depths */
-    int parentRow = -1;
-    if (auto* child = findDescendant(targetId, parentRow)) {
-        bool changed = false;
-        switch (propertyId) {
-        case Proto::PROP_ENABLED:
-            if (!child->enabled) { child->enabled = true; changed = true; } break;
-        case Proto::PROP_VISIBLE:
-            if (!child->visible) { child->visible = true; changed = true; } break;
-        default: break;
-        }
-        if (changed)
-            emit dataChanged(index(parentRow), index(parentRow), { PropsRole });
-        return;
-    }
-
-    /* Top-level widget */
     int row = indexForWidgetId(targetId);
     if (row < 0) return;
     bool changed = false;
@@ -312,12 +119,14 @@ void WidgetModel::resetProperty(uint8_t targetId, uint8_t propertyId)
         }
         break;
     case Proto::PROP_MODE:
-        if (m_widgets[row].type == WidgetType::Text
-            && !m_widgets[row].defaultTextMode.isEmpty()
-            && m_widgets[row].textMode != m_widgets[row].defaultTextMode) {
-            m_widgets[row].textMode = m_widgets[row].defaultTextMode;
-            roles << PropsRole;
-            changed = true;
+        if (m_widgets[row].type == WidgetType::Text) {
+            QString defaultMode = m_widgets[row].props.value(QStringLiteral("defaultMode")).toString();
+            if (!defaultMode.isEmpty()
+                && m_widgets[row].props.value(QStringLiteral("mode")).toString() != defaultMode) {
+                m_widgets[row].props[QStringLiteral("mode")] = defaultMode;
+                roles << PropsRole;
+                changed = true;
+            }
         }
         break;
     default:
@@ -346,37 +155,51 @@ QVariant WidgetModel::data(const QModelIndex& idx, int role) const
     case EnabledRole:  return w.enabled;
     case VisibleRole: {
         if (!w.visible) return false;
-        /* Walk the full section-ownership chain to support nested collapsible sections */
-        int ownerRow = w.sectionOwnerRow;
+        /* Walk the parentId chain to support nested collapsible sections —
+         * any ancestor (direct or indirect) that is a collapsed collapsible
+         * section hides this widget. */
+        int ownerRow = w.parentId;
         while (ownerRow >= 0) {
-            if (m_collapsedSections.contains(ownerRow)) return false;
-            ownerRow = m_widgets[ownerRow].sectionOwnerRow;
+            const WidgetDef& anc = m_widgets[ownerRow];
+            if (anc.type == WidgetType::Section
+                && anc.props.value(QStringLiteral("collapsible")).toBool()
+                && m_collapsedSections.contains(ownerRow))
+                return false;
+            ownerRow = anc.parentId;
         }
         return true;
     }
-    case ValueRole:    return w.value;
+    case ValueRole: return w.value;
     case PropsRole: {
-        QVariantMap props = buildPropsMap(w);
-        if (w.type == WidgetType::Section && w.collapsible)
+        if (w.type == WidgetType::Section && w.props.value(QStringLiteral("collapsible")).toBool()) {
+            QVariantMap props = w.props;
             props[QStringLiteral("collapsed")] = m_collapsedSections.contains(idx.row());
-        return props;
+            return props;
+        }
+        return w.props;
     }
-    case SectionOwnerRowRole: return w.sectionOwnerRow;
-    default:           return {};
+    case FlexRole:   return w.flex;
+    case AlignRole:  return w.align;
+    case ParentRole: return w.parentId;
+    case RowRole:    return idx.row();
+    default:         return {};
     }
 }
 
 QHash<int, QByteArray> WidgetModel::roleNames() const
 {
     return {
-        { WidgetIdRole,        "widgetId"       },
-        { TypeRole,            "type"           },
-        { LabelRole,           "label"          },
-        { EnabledRole,         "enabled"        },
-        { VisibleRole,         "widgetVisible"  },
-        { ValueRole,           "value"          },
-        { PropsRole,           "props"          },
-        { SectionOwnerRowRole, "sectionOwnerRow"},
+        { WidgetIdRole, "widgetId"      },
+        { TypeRole,     "type"          },
+        { LabelRole,    "label"         },
+        { EnabledRole,  "enabled"       },
+        { VisibleRole,  "widgetVisible" },
+        { ValueRole,    "value"         },
+        { PropsRole,    "props"         },
+        { FlexRole,     "flex"          },
+        { AlignRole,    "align"         },
+        { ParentRole,   "parentId"      },
+        { RowRole,      "row"           },
     };
 }
 
@@ -384,7 +207,9 @@ void WidgetModel::toggleSection(int row)
 {
     if (row < 0 || row >= m_widgets.size()) return;
     const WidgetDef& section = m_widgets[row];
-    if (section.type != WidgetType::Section || !section.collapsible) return;
+    if (section.type != WidgetType::Section
+        || !section.props.value(QStringLiteral("collapsible")).toBool())
+        return;
 
     if (m_collapsedSections.contains(row))
         m_collapsedSections.remove(row);
@@ -397,14 +222,14 @@ void WidgetModel::toggleSection(int row)
 
     /* Update visibility of all descendants (direct and nested) of this section */
     for (int i = row + 1; i < m_widgets.size(); ++i) {
-        int ownerRow = m_widgets[i].sectionOwnerRow;
+        int ownerRow = m_widgets[i].parentId;
         while (ownerRow >= 0) {
             if (ownerRow == row) {
                 QModelIndex childIdx = index(i);
                 emit dataChanged(childIdx, childIdx, { VisibleRole });
                 break;
             }
-            ownerRow = m_widgets[ownerRow].sectionOwnerRow;
+            ownerRow = m_widgets[ownerRow].parentId;
         }
     }
 }
@@ -413,4 +238,74 @@ int WidgetModel::indexForWidgetId(uint8_t id) const
 {
     auto it = m_idToRow.find(id);
     return (it != m_idToRow.end()) ? it.value() : -1;
+}
+
+QObject* WidgetModel::childModel(int parentId)
+{
+    auto it = m_childModels.find(parentId);
+    if (it != m_childModels.end())
+        return it.value();
+    auto* cm = new ChildModel(this, parentId);
+    m_childModels.insert(parentId, cm);
+    return cm;
+}
+
+/* ── ChildModel ───────────────────────────────────────────────────────────── */
+
+ChildModel::ChildModel(WidgetModel* source, int parentId)
+    : QAbstractListModel(source)
+    , m_source(source)
+    , m_parentId(parentId)
+{
+    /* O(1) lookup via the index WidgetModel builds once in setWidgets() —
+     * previously an O(N) scan of the full flat list per ChildModel, which
+     * made vending a ChildModel for every one of O(N) containers O(N²)
+     * overall. */
+    m_rows = m_source->m_childrenByParent.value(m_parentId);
+
+    /* Every QML container Repeater binds to a ChildModel, not to the source
+     * WidgetModel directly (see childModel()'s header comment) — without
+     * this forwarding, a live setValue()/setProperty()/toggleSection() call
+     * (STATE_UPDATE from the device, or a design-mode edit) emits
+     * dataChanged only on the source, which no bound Repeater is listening
+     * to, so the change never reaches the screen after initial load. */
+    connect(m_source, &QAbstractItemModel::dataChanged, this,
+            [this](const QModelIndex& topLeft, const QModelIndex& bottomRight, const QList<int>& roles) {
+        for (int srcRow = topLeft.row(); srcRow <= bottomRight.row(); ++srcRow) {
+            int localRow = m_rows.indexOf(srcRow);
+            if (localRow >= 0) {
+                QModelIndex idx = index(localRow);
+                emit dataChanged(idx, idx, roles);
+            }
+        }
+    });
+}
+
+int ChildModel::rowCount(const QModelIndex& parent) const
+{
+    if (parent.isValid()) return 0;
+    return m_rows.size();
+}
+
+QVariant ChildModel::data(const QModelIndex& idx, int role) const
+{
+    if (!idx.isValid() || idx.row() >= m_rows.size())
+        return {};
+    return m_source->data(m_source->index(m_rows[idx.row()]), role);
+}
+
+QHash<int, QByteArray> ChildModel::roleNames() const
+{
+    return m_source->roleNames();
+}
+
+QVariantMap ChildModel::get(int row) const
+{
+    QVariantMap m;
+    if (row < 0 || row >= m_rows.size())
+        return m;
+    const auto roles = roleNames();
+    for (auto it = roles.begin(); it != roles.end(); ++it)
+        m[QString::fromUtf8(it.value())] = data(index(row, 0), it.key());
+    return m;
 }

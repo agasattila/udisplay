@@ -16,7 +16,14 @@ import "./"
  * Position-lookup pattern (9-cell Grid, corners as invisible spacers) reused
  * from ButtonGroupWidget.qml's now-removed dpad delegate.
  *
- * props.items: [{type, widgetId, label, enabled, visible, value, props, position}, ...]
+ * childModel: every item in this dpad, as a real model (see
+ * WidgetModel::childModel()) — each row's own `props.position` holds its
+ * cross-layout slot (top/right/bottom/left/center). Dpad is the one
+ * container that needs lookup BY a property (position) rather than
+ * sequential Repeater access, since it renders a fixed 9-cell cross, not a
+ * list — findByPosition() below does the same linear scan it always did,
+ * just reading rows out of childModel (via its get() convenience method)
+ * instead of a plain props.items array.
  *
  * Uses relative import "./" per Android qmlcachegen requirement — must NOT
  * import the module URI.
@@ -24,12 +31,16 @@ import "./"
 Rectangle {
     id: root
     property string label: ""   /* optional; not rendered */
-    property var props: ({})  /* { items: [...] } — non-required so Loader.source can bind it, matching RowWidget/GridWidget */
+    property var props: ({})  /* unused by dpad itself today — kept for shape parity with other containers */
+    /* Non-required so Loader.source can bind it (WidgetDelegate.qml's
+     * dpadComp), matching props above. */
+    property var childModel: null
 
     function findByPosition(position) {
-        var items = root.props.items || []
-        for (var i = 0; i < items.length; i++) {
-            if (items[i].position === position) return items[i]
+        var n = root.childModel ? root.childModel.rowCount() : 0
+        for (var i = 0; i < n; i++) {
+            var item = root.childModel.get(i)
+            if ((item.props && item.props.position) === position) return item
         }
         return null
     }

@@ -27,11 +27,14 @@ Rectangle {
     required property bool   enabled
     required property var    value    /* active item widgetId or null */
     required property var    props
+    /* Every item in this group, as a real model (see
+     * WidgetModel::childModel()) — supplied by WidgetDelegate.qml. */
+    property var    childModel: null
 
     /* Flow: items wrap, so there's no single "natural" width for an
      * arbitrary item count — use up to 3 columns worth (Flow's typical wrap
      * point) as a reasonable estimate. */
-    implicitWidth: Math.min((props.items || []).length, 3) * (110 + 8) + 32
+    implicitWidth: Math.min(childModel ? childModel.rowCount() : 0, 3) * (110 + 8) + 32
     implicitHeight: col.implicitHeight + 24
     color: "transparent"
 
@@ -56,33 +59,33 @@ Rectangle {
             spacing: 8
 
             Repeater {
-                model: props.items || []
+                model: root.childModel
 
                 delegate: ButtonFace {
-                    required property var modelData
+                    required property var model
 
                     width:  110; height: 36
                     enabled: root.enabled
                     showLabel: false
 
-                    border.color: root.value === modelData.widgetId
+                    border.color: root.value === model.widgetId
                                   ? controller.activeStyle.button : controller.activeStyle.border
                     border.width: 1
 
-                    onButtonPressed:  controller.sendButtonPress(modelData.widgetId)
-                    onButtonReleased: controller.sendButtonRelease(modelData.widgetId)
-                    onButtonClicked:  controller.sendButtonClick(modelData.widgetId)
+                    onButtonPressed:  controller.sendButtonPress(model.widgetId)
+                    onButtonReleased: controller.sendButtonRelease(model.widgetId)
+                    onButtonClicked:  controller.sendButtonClick(model.widgetId)
 
                     Label {
                         anchors.centerIn: parent
-                        text: modelData.label
+                        text: model.label
                         /* button_text unconditionally — fill is always
                          * activeStyle.button (via ButtonFace) now regardless
                          * of selection, so activeStyle.text (meant for the
                          * old dark "surface" fill) would be unreadable here. */
                         color: controller.activeStyle.button_text
                         font.pixelSize: 13
-                        font.bold: root.value === modelData.widgetId
+                        font.bold: root.value === model.widgetId
                     }
                 }
             }

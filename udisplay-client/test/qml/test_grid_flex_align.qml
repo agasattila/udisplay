@@ -9,6 +9,13 @@ import "../../qml/widgets" as W
  * another row/grid collapsed to width 0, the same bug class rowComp already
  * had two fixes for; see test_nested_row_layout.qml for the row side).
  *
+ * WidgetModel is a flat list now — a grid's children come from
+ * WidgetModel::childModel(), not a props.items array. These tests build a
+ * ListModel per container and feed it via childModel: instead — see
+ * FakeWidgetModel.qml's header comment for why a `controller.widgetModel`
+ * stand-in is needed at all, and for how a NESTED container (Grid 2's inner
+ * grid) is looked up by a registered key instead of props.items[N].props.items.
+ *
  * Run headless: `qml -platform offscreen test_grid_flex_align.qml`.
  * Exits 0 on pass, 1 (with a console.error) on fail — CTest reads the exit code.
  */
@@ -23,6 +30,7 @@ Item {
             property string text_muted:   "#888888"
             property string text:         "#c0c0c0"
         }
+        property var widgetModel: FakeWidgetModel {}
     }
 
     function fail(msg) {
@@ -53,7 +61,7 @@ Item {
     }
 
     /* ── Grid 1: 2 columns x 2 rows, per-column flex ratio + align ───────
-     * Layout.fillWidth is gated on modelData.flex > 0 (RowWidget.qml/
+     * Layout.fillWidth is gated on model.flex > 0 (RowWidget.qml/
      * GridWidget.qml's Repeater delegates) — a flex:0 cell never stretches,
      * even when a flex>0 sibling shares its column and pulls that column
      * wider. So within column 0, A (flex:3) stretches to its flex-driven
@@ -62,47 +70,62 @@ Item {
      * fillWidth gating at all. Column 0 (driven by A's flex:3 demand)
      * still ends up wider than column 1 (B, D both flex:0, nothing pulls
      * it wider than its own content). */
-    property var gridProps: {
-        "columns": 2,
-        "align": "center",
-        "items": [
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 3, align: "",
-              props: { text: "A", style: "body" } },
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "right",
-              props: { text: "B", style: "body" } },
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "",
-              props: { text: "C", style: "body" } },
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "",
-              props: { text: "D", style: "body" } }
-        ]
+    ListModel {
+        id: gridItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 3, align: "", props: { text: "A", style: "body" } })
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "right", props: { text: "B", style: "body" } })
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: { text: "C", style: "body" } })
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: { text: "D", style: "body" } })
+            ready = true
+        }
     }
     W.GridWidget {
         id: myGrid
         anchors.left: parent.left
         anchors.right: parent.right
-        props: gridProps
+        props: ({ columns: 2, align: "center" })
+        childModel: gridItems.ready ? gridItems : null
     }
 
     /* ── Grid 2: a grid nested inside a row (gridComp fillWidth fix) ────── */
-    property var outerRowProps: {
-        "items": [
-            { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 0, align: "",
-              props: { text: "Before", style: "body" } },
-            { type: "grid", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 1, align: "",
-              props: { columns: 2, items: [
-                  { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 1, align: "",
-                    props: { text: "G1", style: "body" } },
-                  { type: "label", widgetId: 0, label: "", enabled: true, visible: true, value: null, flex: 1, align: "",
-                    props: { text: "G2", style: "body" } }
-              ] } }
-        ]
+    ListModel {
+        id: innerGridItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 1, align: "", props: { text: "G1", style: "body" } })
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 1, align: "", props: { text: "G2", style: "body" } })
+            controller.widgetModel.register("innerGrid", innerGridItems)
+            ready = true
+        }
+    }
+    ListModel {
+        id: outerRowItems
+        property bool ready: false
+        Component.onCompleted: {
+            append({ widgetId: 0, type: "label", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 0, align: "", props: { text: "Before", style: "body" } })
+            /* row: "innerGrid" — WidgetDelegate.qml looks this delegate's own
+             * children up via controller.widgetModel.childModel(model.row);
+             * innerGridItems was registered under that same key above. */
+            append({ widgetId: 0, type: "grid", label: "", enabled: true, widgetVisible: true, value: "",
+                     flex: 1, align: "", row: "innerGrid", props: { columns: 2 } })
+            ready = true
+        }
     }
     W.RowWidget {
         id: outerRow
         y: 150
         anchors.left: parent.left
         anchors.right: parent.right
-        props: outerRowProps
+        childModel: (outerRowItems.ready && innerGridItems.ready) ? outerRowItems : null
     }
 
     Timer {

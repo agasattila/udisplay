@@ -42,7 +42,7 @@
  *    dc.startDesignMode(path)
  *          │
  *          ├─ reads file (raw YAML bytes)
- *          ├─ applyParsedYaml(raw, /*designMode=*\/true)
+ *          ├─ applyParsedYaml(raw, true)  sets designMode=true
  *          │     ├─ Success      → m_designErrorString = ""
  *          │     │                 (--debug: printDebugDump → qInfo)
  *          │     └─ ParseFailed  → m_designErrorString = yamlParser.errorString()
@@ -59,7 +59,7 @@
  *                   │ (150ms later)
  *                   └─ reloadDesignFile()
  *                         ├─ reads file
- *                         └─ applyParsedYaml(raw, /*designMode=*\/true)  (same as above)
+ *                         └─ applyParsedYaml(raw, true)  (same as above)
  *
  * BOOTSTRAP FLOW (real device)
  *
@@ -70,7 +70,7 @@
  *                │     └─ empty → setError("Failed to decompress...") + printDebugFailure, return
  *                ├─ capabilityGate = lambda checking kKnownCapabilities,
  *                │                   captures rejectionReason by reference
- *                ├─ applyParsedYaml(yaml, /*designMode=*\/false, capabilityGate)
+ *                ├─ applyParsedYaml(yaml, false, capabilityGate)
  *                │     ├─ ParseFailed → setError("YAML parse failed: " + yamlParser.errorString())
  *                │     │                 (no teardown() — matches historical behavior, see TODO-046)
  *                │     ├─ Rejected    → setError(rejectionReason), teardown()

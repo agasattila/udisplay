@@ -1,6 +1,7 @@
 #include "WidgetDump.h"
 #include <QTextStream>
 #include <QVariant>
+#include <QVariantMap>
 
 namespace {
 
@@ -20,8 +21,9 @@ QString indent(int depth)
     return QString(depth * 2, QLatin1Char(' '));
 }
 
-void dumpWidget(QTextStream& out, const WidgetDef& w, int depth)
+void dumpWidget(QTextStream& out, const QList<WidgetDef>& all, int row, int depth)
 {
+    const WidgetDef& w = all[row];
     const QString pad = indent(depth);
     out << pad << QStringLiteral("[0x%1] %2 \"%3\" keyPath=\"%4\" (enabled=%5 visible=%6)\n")
                      .arg(w.widgetId, 2, 16, QLatin1Char('0'))
@@ -29,63 +31,60 @@ void dumpWidget(QTextStream& out, const WidgetDef& w, int depth)
                      .arg(w.enabled ? QStringLiteral("true") : QStringLiteral("false"))
                      .arg(w.visible ? QStringLiteral("true") : QStringLiteral("false"));
 
+    out << pad << QStringLiteral("  parentId: %1\n").arg(w.parentId);
     out << pad << QStringLiteral("  value: %1\n").arg(formatValue(w.value));
     out << pad << QStringLiteral("  debugValue: %1\n").arg(formatValue(w.debugValue));
 
     switch (w.type) {
     case WidgetType::Display:
-        out << pad << QStringLiteral("  unit: %1\n").arg(formatValue(w.unit));
-        out << pad << QStringLiteral("  format: %1\n").arg(formatValue(w.format));
-        out << pad << QStringLiteral("  style: %1\n").arg(formatValue(w.displayStyle));
+        out << pad << QStringLiteral("  unit: %1\n").arg(formatValue(w.props.value(QStringLiteral("unit"))));
+        out << pad << QStringLiteral("  format: %1\n").arg(formatValue(w.props.value(QStringLiteral("format"))));
+        out << pad << QStringLiteral("  style: %1\n").arg(formatValue(w.props.value(QStringLiteral("style"))));
         break;
     case WidgetType::Led:
-        out << pad << QStringLiteral("  color: %1\n").arg(formatValue(w.color));
+        out << pad << QStringLiteral("  color: %1\n").arg(formatValue(w.props.value(QStringLiteral("color"))));
         break;
     case WidgetType::RgbLed:
         break;
     case WidgetType::Button:
-        out << pad << QStringLiteral("  shape: %1\n").arg(formatValue(w.shape));
-        out << pad << QStringLiteral("  color: %1\n").arg(formatValue(w.color));
-        out << pad << QStringLiteral("  position: %1\n").arg(formatValue(w.position));
+        out << pad << QStringLiteral("  shape: %1\n").arg(formatValue(w.props.value(QStringLiteral("shape"))));
+        out << pad << QStringLiteral("  position: %1\n").arg(formatValue(w.props.value(QStringLiteral("position"))));
         break;
     case WidgetType::ButtonGroup:
-        out << pad << QStringLiteral("  layout: %1\n").arg(formatValue(w.groupLayout));
-        out << pad << QStringLiteral("  items:\n");
-        for (const auto& it : w.groupItems) {
-            out << pad << QStringLiteral("    [0x%1] \"%2\" keyPath=\"%3\" position=%4\n")
-                             .arg(it.widgetId, 2, 16, QLatin1Char('0'))
-                             .arg(it.label, it.keyPath, formatValue(it.position));
-        }
+        out << pad << QStringLiteral("  layout: %1\n").arg(formatValue(w.props.value(QStringLiteral("layout"))));
         break;
     case WidgetType::Slider:
-        out << pad << QStringLiteral("  min: %1\n").arg(w.sliderMin);
-        out << pad << QStringLiteral("  max: %1\n").arg(w.sliderMax);
-        out << pad << QStringLiteral("  step: %1\n").arg(w.sliderStep);
-        out << pad << QStringLiteral("  unit: %1\n").arg(formatValue(w.unit));
+        out << pad << QStringLiteral("  min: %1\n").arg(w.props.value(QStringLiteral("min")).toDouble());
+        out << pad << QStringLiteral("  max: %1\n").arg(w.props.value(QStringLiteral("max")).toDouble());
+        out << pad << QStringLiteral("  step: %1\n").arg(w.props.value(QStringLiteral("step")).toDouble());
+        out << pad << QStringLiteral("  unit: %1\n").arg(formatValue(w.props.value(QStringLiteral("unit"))));
         break;
     case WidgetType::Text:
-        out << pad << QStringLiteral("  mode: %1\n").arg(formatValue(w.textMode));
-        out << pad << QStringLiteral("  defaultTextMode: %1\n").arg(formatValue(w.defaultTextMode));
-        out << pad << QStringLiteral("  placeholder: %1\n").arg(formatValue(w.textPlaceholder));
-        out << pad << QStringLiteral("  maxlength: %1\n").arg(w.textMaxLength);
+        out << pad << QStringLiteral("  mode: %1\n").arg(formatValue(w.props.value(QStringLiteral("mode"))));
+        out << pad << QStringLiteral("  defaultMode: %1\n").arg(formatValue(w.props.value(QStringLiteral("defaultMode"))));
+        out << pad << QStringLiteral("  placeholder: %1\n").arg(formatValue(w.props.value(QStringLiteral("placeholder"))));
+        out << pad << QStringLiteral("  maxlength: %1\n").arg(w.props.value(QStringLiteral("maxlength")).toInt());
         break;
     case WidgetType::Dropdown:
         out << pad << QStringLiteral("  items:\n");
-        for (const auto& di : w.dropdownItems) {
-            out << pad << QStringLiteral("    key=\"%1\" label=\"%2\"\n").arg(di.key, di.label);
+        for (const auto& v : w.props.value(QStringLiteral("items")).toList()) {
+            QVariantMap di = v.toMap();
+            out << pad << QStringLiteral("    key=\"%1\" label=\"%2\"\n")
+                             .arg(di.value(QStringLiteral("key")).toString(),
+                                  di.value(QStringLiteral("label")).toString());
         }
         break;
     case WidgetType::Label:
-        out << pad << QStringLiteral("  text: %1\n").arg(formatValue(w.labelText));
-        out << pad << QStringLiteral("  style: %1\n").arg(formatValue(w.labelStyle));
-        out << pad << QStringLiteral("  textAlign: %1\n").arg(formatValue(w.labelAlign));
+        out << pad << QStringLiteral("  text: %1\n").arg(formatValue(w.props.value(QStringLiteral("text"))));
+        out << pad << QStringLiteral("  style: %1\n").arg(formatValue(w.props.value(QStringLiteral("style"))));
+        out << pad << QStringLiteral("  textAlign: %1\n").arg(formatValue(w.props.value(QStringLiteral("labelAlign"))));
         break;
     case WidgetType::Separator:
         break;
     case WidgetType::Section:
         out << pad << QStringLiteral("  collapsible: %1\n")
-                         .arg(w.collapsible ? QStringLiteral("true") : QStringLiteral("false"));
-        out << pad << QStringLiteral("  sectionOwnerRow: %1\n").arg(w.sectionOwnerRow);
+                         .arg(w.props.value(QStringLiteral("collapsible")).toBool()
+                              ? QStringLiteral("true") : QStringLiteral("false"));
         break;
     case WidgetType::Row:
         out << pad << QStringLiteral("  flex: %1\n").arg(w.flex);
@@ -93,12 +92,14 @@ void dumpWidget(QTextStream& out, const WidgetDef& w, int depth)
         break;
     case WidgetType::Grid:
         out << pad << QStringLiteral("  flex: %1\n").arg(w.flex);
-        out << pad << QStringLiteral("  columns: %1\n").arg(w.gridColumns);
+        out << pad << QStringLiteral("  columns: %1\n").arg(w.props.value(QStringLiteral("columns")).toInt());
         out << pad << QStringLiteral("  align: %1\n").arg(formatValue(w.align));
         break;
     case WidgetType::Dpad:
         out << pad << QStringLiteral("  flex: %1\n").arg(w.flex);
         out << pad << QStringLiteral("  align: %1\n").arg(formatValue(w.align));
+        break;
+    case WidgetType::Toggle:
         break;
     case WidgetType::Unknown:
         break;
@@ -116,10 +117,15 @@ void dumpWidget(QTextStream& out, const WidgetDef& w, int depth)
         out << pad << QStringLiteral("  align: %1\n").arg(formatValue(w.align));
     }
 
-    if (!w.children.isEmpty()) {
+    QList<int> childRows;
+    for (int j = 0; j < all.size(); ++j)
+        if (all[j].parentId == row)
+            childRows.append(j);
+
+    if (!childRows.isEmpty()) {
         out << pad << QStringLiteral("  widgets:\n");
-        for (const WidgetDef& child : w.children)
-            dumpWidget(out, child, depth + 2);
+        for (int j : childRows)
+            dumpWidget(out, all, j, depth + 2);
     }
 }
 
@@ -133,12 +139,17 @@ QString dumpWidgetTree(const QList<WidgetDef>& widgets,
     QString result;
     QTextStream out(&result);
 
+    QList<int> topLevel;
+    for (int i = 0; i < widgets.size(); ++i)
+        if (widgets[i].parentId < 0)
+            topLevel.append(i);
+
     out << QStringLiteral("device: name=\"%1\" version=\"%2\" activeStyle=\"%3\"\n")
              .arg(deviceName, version, activeStyle);
-    out << QStringLiteral("widgets: (%1 top-level)\n").arg(widgets.size());
+    out << QStringLiteral("widgets: (%1 top-level)\n").arg(topLevel.size());
 
-    for (const WidgetDef& w : widgets)
-        dumpWidget(out, w, 1);
+    for (int i : topLevel)
+        dumpWidget(out, widgets, i, 1);
 
     return result;
 }

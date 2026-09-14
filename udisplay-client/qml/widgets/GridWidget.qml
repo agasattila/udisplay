@@ -8,7 +8,10 @@ import "./"
 
 /* Grid layout container.
  * props.columns: number of columns (default 2).
- * props.items: [{type, widgetId, label, enabled, visible, value, props, flex, align}, ...]
+ * childModel: every child widget of this grid, as a real model (see
+ * WidgetModel::childModel()) — each row exposes the same roles as
+ * WidgetModel itself (widgetId, type, label, enabled, widgetVisible, value,
+ * props, flex, align, parentId).
  * props.align: "left"|"right"|"center" — default content alignment for
  * children that can't stretch (flex: 0/omitted); a child's own `align`
  * overrides this for that one child.
@@ -35,7 +38,11 @@ import "./"
 Rectangle {
     id: root
     property string label: ""   /* optional; not rendered for layout containers */
-    property var    props: ({})  /* { columns, items: [...] } — non-required so Loader.source can bind it */
+    property var    props: ({})  /* { columns } — non-required so Loader.source can bind it */
+    /* Every child widget of this grid, as a real model — non-required for
+     * the same reason props is: WidgetDelegate.qml's gridComp sets it via a
+     * live binding in onLoaded after this item is created. */
+    property var    childModel: null
     /* Compact rendering — non-required (same reason as props above: set via
      * live binding when loaded through a dynamic Loader.source, e.g.
      * WidgetDelegate.qml's gridComp). Forwarded to every child's own
@@ -49,11 +56,11 @@ Rectangle {
     color: "transparent"
 
     property real contentImplicitWidth: {
-        var items = props.items || []
+        var n = childModel ? childModel.rowCount() : 0
         var cols = grid.columns
         var colWidths = []
         for (var c = 0; c < cols; c++) colWidths.push(0)
-        for (var i = 0; i < items.length; i++) {
+        for (var i = 0; i < n; i++) {
             var d = repeater.itemAt(i)
             /* See RowWidget.qml's contentImplicitWidth for why this drills
              * into d.item.implicitWidth rather than reading d.implicitWidth
@@ -80,16 +87,16 @@ Rectangle {
         /* Per-column sum of flex weights (index % columns groups items into
          * their virtual column). flex: 0/omitted items contribute 0. */
         property var columnFlexTotals: {
-            var items = props.items || []
+            var n = root.childModel ? root.childModel.rowCount() : 0
             var totals = []
             for (var c = 0; c < grid.columns; c++) totals.push(0)
-            for (var i = 0; i < items.length; i++)
-                totals[i % grid.columns] += (items[i].flex || 0)
+            for (var i = 0; i < n; i++)
+                totals[i % grid.columns] += (root.childModel.get(i).flex || 0)
             return totals
         }
 
-        function alignFor(modelData) {
-            var a = modelData.align || props.align || "left"
+        function alignFor(m) {
+            var a = m.align || root.props.align || "left"
             return a === "right" ? Qt.AlignRight
                  : a === "center" ? Qt.AlignHCenter
                  : Qt.AlignLeft
@@ -97,15 +104,15 @@ Rectangle {
 
         Repeater {
             id: repeater
-            model: props.items || []
+            model: root.childModel
 
             delegate: WidgetDelegate {
-                required property var modelData
+                required property var model
                 required property int index
                 readonly property int col: index % grid.columns
                 readonly property real colTotalFlex: grid.columnFlexTotals[col] || 0
                 compact: root.compact
-                Layout.fillWidth: modelData.flex > 0
+                Layout.fillWidth: model.flex > 0
                 /* item.implicitWidth, not bare implicitWidth — see
                  * RowWidget.qml's identical delegate comment: this binding
                  * overrides WidgetDelegate.qml's own internal
@@ -115,9 +122,9 @@ Rectangle {
                 Layout.minimumWidth: item ? item.implicitWidth : 0
                 Layout.preferredWidth: Math.max(item ? item.implicitWidth : 0,
                     colTotalFlex > 0
-                        ? (grid.width / grid.columns) * modelData.flex / colTotalFlex
+                        ? (grid.width / grid.columns) * model.flex / colTotalFlex
                         : 0)
-                Layout.alignment: grid.alignFor(modelData)
+                Layout.alignment: grid.alignFor(model)
             }
         }
     }
