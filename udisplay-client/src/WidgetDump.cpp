@@ -39,7 +39,7 @@ void dumpWidget(QTextStream& out, const QList<WidgetDef>& all, int row, int dept
     case WidgetType::Display:
         out << pad << QStringLiteral("  unit: %1\n").arg(formatValue(w.props.value(QStringLiteral("unit"))));
         out << pad << QStringLiteral("  format: %1\n").arg(formatValue(w.props.value(QStringLiteral("format"))));
-        out << pad << QStringLiteral("  style: %1\n").arg(formatValue(w.style));
+        out << pad << QStringLiteral("  style: %1\n").arg(formatValue(w.props.value(QStringLiteral("style"))));
         break;
     case WidgetType::Led:
         out << pad << QStringLiteral("  color: %1\n").arg(formatValue(w.props.value(QStringLiteral("color"))));
@@ -76,7 +76,7 @@ void dumpWidget(QTextStream& out, const QList<WidgetDef>& all, int row, int dept
         break;
     case WidgetType::Label:
         out << pad << QStringLiteral("  text: %1\n").arg(formatValue(w.props.value(QStringLiteral("text"))));
-        out << pad << QStringLiteral("  style: %1\n").arg(formatValue(w.style));
+        out << pad << QStringLiteral("  style: %1\n").arg(formatValue(w.props.value(QStringLiteral("style"))));
         out << pad << QStringLiteral("  textAlign: %1\n").arg(formatValue(w.props.value(QStringLiteral("labelAlign"))));
         break;
     case WidgetType::Separator:

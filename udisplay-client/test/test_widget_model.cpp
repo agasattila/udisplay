@@ -61,10 +61,9 @@ static WidgetDef makeDisplay(uint8_t id)
     w.widgetId = id;
     w.type     = WidgetType::Display;
     w.label    = QStringLiteral("Voltage");
-    w.style    = QStringLiteral("large");
     w.props[QStringLiteral("unit")]   = QStringLiteral("V");
     w.props[QStringLiteral("format")] = QStringLiteral("%.3f");
-    w.props[QStringLiteral("style")]  = w.style;
+    w.props[QStringLiteral("style")]  = QStringLiteral("large");
     return w;
 }
 
@@ -546,9 +545,8 @@ private slots:
         w.keyPath  = QStringLiteral("title");
         w.widgetId = 0;
         w.type     = WidgetType::Label;
-        w.style    = QStringLiteral("heading");
         w.props[QStringLiteral("text")]  = QStringLiteral("Hello");
-        w.props[QStringLiteral("style")] = w.style;
+        w.props[QStringLiteral("style")] = QStringLiteral("heading");
 
         WidgetModel m;
         m.setWidgets({ w });

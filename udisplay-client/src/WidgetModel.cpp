@@ -18,10 +18,12 @@ void WidgetModel::setWidgets(const QList<WidgetDef>& widgets)
     m_widgets = widgets;
     m_idToRow.clear();
     m_collapsedSections.clear();
+    m_childrenByParent.clear();
     for (int i = 0; i < m_widgets.size(); ++i) {
         /* widgetId=0 means decoration/container — skip flat id lookup */
         if (m_widgets[i].widgetId != 0)
             m_idToRow[m_widgets[i].widgetId] = i;
+        m_childrenByParent[m_widgets[i].parentId].append(i);
     }
     endResetModel();
     ++m_generation;
@@ -35,6 +37,7 @@ void WidgetModel::clear()
     m_widgets.clear();
     m_idToRow.clear();
     m_collapsedSections.clear();
+    m_childrenByParent.clear();
     endResetModel();
     ++m_generation;
     emit generationChanged();
@@ -254,9 +257,11 @@ ChildModel::ChildModel(WidgetModel* source, int parentId)
     , m_source(source)
     , m_parentId(parentId)
 {
-    for (int i = 0; i < m_source->m_widgets.size(); ++i)
-        if (m_source->m_widgets[i].parentId == m_parentId)
-            m_rows.append(i);
+    /* O(1) lookup via the index WidgetModel builds once in setWidgets() —
+     * previously an O(N) scan of the full flat list per ChildModel, which
+     * made vending a ChildModel for every one of O(N) containers O(N²)
+     * overall. */
+    m_rows = m_source->m_childrenByParent.value(m_parentId);
 
     /* Every QML container Repeater binds to a ChildModel, not to the source
      * WidgetModel directly (see childModel()'s header comment) — without

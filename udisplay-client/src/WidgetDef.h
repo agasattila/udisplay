@@ -103,13 +103,6 @@ struct WidgetDef {
      * applied by DeviceController::applyParsedYaml() in design mode only. */
     QVariant debugValue;
 
-    /* Visual style variant, meaning depends on type (display: "default"|
-     * "large"; label: "heading"|"body"|"caption"; empty for types that don't
-     * have one). Also copied into props["style"] at parse time so existing
-     * QML (DisplayWidget.qml, LabelWidget.qml) keeps reading props.style
-     * unchanged. */
-    QString style;
-
     /* Layout weight/alignment inside a row/grid container. flex=0 means
      * auto-width (no stretch). align is a null QString by default — see the
      * detailed inherit-vs-override note this used to carry in WidgetDef;

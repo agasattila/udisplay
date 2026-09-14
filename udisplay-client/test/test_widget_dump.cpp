@@ -28,10 +28,9 @@ static int appendDisplay(QList<WidgetDef>& out, uint8_t id, int parentId = -1)
     w.type     = WidgetType::Display;
     w.label    = QStringLiteral("Temperature");
     w.parentId = parentId;
-    w.style    = QStringLiteral("large");
     w.props[QStringLiteral("unit")]   = QStringLiteral("C");
     w.props[QStringLiteral("format")] = QStringLiteral("%.1f");
-    w.props[QStringLiteral("style")]  = w.style;
+    w.props[QStringLiteral("style")]  = QStringLiteral("large");
     out.append(w);
     return out.size() - 1;
 }
@@ -56,9 +55,8 @@ static int appendLabel(QList<WidgetDef>& out, int parentId = -1)
     w.widgetId = 0;
     w.type     = WidgetType::Label;
     w.parentId = parentId;
-    w.style    = QStringLiteral("heading");
     w.props[QStringLiteral("text")]  = QStringLiteral("Section Heading");
-    w.props[QStringLiteral("style")] = w.style;
+    w.props[QStringLiteral("style")] = QStringLiteral("heading");
     out.append(w);
     return out.size() - 1;
 }

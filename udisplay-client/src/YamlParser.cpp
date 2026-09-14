@@ -289,13 +289,13 @@ static int buildWidget(const std::string& key,
     case WidgetType::Display: {
         w.props[QStringLiteral("unit")]   = nodeStr(node, "unit");
         w.props[QStringLiteral("format")] = nodeStr(node, "format", QStringLiteral("%.2f"));
-        w.style = nodeStr(node, "style", QStringLiteral("default"));
-        if (!inEnum(w.style, UDisplaySchema::kDisplayStyles)) {
+        QString style = nodeStr(node, "style", QStringLiteral("default"));
+        if (!inEnum(style, UDisplaySchema::kDisplayStyles)) {
             diag(diags, Severity::Error, key, "style",
                  QStringLiteral("unknown display style '%1'; valid values: default, large")
-                     .arg(w.style));
+                     .arg(style));
         }
-        w.props[QStringLiteral("style")] = w.style;
+        w.props[QStringLiteral("style")] = style;
         break;
     }
 
@@ -418,17 +418,18 @@ static int buildWidget(const std::string& key,
         break;
     }
 
-    case WidgetType::Label:
+    case WidgetType::Label: {
         w.props[QStringLiteral("text")] = nodeStr(node, "text");
-        w.style = nodeStr(node, "style", QStringLiteral("body"));
-        if (!inEnum(w.style, UDisplaySchema::kLabelStyles)) {
+        QString style = nodeStr(node, "style", QStringLiteral("body"));
+        if (!inEnum(style, UDisplaySchema::kLabelStyles)) {
             diag(diags, Severity::Error, key, "style",
                  QStringLiteral("unknown label style '%1'; valid values: heading, body, caption")
-                     .arg(w.style));
+                     .arg(style));
         }
-        w.props[QStringLiteral("style")] = w.style;
+        w.props[QStringLiteral("style")] = style;
         w.props[QStringLiteral("labelAlign")] = parseAlign(node, key, "textAlign", kLabelAligns, diags);
         break;
+    }
 
     case WidgetType::Section: {
         bool collapsible = false;

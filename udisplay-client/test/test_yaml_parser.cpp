@@ -252,7 +252,7 @@ private slots:
         QCOMPARE(dv->label, QStringLiteral("Voltage"));
         QCOMPARE(dv->props[QStringLiteral("unit")].toString(),   QStringLiteral("V"));
         QCOMPARE(dv->props[QStringLiteral("format")].toString(), QStringLiteral("%.3f"));
-        QCOMPARE(dv->style, QStringLiteral("large"));
+        QCOMPARE(dv->props[QStringLiteral("style")].toString(), QStringLiteral("large"));
     }
 
     void v5_slider_props()
@@ -331,7 +331,7 @@ private slots:
             "    label: Temp\n";
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets[0].props[QStringLiteral("format")].toString(), QStringLiteral("%.2f"));
-        QCOMPARE(widgets[0].style, QStringLiteral("default"));
+        QCOMPARE(widgets[0].props[QStringLiteral("style")].toString(), QStringLiteral("default"));
     }
 
     /* ── Error handling ───────────────────────────────────────────── */
@@ -537,7 +537,7 @@ private slots:
         QCOMPARE(widgets[0].type,     WidgetType::Label);
         QCOMPARE(widgets[0].widgetId, uint8_t(0));
         QCOMPARE(widgets[0].props[QStringLiteral("text")].toString(), QStringLiteral("Hello world"));
-        QCOMPARE(widgets[0].style, QStringLiteral("heading"));
+        QCOMPARE(widgets[0].props[QStringLiteral("style")].toString(), QStringLiteral("heading"));
     }
 
     /* Decorations are transparent to ID assignment: a toggle after a

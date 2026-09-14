@@ -144,6 +144,10 @@ private:
     QHash<uint8_t, int>         m_idToRow;      /* widget_id → row index, every depth */
     QSet<int>                   m_collapsedSections; /* flat-model rows of collapsed sections */
     QHash<int, ChildModel*>     m_childModels;  /* parentId → cached child-model instance */
+    QHash<int, QVector<int>>    m_childrenByParent; /* parentId → source rows, in declaration
+                                                      * order — built once in setWidgets() so
+                                                      * ChildModel construction is O(1) lookup
+                                                      * instead of an O(N) scan per container. */
     int                          m_generation = 0;
 };
 
