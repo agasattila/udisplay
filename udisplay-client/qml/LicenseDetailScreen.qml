@@ -3,6 +3,7 @@
 
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls.Material
 import QtQuick.Layouts
 
 /* Pushed onto DiscoveryScreen's local StackView from LicensesScreen.qml.
@@ -32,6 +33,30 @@ Item {
             color: "#888"
             wrapMode: Text.WordWrap
         }
+
+        Button {
+            objectName: "projectUrlButton"
+            Layout.fillWidth: true
+            text: "View project page"
+            Material.background: "#16213e"
+            Material.foreground: "#00d4aa"
+            font.pixelSize: 13
+            onClicked: {
+                var opened = Qt.openUrlExternally(root.dependency.url)
+                urlFeedback.visible = !opened
+            }
+        }
+        Label {
+            id: urlFeedback
+            objectName: "urlFeedback"
+            Layout.fillWidth: true
+            visible: false
+            text: "Couldn't open a browser. Visit " + root.dependency.url + " manually."
+            wrapMode: Text.WordWrap
+            font.pixelSize: 11
+            color: "#e74c3c"
+        }
+
         Rectangle { Layout.fillWidth: true; height: 1; color: "#2a2a4a" }
 
         ScrollView {

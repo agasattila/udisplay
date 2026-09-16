@@ -72,6 +72,7 @@ Item {
 
         Button {
             id: githubButton
+            objectName: "githubButton"
             Layout.fillWidth: true
             text: "View on GitHub"
             Material.background: "#16213e"
@@ -85,6 +86,7 @@ Item {
 
         Label {
             id: linkFeedback
+            objectName: "linkFeedback"
             Layout.fillWidth: true
             visible: false
             text: "Couldn't open a browser. Visit github.com/agasattila/udisplay manually."

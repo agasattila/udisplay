@@ -206,6 +206,27 @@ Item {
             fail("discoveryBackButton should be visible while browsing license detail")
             return
         }
+
+        // Same reasoning as AboutScreen's GitHub link: the offscreen QPA
+        // platform has no URL handler, so this reliably exercises the
+        // failure-feedback path, not a flaky guess.
+        var projectUrlButton = findByObjectName(mainWindow.contentItem, "projectUrlButton")
+        var urlFeedback = findByObjectName(mainWindow.contentItem, "urlFeedback")
+        if (!projectUrlButton || !urlFeedback) {
+            fail("could not find projectUrlButton/urlFeedback on license detail screen")
+            return
+        }
+        if (urlFeedback.visible !== false) {
+            fail("urlFeedback should start hidden, got visible=" + urlFeedback.visible)
+            return
+        }
+        projectUrlButton.clicked()
+        if (urlFeedback.visible !== true) {
+            fail("urlFeedback should show after Qt.openUrlExternally() fails " +
+                 "(no URL handler under -platform offscreen), got visible=" + urlFeedback.visible)
+            return
+        }
+
         backButton.clicked()
         Qt.callLater(step4_backAtLicensesList)
     }

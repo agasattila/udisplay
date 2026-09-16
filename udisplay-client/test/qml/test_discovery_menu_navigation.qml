@@ -183,6 +183,27 @@ Item {
             fail("discoveryBackButton should be visible while browsing About")
             return
         }
+
+        // The offscreen QPA platform has no URL handler, so
+        // Qt.openUrlExternally() reliably returns false here -- this
+        // exercises AboutScreen's failure-feedback path, not a flaky guess.
+        var githubButton = findByObjectName(mainWindow.contentItem, "githubButton")
+        var linkFeedback = findByObjectName(mainWindow.contentItem, "linkFeedback")
+        if (!githubButton || !linkFeedback) {
+            fail("could not find githubButton/linkFeedback on About screen")
+            return
+        }
+        if (linkFeedback.visible !== false) {
+            fail("linkFeedback should start hidden, got visible=" + linkFeedback.visible)
+            return
+        }
+        githubButton.clicked()
+        if (linkFeedback.visible !== true) {
+            fail("linkFeedback should show after Qt.openUrlExternally() fails " +
+                 "(no URL handler under -platform offscreen), got visible=" + linkFeedback.visible)
+            return
+        }
+
         backButton.clicked()
         Qt.callLater(step3_backAtRootThenOpenLicenses)
     }
