@@ -169,6 +169,13 @@ if(QML_EXECUTABLE)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         TIMEOUT 10)
 
+    add_test(NAME test_qml_discovery_menu_reset_on_error
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_discovery_menu_reset_on_error.qml")
+    set_tests_properties(test_qml_discovery_menu_reset_on_error PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10)
+
     add_test(NAME test_qml_discovery_content_screen
              COMMAND ${QML_EXECUTABLE} -platform offscreen
                      "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_discovery_content_screen.qml")

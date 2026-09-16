@@ -16,7 +16,8 @@ Page {
     Component.onDestruction: discoveryModel.stopScan()
 
     /* Stop scanning while a connection attempt is in progress; reset the
-     * hamburger-menu local stack when a device connects.
+     * hamburger-menu local stack when a device connects OR the attempt
+     * fails.
      *
      * main.qml's root StackView only ever pushes DeviceScreen OVER this
      * DiscoveryScreen instance (main.qml:43 `stack.push(deviceScreen)`) and
@@ -27,7 +28,16 @@ Page {
      * on the next disconnect, DiscoveryScreen reappears exactly as left --
      * stuck on a submenu with the hamburger button hidden
      * (`visible: localStack.depth === 1`), instead of the device list the
-     * user expects to reconnect from. Found by adversarial review. */
+     * user expects to reconnect from. Found by adversarial review.
+     *
+     * The reset also fires on "error": the error banner
+     * (discoveryErrorBanner, bound to controller.errorString) lives only in
+     * discoveryContentComponent at the bottom of localStack, not in
+     * About/Licenses/LicenseDetail. Without resetting on "error" too, a
+     * connection attempt that fails while the user is browsing those
+     * screens fails completely silently -- no banner, no menu-depth change,
+     * nothing -- until the user manually taps back. Found by adversarial
+     * review (ship pre-landing pass). */
     Connections {
         target: controller
         function onStateChanged() {
@@ -38,7 +48,8 @@ Page {
                      controller.state === "error")
                 discoveryModel.startScan()
 
-            if (controller.state === "running") {
+            if (controller.state === "running" ||
+                controller.state === "error") {
                 menu.close()
                 localStack.pop(null)
             }
