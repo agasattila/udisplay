@@ -14,6 +14,11 @@ Rectangle {
     required property bool   enabled
     required property var    value   /* selected index (int) or null */
     required property var    props   /* { items: [{key, label}, ...] } */
+    /* Resolved style tokens for this row (see WidgetDelegate.qml's
+     * _effectiveStyle). Non-required, defaulting to {} — standalone QML
+     * tests instantiate this widget directly with no controller/resolver in
+     * scope, so color bindings below read undefined fields gracefully (no crash). */
+    property var effectiveStyle: ({})
 
     implicitWidth: dropdownLabel.implicitWidth + 140 + 12 + 32  /* 140 = combo's own Layout.minimumWidth */
     implicitHeight: 72
@@ -26,7 +31,7 @@ Rectangle {
         Label {
             id: dropdownLabel
             text: root.label
-            color: controller.activeStyle.text_muted
+            color: effectiveStyle.text_muted
             font.pixelSize: 12
             font.capitalization: Font.AllUppercase
             font.letterSpacing: 1
@@ -51,9 +56,9 @@ Rectangle {
             }
 
             background: Rectangle {
-                color: combo.pressed ? controller.activeStyle.surface : controller.activeStyle.background
+                color: combo.pressed ? effectiveStyle.surface : effectiveStyle.background
                 radius: 8
-                border.color: controller.activeStyle.accent
+                border.color: effectiveStyle.accent
                 border.width: 1
             }
 
@@ -61,7 +66,7 @@ Rectangle {
                 leftPadding: 10
                 rightPadding: 10
                 text: combo.displayText
-                color: controller.activeStyle.text_heading
+                color: effectiveStyle.text_heading
                 font.pixelSize: 13
                 verticalAlignment: Text.AlignVCenter
             }
@@ -73,11 +78,11 @@ Rectangle {
                 highlighted: combo.highlightedIndex === index
                 contentItem: Label {
                     text: modelData
-                    color: highlighted ? controller.activeStyle.accent : controller.activeStyle.text
+                    color: highlighted ? effectiveStyle.accent : effectiveStyle.text
                     font.pixelSize: 13
                 }
                 background: Rectangle {
-                    color: highlighted ? controller.activeStyle.surface : "transparent"
+                    color: highlighted ? effectiveStyle.surface : "transparent"
                 }
             }
 

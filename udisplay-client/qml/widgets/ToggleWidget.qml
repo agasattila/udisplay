@@ -14,6 +14,11 @@ Rectangle {
     required property string label
     required property bool   enabled
     required property var    value   /* uint8: 0=off, 1=on; null until first update */
+    /* Resolved style tokens for this row (see WidgetDelegate.qml's
+     * _effectiveStyle). Non-required, defaulting to {} — standalone QML
+     * tests instantiate this widget directly with no controller/resolver in
+     * scope, so color bindings below read undefined fields gracefully (no crash). */
+    property var effectiveStyle: ({})
 
     implicitWidth: toggleLabel.implicitWidth + track.width + 12 + 32
     implicitHeight: 56
@@ -27,7 +32,7 @@ Rectangle {
         Label {
             id: toggleLabel
             text: root.label
-            color: controller.activeStyle.text
+            color: effectiveStyle.text
             font.pixelSize: 14
             Layout.fillWidth: true
         }
@@ -37,8 +42,8 @@ Rectangle {
             id: track
             width: 46; height: 26
             radius: 13
-            color: isOn ? controller.activeStyle.accent : controller.activeStyle.surface
-            border.color: isOn ? controller.activeStyle.accent : controller.activeStyle.border
+            color: isOn ? effectiveStyle.accent : effectiveStyle.surface
+            border.color: isOn ? effectiveStyle.accent : effectiveStyle.border
             border.width: 1
             property bool isOn: root.value === 1 || root.value === true
 
@@ -51,7 +56,7 @@ Rectangle {
                 radius: 10
                 anchors.verticalCenter: parent.verticalCenter
                 x: track.isOn ? track.width - width - 3 : 3
-                color: track.isOn ? controller.activeStyle.background : controller.activeStyle.text_muted
+                color: track.isOn ? effectiveStyle.background : effectiveStyle.text_muted
 
                 Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
             }

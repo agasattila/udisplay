@@ -784,3 +784,39 @@ Android CI job could be considered fully done.
 **Why:** Two independent Merkle implementations without a shared spec will diverge on edge cases.
 **Status:** ✅ DONE — `docs/merkle.md` exists in the repo.
 **Depends on:** Nothing — this is the foundation.
+
+---
+
+### TODO-055: Container-level style cascading (row/grid/section theming their subtree)
+**What:** Implement the inherited-style resolution path deliberately left unbuilt by the
+"Unify widget style handling" work (issue #11, `docs/designs/unify-widget-style-handling.md`):
+a styled container (`section`/`button-group` today; `row`/`grid`/`dpad` once their
+transparent-container restriction lifts) should propagate its `style:` to descendant
+widgets that don't set their own, using the resolution order Codex's cross-model review
+proposed: `explicit widget style → nearest styled ancestor → app-wide active style`.
+**Why:** Themed dashboard regions (an alarm panel, a muted diagnostics area) are the
+actual "coolest version" of per-widget styling identified during `/office-hours` and
+`/plan-eng-review` on issue #11 — the v1 resolver only handles individual widgets.
+**Pros:** The resolver built for v1 is explicitly designed to accept an inherited-style
+parameter (`DeviceController::effectiveStyleFor(row)`), so this is additive, not a
+rearchitect. `WidgetModel`'s `parentId` ancestor-walk machinery (already used for
+collapsed-section visibility) is directly reusable for the ancestor lookup.
+**Cons:** Needs its own design pass for a few real edge cases: unbounded ancestor-walk
+depth (relates to the existing `TODO-036` recursion-depth cap), and whether `row`/`grid`/
+`dpad`'s current "reject `style:`" restriction should lift at the same time cascading
+ships (it becomes meaningful once cascading exists) or in a separate step. Also — flagged
+by outside-voice cross-model review on the v1 PR — cascading is a visible BEHAVIOR CHANGE
+for any existing device YAML that already sets `style:` on a `section`/`button-group` for
+its own chrome: today that widget's unstyled children stay on the app-wide active style;
+once cascading ships, those same unchanged children start inheriting the container's style
+instead, with no YAML edit needed to trigger the new appearance. Not a blocker for v1, but
+the cascading design pass should decide (and document in a release note) whether that's
+acceptable silent behavior drift or needs its own opt-in.
+**Context:** v1 (issue #11) ships leaf-widget-only style resolution plus `section`/
+`button-group`'s own (non-cascading) chrome coloring. This TODO is the deliberately
+deferred second half. Start by reading `docs/designs/unify-widget-style-handling.md`'s
+Open Questions and Cross-Model Perspective sections — the resolution order and the
+"why deferred" reasoning are already captured there.
+**Effort:** M (human: ~1-2 days / CC: ~2-3 hrs)
+**Priority:** P3 — no reported need yet, deliberately deferred scope, not a bug.
+**Depends on:** Issue #11 / `docs/designs/unify-widget-style-handling.md`'s v1 landing first.

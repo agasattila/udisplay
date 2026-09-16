@@ -113,6 +113,7 @@ class DeviceController : public QObject
     Q_PROPERTY(WidgetModel* widgetModel      READ widgetModel       CONSTANT)
     Q_PROPERTY(QVariantMap  activeStyle      READ activeStyle       NOTIFY activeStyleChanged)
     Q_PROPERTY(QStringList  availableStyles  READ availableStyles   NOTIFY availableStylesChanged)
+    Q_PROPERTY(QVariantList parseWarnings    READ parseWarnings     NOTIFY parseWarningsChanged)
 
 public:
     explicit DeviceController(QObject* parent = nullptr);
@@ -125,6 +126,16 @@ public:
     WidgetModel* widgetModel()            { return &m_model; }
     QVariantMap activeStyle()       const { return m_activeStyleMap; }
     QStringList availableStyles()   const { return m_styles.keys(); }
+    /* Current parse diagnostics (TODO-040) — readable directly, not just
+     * reachable via the parseWarningsChanged signal, so a QML element
+     * constructed AFTER a parse (e.g. this screen loading post-bootstrap)
+     * can see what already happened, not only future emissions. Each entry:
+     * { severity: "error"|"warning", widgetKey, field, message }. Empty
+     * (not just unset) once every diagnostic from the last parse is fixed —
+     * see applyParsedYaml()'s emit-on-transition comment for why the
+     * NOTIFY signal still fires on that clear, even though it carries an
+     * empty list. */
+    QVariantList parseWarnings()    const { return m_parseWarnings; }
 
     /* ── Design Mode ────────────────────────────────────────────── */
     /** Call from main() when -design <file> is present.
@@ -143,6 +154,17 @@ public:
     Q_INVOKABLE void connectDiscovered(const QVariant& deviceInfo);
     Q_INVOKABLE void disconnectDevice();
     Q_INVOKABLE void setActiveStyle(const QString& name);
+
+    /* Resolves the effective style QVariantMap for the widget at flat-list
+     * `row`: its own explicit `style:` name if set (props["style"]),
+     * falling back to the app-wide activeStyle otherwise. Defensive against
+     * an invalid/out-of-range row or a style name absent from m_styles
+     * (both should be unreachable from a successfully-parsed YAML — the
+     * parser rejects an unknown stylesheet name at Severity::Error — but
+     * never crash regardless). QML bindings must depend on BOTH
+     * `activeStyle` and `widgetModel.generation` (see WidgetModel.h) to stay
+     * live — see docs/designs/unify-widget-style-handling.md. */
+    Q_INVOKABLE QVariantMap effectiveStyleFor(int row);
 
     Q_INVOKABLE void sendButtonPress(int widgetId);
     Q_INVOKABLE void sendButtonRelease(int widgetId);
@@ -239,6 +261,7 @@ private:
     QMap<QString, StyleToken> m_styles;
     QString          m_activeStyleName = QStringLiteral("default");
     QVariantMap      m_activeStyleMap;
+    QVariantList     m_parseWarnings;
     QString          m_deviceName;
     QString          m_errorString;
     QString          m_designErrorString;

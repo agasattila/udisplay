@@ -142,13 +142,24 @@ def schema_errors(doc: dict, schema: dict,
     return errors
 
 
+# Widget types that reject style: entirely (schema also enforces this via
+# additionalProperties: false — kept here too so the semantic check below
+# can skip a value that shouldn't exist in the first place, rather than
+# reporting a confusing "unknown stylesheet" on a field that's already a
+# schema violation). Mirrors udisplay-client's YamlParser.cpp exactly:
+# row/grid/dpad/button render color:"transparent" in QML, so style: would
+# be a no-op there.
+_STYLE_REJECTED_TYPES = {"row", "grid", "dpad", "button"}
+
+
 def _semantic_errors_in_map(widgets: dict, path_prefix: str,
-                            seen_names: set[str]) -> list[str]:
+                            seen_names: set[str], style_names: set[str]) -> list[str]:
     """
     Recursive semantic check for a widget map.
     - slider min < max
     - dpad's button children must all have position
     - leaf widget names globally unique across all container scopes
+    - style: (if present and the type allows it) names a declared stylesheet
     """
     errors: list[str] = []
 
@@ -157,6 +168,14 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
             continue
         wtype = widget.get("type")
         widget_path = f"{path_prefix}.{key}" if path_prefix else f"widgets.{key}"
+
+        style_ref = widget.get("style")
+        if style_ref is not None and wtype not in _STYLE_REJECTED_TYPES:
+            if style_ref not in style_names:
+                errors.append(
+                    f"  {widget_path}: style '{style_ref}' is not declared in the "
+                    f"top-level style: block"
+                )
 
         if wtype in CONTAINER_TYPES:
             sub_widgets = widget.get("widgets", {})
@@ -170,7 +189,7 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
                         f"  {widget_path}: dpad requires `position` on every child "
                         f"button; missing: {', '.join(missing)}"
                     )
-            errors.extend(_semantic_errors_in_map(sub_widgets, widget_path, seen_names))
+            errors.extend(_semantic_errors_in_map(sub_widgets, widget_path, seen_names, style_names))
             continue
 
         if wtype in DECORATION_TYPES:
@@ -200,9 +219,15 @@ def semantic_errors(doc: dict) -> list[str]:
     - slider min < max
     - dpad's button children must all have position
     - leaf names globally unique across all container scopes
+    - style: names a declared stylesheet
     """
     seen: set[str] = set()
-    return _semantic_errors_in_map(doc.get("widgets", {}), "", seen)
+    # "default" is always implicitly valid, even with no style: block at all
+    # — matches udisplay-client's YamlParser.cpp parseStyles(), which always
+    # populates a "default" entry (from the style.default: block if present,
+    # else hardcoded StyleToken C++ defaults).
+    style_names = set(doc.get("style", {}).keys()) | {"default"}
+    return _semantic_errors_in_map(doc.get("widgets", {}), "", seen, style_names)
 
 
 def validate(doc: dict, schema: dict | None = None,

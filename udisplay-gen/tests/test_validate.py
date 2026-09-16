@@ -413,7 +413,7 @@ def test_button_group_single_item_rejected():
 def test_display_style_invalid():
     doc = {
         "device": {"name": "x"},
-        "widgets": {"d": {"type": "display", "style": "xlarge"}},
+        "widgets": {"d": {"type": "display", "displayStyle": "xlarge"}},
     }
     errors = schema_errors(doc, SCHEMA)
     assert errors
@@ -518,7 +518,7 @@ def test_label_valid_inline():
     doc = {
         "device": {"name": "x"},
         "widgets": {
-            "hdr": {"type": "label", "text": "Network", "style": "heading"},
+            "hdr": {"type": "label", "text": "Network", "labelStyle": "heading"},
         },
     }
     assert validate(doc, SCHEMA) == []
@@ -536,10 +536,64 @@ def test_label_missing_text_rejected():
 def test_label_invalid_style_rejected():
     doc = {
         "device": {"name": "x"},
-        "widgets": {"hdr": {"type": "label", "text": "Hi", "style": "xlarge"}},
+        "widgets": {"hdr": {"type": "label", "text": "Hi", "labelStyle": "xlarge"}},
     }
     errors = schema_errors(doc, SCHEMA)
     assert errors
+
+
+# ── Unify widget style handling (docs/designs/unify-widget-style-handling.md) ──
+
+def test_style_unknown_stylesheet_name_rejected():
+    """style: on a widget must name a stylesheet actually declared in the
+    top-level style: block — not expressible in JSON Schema alone, this is
+    semantic_errors()'s job."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {"d": {"type": "display", "style": "alarm"}},
+    }
+    errors = validate(doc, SCHEMA)
+    assert errors
+    assert any("alarm" in e for e in errors)
+
+
+def test_style_declared_stylesheet_name_accepted():
+    doc = {
+        "device": {"name": "x"},
+        "style": {"alarm": {"accent": "#ff0000"}},
+        "widgets": {"d": {"type": "display", "style": "alarm"}},
+    }
+    assert validate(doc, SCHEMA) == []
+
+
+def test_style_implicit_default_accepted():
+    """"default" is always implicitly declared, even with no style: block at
+    all — matches the client's own parseStyles() behavior."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {"d": {"type": "display", "style": "default"}},
+    }
+    assert validate(doc, SCHEMA) == []
+
+
+def test_style_on_row_rejected_by_schema():
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {"r": {"type": "row", "style": "alarm",
+                           "widgets": {"a": {"type": "toggle"}}}},
+    }
+    errors = schema_errors(doc, SCHEMA)
+    assert errors
+
+
+def test_style_on_section_accepted():
+    doc = {
+        "device": {"name": "x"},
+        "style": {"alarm": {"accent": "#ff0000"}},
+        "widgets": {"s": {"type": "section", "style": "alarm",
+                           "widgets": {"a": {"type": "toggle"}}}},
+    }
+    assert validate(doc, SCHEMA) == []
 
 
 def test_separator_valid():

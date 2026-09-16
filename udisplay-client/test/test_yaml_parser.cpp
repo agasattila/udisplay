@@ -65,7 +65,7 @@ static const char* YAML_V5 =
     "    label: Voltage\n"
     "    unit: V\n"
     "    format: '%.3f'\n"
-    "    style: large\n"
+    "    displayStyle: large\n"
     "  mode_sel:\n"
     "    type: button-group\n"
     "    layout: grid\n"
@@ -252,7 +252,7 @@ private slots:
         QCOMPARE(dv->label, QStringLiteral("Voltage"));
         QCOMPARE(dv->props[QStringLiteral("unit")].toString(),   QStringLiteral("V"));
         QCOMPARE(dv->props[QStringLiteral("format")].toString(), QStringLiteral("%.3f"));
-        QCOMPARE(dv->props[QStringLiteral("style")].toString(), QStringLiteral("large"));
+        QCOMPARE(dv->props[QStringLiteral("displayStyle")].toString(), QStringLiteral("large"));
     }
 
     void v5_slider_props()
@@ -331,7 +331,7 @@ private slots:
             "    label: Temp\n";
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets[0].props[QStringLiteral("format")].toString(), QStringLiteral("%.2f"));
-        QCOMPARE(widgets[0].props[QStringLiteral("style")].toString(), QStringLiteral("default"));
+        QCOMPARE(widgets[0].props[QStringLiteral("displayStyle")].toString(), QStringLiteral("default"));
     }
 
     /* ── Error handling ───────────────────────────────────────────── */
@@ -528,7 +528,7 @@ private slots:
             "  title:\n"
             "    type: label\n"
             "    text: Hello world\n"
-            "    style: heading\n";
+            "    labelStyle: heading\n";
         YamlParser p;
         QList<WidgetDef> widgets;
         QString name, version;
@@ -537,7 +537,7 @@ private slots:
         QCOMPARE(widgets[0].type,     WidgetType::Label);
         QCOMPARE(widgets[0].widgetId, uint8_t(0));
         QCOMPARE(widgets[0].props[QStringLiteral("text")].toString(), QStringLiteral("Hello world"));
-        QCOMPARE(widgets[0].props[QStringLiteral("style")].toString(), QStringLiteral("heading"));
+        QCOMPARE(widgets[0].props[QStringLiteral("labelStyle")].toString(), QStringLiteral("heading"));
     }
 
     /* Decorations are transparent to ID assignment: a toggle after a
@@ -1658,7 +1658,7 @@ private slots:
             "widgets:\n"
             "  d:\n"
             "    type: display\n"
-            "    style: hero\n";
+            "    displayStyle: hero\n";
         YamlParser p;
         QList<WidgetDef> widgets;
         QString name, version;
@@ -1666,7 +1666,7 @@ private slots:
         QVERIFY(!p.errorString().isEmpty());
         bool hasError = false;
         for (const auto& d : p.diagnostics())
-            if (d.field == QStringLiteral("style") &&
+            if (d.field == QStringLiteral("displayStyle") &&
                 d.severity == YamlParser::Severity::Error) hasError = true;
         QVERIFY(hasError);
     }
@@ -1678,7 +1678,7 @@ private slots:
             "  lbl:\n"
             "    type: label\n"
             "    text: Hello\n"
-            "    style: giant\n";
+            "    labelStyle: giant\n";
         YamlParser p;
         QList<WidgetDef> widgets;
         QString name, version;
@@ -1686,9 +1686,112 @@ private slots:
         QVERIFY(!p.errorString().isEmpty());
         bool hasError = false;
         for (const auto& d : p.diagnostics())
+            if (d.field == QStringLiteral("labelStyle") &&
+                d.severity == YamlParser::Severity::Error) hasError = true;
+        QVERIFY(hasError);
+    }
+
+    /* ── style: (stylesheet reference), separate from displayStyle/labelStyle ── */
+
+    void oldStyleKey_onDisplay_hitsUnknownStylesheetDiagnostic()
+    {
+        /* The OLD variant-selector key ("style") is now a DIFFERENT property
+         * (stylesheet reference) on display widgets — see
+         * docs/designs/unify-widget-style-handling.md. A migrated author who
+         * forgot to rename to displayStyle: gets a clear diagnostic (unknown
+         * stylesheet name), not a silently-wrong variant. */
+        const char* yaml =
+            "widgets:\n"
+            "  d:\n"
+            "    type: display\n"
+            "    style: large\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(yaml, widgets, name, version));
+        bool hasError = false;
+        for (const auto& d : p.diagnostics())
             if (d.field == QStringLiteral("style") &&
                 d.severity == YamlParser::Severity::Error) hasError = true;
         QVERIFY(hasError);
+    }
+
+    void style_unknownStylesheetName_failsParse()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  d:\n"
+            "    type: display\n"
+            "    style: alarm\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(yaml, widgets, name, version));
+        bool hasError = false;
+        for (const auto& d : p.diagnostics())
+            if (d.field == QStringLiteral("style") &&
+                d.severity == YamlParser::Severity::Error) hasError = true;
+        QVERIFY(hasError);
+    }
+
+    void style_knownStylesheetName_parsesOk()
+    {
+        const char* yaml =
+            "style:\n"
+            "  alarm:\n"
+            "    accent: '#ff0000'\n"
+            "widgets:\n"
+            "  d:\n"
+            "    type: display\n"
+            "    style: alarm\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(p.parse(yaml, widgets, name, version));
+        QCOMPARE(widgets[0].props[QStringLiteral("style")].toString(), QStringLiteral("alarm"));
+    }
+
+    void style_onRowGridDpadButton_rejected()
+    {
+        for (const char* type : { "row", "grid", "dpad", "button" }) {
+            const QString yamlStr = QStringLiteral(
+                "widgets:\n"
+                "  c:\n"
+                "    type: %1\n"
+                "    style: alarm\n").arg(QString::fromLatin1(type));
+            YamlParser p;
+            QList<WidgetDef> widgets;
+            QString name, version;
+            QVERIFY2(!p.parse(yamlStr.toUtf8(), widgets, name, version), type);
+            bool hasError = false;
+            for (const auto& d : p.diagnostics())
+                if (d.field == QStringLiteral("style") &&
+                    d.severity == YamlParser::Severity::Error) hasError = true;
+            QVERIFY2(hasError, type);
+        }
+    }
+
+    void style_onSectionAndButtonGroup_accepted()
+    {
+        const char* yaml =
+            "style:\n"
+            "  alarm:\n"
+            "    accent: '#ff0000'\n"
+            "widgets:\n"
+            "  sec:\n"
+            "    type: section\n"
+            "    style: alarm\n"
+            "    widgets:\n"
+            "      lbl:\n"
+            "        type: label\n"
+            "        text: hi\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(p.parse(yaml, widgets, name, version));
+        const WidgetDef* sec = findByKey(widgets, "sec");
+        QVERIFY(sec);
+        QCOMPARE(sec->props[QStringLiteral("style")].toString(), QStringLiteral("alarm"));
     }
 
     void sliderStep_zero_warns()
