@@ -134,7 +134,12 @@ systematic sweep this TODO scoped:
 - Covered incidentally: Row/Grid flex/align/nesting math (4 tests), button-face
   composition (3 tests), global-stylesheet reaching page chrome (1 test), version-label/
   status-dot overlap (1 test).
-- **Discovery screen:** no test.
+- **Discovery screen:** hamburger menu + About/Licenses/LicenseDetail navigation now
+  covered (4 tests added shipping issue #14: `test_discovery_menu_navigation.qml`,
+  `test_license_detail_navigation.qml`, `test_discovery_menu_reset_on_connect.qml`, plus
+  the GitHub/project-link failure-path assertions folded into the first two). The rest of
+  DiscoveryScreen (device-list ListView rendering, manual TCP host/port entry, the error
+  banner) is still untested — this line item is partially closed, not the whole screen.
 - **Bootstrap flow:** not covered in QML at all (covered in C++ via `test_bootstrap.cpp`/
   `test_device_controller.cpp`, but that's not a QML/UI test).
 - **Widget rendering, all types:** only the widgets that happened to be a bug-fix vehicle
