@@ -117,8 +117,15 @@ Page {
             Label {
                 objectName: "discoveryHeaderTitle"
                 Layout.fillWidth: true
-                text: localStack.depth > 1 ? localStack.currentItem.pageTitle
-                                            : "uDisplay"
+                /* Guard against the moment localStack.depth's changed
+                 * signal fires a tick before localStack.currentItem's
+                 * does: currentItem is briefly still the outgoing item
+                 * (which has no pageTitle), and evaluating .pageTitle
+                 * on it yields undefined, logging a QML warning when
+                 * assigned to this QString property. */
+                text: localStack.depth > 1 && localStack.currentItem && localStack.currentItem.pageTitle
+                          ? localStack.currentItem.pageTitle
+                          : "uDisplay"
                 font.pixelSize: localStack.depth > 1 ? 16 : 18
                 font.bold: true
                 color: "#00d4aa"
