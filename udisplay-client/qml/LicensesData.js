@@ -224,7 +224,9 @@ var dependencies = [
         name: "QtZeroConf",
         role: "mDNS/Bonjour service discovery",
         url: "https://github.com/jbagg/QtZeroConf",
-        copyright: "Copyright (C) The Qt Company Ltd. and other contributors.",
+        copyright: "The Qt Toolkit is Copyright (C) 2014 Digia Plc and/or its " +
+                   "subsidiary(-ies). (QtZeroConf's own LICENSE file reproduces " +
+                   "Qt's LGPLv3 distribution text verbatim, including this notice.)",
         licenseName: "GNU Lesser General Public License v3.0",
         licenseText: LICENSE_LGPL3
     },
