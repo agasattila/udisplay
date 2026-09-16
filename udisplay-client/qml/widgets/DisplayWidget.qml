@@ -5,11 +5,11 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-/* Numeric read-only display. style="large" renders as a hero block.
+/* Numeric read-only display. displayStyle="large" renders as a hero block.
  * compact: true renders a small inline reading (label + value + unit,
- * shrunk fonts/margins, style="large" ignored) — used on a button face,
- * where the standalone 64px (96px at style: large) row would overflow a
- * 40px button. */
+ * shrunk fonts/margins, displayStyle="large" ignored) — used on a button
+ * face, where the standalone 64px (96px at displayStyle: large) row would
+ * overflow a 40px button. */
 Rectangle {
     id: root
     required property int    widgetId
@@ -18,15 +18,20 @@ Rectangle {
     required property var    value
     required property var    props
     property bool compact: false
+    /* Resolved style tokens for this row (see WidgetDelegate.qml's
+     * _effectiveStyle). Non-required, defaulting to {} — standalone QML
+     * tests instantiate this widget directly with no controller/resolver in
+     * scope, so color bindings below read undefined fields gracefully (no crash). */
+    property var effectiveStyle: ({})
 
     /* Derived (compact, style) sizing — computed once here rather than
      * repeating the two-level ternary at each Label use site below. */
-    readonly property bool  _isLarge:            !compact && props.style === "large"
-    readonly property int   _boxHeight:           compact ? 24 : (props.style === "large" ? 96 : 64)
-    readonly property int   _labelPixelSize:      compact ? 10 : (props.style === "large" ? 13 : 12)
-    readonly property int   _valuePixelSize:      compact ? 14 : (props.style === "large" ? 36 : 22)
-    readonly property int   _unitPixelSize:       compact ? 10 : (props.style === "large" ? 14 : 12)
-    readonly property int   _unitBottomPadding:   compact ? 0  : (props.style === "large" ? 4  : 2)
+    readonly property bool  _isLarge:            !compact && props.displayStyle === "large"
+    readonly property int   _boxHeight:           compact ? 24 : (props.displayStyle === "large" ? 96 : 64)
+    readonly property int   _labelPixelSize:      compact ? 10 : (props.displayStyle === "large" ? 13 : 12)
+    readonly property int   _valuePixelSize:      compact ? 14 : (props.displayStyle === "large" ? 36 : 22)
+    readonly property int   _unitPixelSize:       compact ? 10 : (props.displayStyle === "large" ? 14 : 12)
+    readonly property int   _unitBottomPadding:   compact ? 0  : (props.displayStyle === "large" ? 4  : 2)
 
     implicitWidth: contentRow.implicitWidth + (compact ? 16 : 32)  /* + left/right margins below */
     implicitHeight: _boxHeight
@@ -42,7 +47,7 @@ Rectangle {
         /* Label */
         Label {
             text: root.label
-            color: controller.activeStyle.text_muted
+            color: effectiveStyle.text_muted
             font.pixelSize: root._labelPixelSize
             font.capitalization: Font.AllUppercase
             font.letterSpacing: 1
@@ -73,7 +78,7 @@ Rectangle {
                     if (fmt.indexOf("%d") >= 0) return Math.round(num).toString()
                     return num.toFixed(2)
                 }
-                color: controller.activeStyle.accent
+                color: effectiveStyle.accent
                 font.pixelSize: root._valuePixelSize
                 font.bold: root._isLarge
                 font.family: "monospace"
@@ -81,7 +86,7 @@ Rectangle {
 
             Label {
                 text: props.unit || ""
-                color: controller.activeStyle.text_muted
+                color: effectiveStyle.text_muted
                 font.pixelSize: root._unitPixelSize
                 Layout.alignment: Qt.AlignBottom
                 bottomPadding: root._unitBottomPadding

@@ -49,6 +49,7 @@ Item {
         property string deviceName: "Sentinel Device"
         property string state: "running"
         property string designErrorString: ""
+        property var parseWarnings: []
         property var widgetModel: FakeWidgetModel {}
         property var activeStyle: QtObject {
             property string background:   "#0d0d1a"

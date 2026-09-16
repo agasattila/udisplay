@@ -30,6 +30,11 @@ Rectangle {
     /* Every item in this group, as a real model (see
      * WidgetModel::childModel()) — supplied by WidgetDelegate.qml. */
     property var    childModel: null
+    /* Resolved style tokens for this row (see WidgetDelegate.qml's
+     * _effectiveStyle). Non-required, defaulting to {} — standalone QML
+     * tests instantiate this widget directly with no controller/resolver in
+     * scope, so color bindings below read undefined fields gracefully (no crash). */
+    property var    effectiveStyle: ({})
 
     /* Flow: items wrap, so there's no single "natural" width for an
      * arbitrary item count — use up to 3 columns worth (Flow's typical wrap
@@ -46,7 +51,7 @@ Rectangle {
 
         Label {
             text: root.label
-            color: controller.activeStyle.text_muted
+            color: effectiveStyle.text_muted
             font.pixelSize: 12
             font.capitalization: Font.AllUppercase
             font.letterSpacing: 1
@@ -69,7 +74,7 @@ Rectangle {
                     showLabel: false
 
                     border.color: root.value === model.widgetId
-                                  ? controller.activeStyle.button : controller.activeStyle.border
+                                  ? effectiveStyle.button : effectiveStyle.border
                     border.width: 1
 
                     onButtonPressed:  controller.sendButtonPress(model.widgetId)
@@ -83,7 +88,7 @@ Rectangle {
                          * activeStyle.button (via ButtonFace) now regardless
                          * of selection, so activeStyle.text (meant for the
                          * old dark "surface" fill) would be unreadable here. */
-                        color: controller.activeStyle.button_text
+                        color: effectiveStyle.button_text
                         font.pixelSize: 13
                         font.bold: root.value === model.widgetId
                     }

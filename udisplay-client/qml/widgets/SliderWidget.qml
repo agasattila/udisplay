@@ -14,6 +14,11 @@ Rectangle {
     required property bool   enabled
     required property var    value   /* float, null until first STATE_UPDATE */
     required property var    props
+    /* Resolved style tokens for this row (see WidgetDelegate.qml's
+     * _effectiveStyle). Non-required, defaulting to {} — standalone QML
+     * tests instantiate this widget directly with no controller/resolver in
+     * scope, so color bindings below read undefined fields gracefully (no crash). */
+    property var effectiveStyle: ({})
 
     /* The Slider control itself stretches to fill (Layout.fillWidth below) —
      * there's no natural "track width" worth measuring. 180px is a
@@ -33,7 +38,7 @@ Rectangle {
             Label {
                 id: sliderLabel
                 text: root.label
-                color: controller.activeStyle.text_muted
+                color: effectiveStyle.text_muted
                 font.pixelSize: 12
                 font.capitalization: Font.AllUppercase
                 font.letterSpacing: 1
@@ -50,7 +55,7 @@ Rectangle {
                         : 0
                     return v.toFixed(decimals) + (props.unit ? " " + props.unit : "")
                 }
-                color: controller.activeStyle.accent
+                color: effectiveStyle.accent
                 font.pixelSize: 14
                 font.family: "monospace"
             }
@@ -67,18 +72,18 @@ Rectangle {
             enabled:    root.enabled
             opacity:    root.enabled ? 1.0 : 0.4
 
-            Material.accent: controller.activeStyle.accent
+            Material.accent: effectiveStyle.accent
             background: Rectangle {
                 x: slider.leftPadding
                 y: slider.topPadding + slider.availableHeight / 2 - height / 2
                 width: slider.availableWidth
                 height: 4
                 radius: 2
-                color: controller.activeStyle.surface
+                color: effectiveStyle.surface
                 Rectangle {
                     width: slider.visualPosition * parent.width
                     height: parent.height
-                    color: controller.activeStyle.accent
+                    color: effectiveStyle.accent
                     radius: 2
                 }
             }
@@ -88,9 +93,9 @@ Rectangle {
                 width: 18; height: 18
                 radius: 9
                 color: slider.pressed
-                       ? Qt.lighter(controller.activeStyle.accent, 1.2)
-                       : controller.activeStyle.accent
-                border.color: controller.activeStyle.background
+                       ? Qt.lighter(effectiveStyle.accent, 1.2)
+                       : effectiveStyle.accent
+                border.color: effectiveStyle.background
                 border.width: 2
             }
 

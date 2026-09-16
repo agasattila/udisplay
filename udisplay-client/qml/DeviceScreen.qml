@@ -86,8 +86,64 @@ Page {
         }
     }
 
+    /* Parse-warning banner (TODO-040) — non-fatal YAML issues (unlike the
+     * parse-error overlay above, which blocks the whole screen) shown in
+     * BOTH bootstrap (real device) and design mode: `parseWarnings`
+     * previously reached no QML listener anywhere in the app — the client
+     * parses device-supplied YAML directly with no schema validation, so a
+     * legacy/hand-authored device YAML's issues (e.g. the deprecated
+     * button `children:` key) were only ever visible in a desktop stderr
+     * log, never on the embedded touchscreen actually running it. Reads
+     * controller.parseWarnings directly (not just a live Connections), so
+     * this banner is also correct for a screen instantiated AFTER the
+     * parse already happened — see DeviceController.h's parseWarnings doc. */
+    Rectangle {
+        id: warningBanner
+        objectName: "warningBanner"
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        visible: controller.parseWarnings.length > 0 && !warningBanner.dismissed
+        property bool dismissed: false
+        /* Re-arm on every parse (not just when visible flips true) — dismissed
+         * stayed true across a subsequent parse that also produced warnings,
+         * since visible never toggled to trigger a reset. parseWarningsChanged
+         * fires on every parse, including one that clears to empty, so this
+         * also harmlessly resets dismissed when there's nothing to show. */
+        Connections {
+            target: controller
+            function onParseWarningsChanged() { warningBanner.dismissed = false }
+        }
+        height: visible ? bannerContent.implicitHeight + 16 : 0
+        color: "#3a2a00"
+        z: 2
+
+        RowLayout {
+            id: bannerContent
+            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter;
+                      leftMargin: 12; rightMargin: 12 }
+            spacing: 8
+
+            Label {
+                Layout.fillWidth: true
+                text: controller.parseWarnings.length === 1
+                      ? "⚠ 1 YAML issue: " + controller.parseWarnings[0].message
+                      : "⚠ " + controller.parseWarnings.length + " YAML issues — see log for details"
+                color: "#f5a623"
+                font.pixelSize: 12
+                elide: Text.ElideRight
+                wrapMode: Text.NoWrap
+            }
+            ToolButton {
+                text: "✕"
+                font.pixelSize: 14
+                implicitWidth: 28
+                implicitHeight: 28
+                onClicked: warningBanner.dismissed = true
+            }
+        }
+    }
+
     ScrollView {
-        anchors.fill: parent
+        anchors { top: warningBanner.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
         visible: controller.designErrorString === ""
         contentWidth: availableWidth
         clip: true

@@ -33,8 +33,8 @@ def main():
     button_shapes    = get_enum(defs, "buttonWidget",      "shape")
     bg_layouts       = get_enum(defs, "buttonGroupWidget", "layout")
     text_modes       = get_enum(defs, "textWidget",        "mode")
-    display_styles   = get_enum(defs, "displayWidget",     "style")
-    label_styles     = get_enum(defs, "labelWidget",       "style")
+    display_styles   = get_enum(defs, "displayWidget",     "displayStyle")
+    label_styles     = get_enum(defs, "labelWidget",       "labelStyle")
 
     lines = [
         "// SPDX-License-Identifier: LGPL-3.0-only",

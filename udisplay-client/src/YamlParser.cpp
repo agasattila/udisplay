@@ -106,6 +106,34 @@ static int parseGridColumns(const YAML::Node& node, const std::string& key, Diag
     return columns;
 }
 
+/* style: (stylesheet reference) — common to every widget type except the
+ * truly transparent containers (row/grid/dpad/button all render
+ * color:"transparent" in QML with no chrome of their own, so a stylesheet
+ * reference on them would be a silent no-op; see
+ * docs/designs/unify-widget-style-handling.md's Open Questions). Shared by
+ * buildWidget() AND buildAndAppendWidgets()'s hand-rolled top-level-section
+ * construction — section widgets are NOT built via buildWidget(), so this
+ * must be called from both sites rather than folded into buildWidget()
+ * alone (a lesson from TODO-037: container-transparency logic in this file
+ * already has more than one construction path for the same widget type).
+ * Only checks whether style: was WRITTEN here — validating that the name
+ * refers to an actually-declared stylesheet happens in a post-pass in
+ * YamlParser::parse(), once the full style: block (stylesOut) and the full
+ * flat widget list both exist. */
+static void parseStyleProp(const YAML::Node& node, const std::string& key,
+                           WidgetType type, QVariantMap& props, Diags& diags)
+{
+    if (!node["style"] || !node["style"].IsScalar()) return;
+    if (type == WidgetType::Row || type == WidgetType::Grid ||
+        type == WidgetType::Dpad || type == WidgetType::Button) {
+        diag(diags, Severity::Error, key, "style",
+             QStringLiteral("style: is not supported on '%1' widgets yet")
+                 .arg(widgetTypeName(type)));
+    } else {
+        props[QStringLiteral("style")] = nodeStr(node, "style");
+    }
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
  *  Widget ID assignment
  * ══════════════════════════════════════════════════════════════════════════ */
@@ -289,13 +317,13 @@ static int buildWidget(const std::string& key,
     case WidgetType::Display: {
         w.props[QStringLiteral("unit")]   = nodeStr(node, "unit");
         w.props[QStringLiteral("format")] = nodeStr(node, "format", QStringLiteral("%.2f"));
-        QString style = nodeStr(node, "style", QStringLiteral("default"));
-        if (!inEnum(style, UDisplaySchema::kDisplayStyles)) {
-            diag(diags, Severity::Error, key, "style",
-                 QStringLiteral("unknown display style '%1'; valid values: default, large")
-                     .arg(style));
+        QString displayStyle = nodeStr(node, "displayStyle", QStringLiteral("default"));
+        if (!inEnum(displayStyle, UDisplaySchema::kDisplayStyles)) {
+            diag(diags, Severity::Error, key, "displayStyle",
+                 QStringLiteral("unknown displayStyle '%1'; valid values: default, large")
+                     .arg(displayStyle));
         }
-        w.props[QStringLiteral("style")] = style;
+        w.props[QStringLiteral("displayStyle")] = displayStyle;
         break;
     }
 
@@ -420,13 +448,13 @@ static int buildWidget(const std::string& key,
 
     case WidgetType::Label: {
         w.props[QStringLiteral("text")] = nodeStr(node, "text");
-        QString style = nodeStr(node, "style", QStringLiteral("body"));
-        if (!inEnum(style, UDisplaySchema::kLabelStyles)) {
-            diag(diags, Severity::Error, key, "style",
-                 QStringLiteral("unknown label style '%1'; valid values: heading, body, caption")
-                     .arg(style));
+        QString labelStyle = nodeStr(node, "labelStyle", QStringLiteral("body"));
+        if (!inEnum(labelStyle, UDisplaySchema::kLabelStyles)) {
+            diag(diags, Severity::Error, key, "labelStyle",
+                 QStringLiteral("unknown labelStyle '%1'; valid values: heading, body, caption")
+                     .arg(labelStyle));
         }
-        w.props[QStringLiteral("style")] = style;
+        w.props[QStringLiteral("labelStyle")] = labelStyle;
         w.props[QStringLiteral("labelAlign")] = parseAlign(node, key, "textAlign", kLabelAligns, diags);
         break;
     }
@@ -449,6 +477,8 @@ static int buildWidget(const std::string& key,
     default:
         break;
     }
+
+    parseStyleProp(node, key, w.type, w.props, diags);
 
     /* debug_state: optional design-mode preview value, per-type coercion.
      * Per-field try-catch so a type mismatch emits a Warning instead of
@@ -646,6 +676,7 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
                 collapsible = node["collapsible"].as<bool>();
             s.props[QStringLiteral("collapsible")] = collapsible;
             s.parentId = parentId;
+            parseStyleProp(node, key, s.type, s.props, diags);
             out.append(s);
             int sectionRow = out.size() - 1;
             if (node["widgets"] && node["widgets"].IsMap())
@@ -838,6 +869,22 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
 
     widgetsOut.clear();
     buildAndAppendWidgets(widgets, idMap, /*parentId=*/-1, widgetsOut, m_diagnostics);
+
+    /* style: name validation — a post-pass over the fully-built flat list,
+     * now that stylesOut (the full named-stylesheet registry, parsed before
+     * widgets: — see this file's header) is available. Each widget's own
+     * buildWidget() call already decided WHETHER style: is syntactically
+     * allowed on its type; this pass only checks that a present name
+     * actually refers to a declared stylesheet. */
+    for (const WidgetDef& w : widgetsOut) {
+        if (!w.props.contains(QStringLiteral("style"))) continue;
+        const QString name = w.props.value(QStringLiteral("style")).toString();
+        if (!stylesOut.contains(name)) {
+            diag(m_diagnostics, Severity::Error, w.keyPath.toStdString(), "style",
+                 QStringLiteral("unknown stylesheet '%1' — not declared in the top-level "
+                                "style: block").arg(name));
+        }
+    }
 
     /* Any Error diagnostic is fatal — report the first one. */
     for (const auto& d : m_diagnostics) {

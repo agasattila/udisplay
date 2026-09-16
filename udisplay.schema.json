@@ -105,6 +105,12 @@
       "default": "left"
     },
 
+    "styleProp": {
+      "description": "Optional reference to a named stylesheet defined in the top-level style: block. The widget renders using that stylesheet's color tokens instead of the app-wide active style. Not supported on row/grid/dpad/button — those render no chrome of their own, so a reference would be a no-op. Must name a stylesheet actually declared in style: (enforced by udisplay-gen's semantic validation, not expressible in JSON Schema alone).",
+      "type": "string",
+      "minLength": 1
+    },
+
     "displayWidget": {
       "description": "Numeric read-only display. Renders the latest value pushed by the device via STATE_UPDATE. No user interaction.",
       "type": "object",
@@ -127,12 +133,13 @@
           "type": "string",
           "maxLength": 32
         },
-        "style": {
+        "displayStyle": {
           "description": "Rendering style. `large` renders as a full-width hero block with a 32px bold value — intended for primary instrument readings.",
           "type": "string",
           "enum": ["default", "large"],
           "default": "default"
         },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" },
         "debug_state": {
@@ -159,6 +166,7 @@
           "type": "string",
           "pattern": "^#[0-9a-fA-F]{6}$"
         },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" },
         "debug_state": {
@@ -180,6 +188,7 @@
           "type": "string",
           "maxLength": 32
         },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" },
         "debug_state": {
@@ -301,6 +310,7 @@
           },
           "minProperties": 2
         },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
       }
@@ -352,6 +362,7 @@
           "type": "string",
           "maxLength": 16
         },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" },
         "debug_state": {
@@ -373,6 +384,7 @@
           "type": "string",
           "maxLength": 32
         },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" },
         "debug_state": {
@@ -412,6 +424,7 @@
           "maximum": 255,
           "default": 255
         },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" },
         "debug_state": {
@@ -446,6 +459,7 @@
           },
           "minProperties": 2
         },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" },
         "debug_state": {
@@ -468,12 +482,13 @@
           "minLength": 1,
           "maxLength": 255
         },
-        "style": {
+        "labelStyle": {
           "description": "Text style. `heading` = bold, larger. `body` = normal weight (default). `caption` = small, muted.",
           "type": "string",
           "enum": ["heading", "body", "caption"],
           "default": "body"
         },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" },
         "textAlign": { "$ref": "#/$defs/labelAlignProp" }
@@ -487,6 +502,7 @@
       "additionalProperties": false,
       "properties": {
         "type": { "const": "separator" },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
       }
@@ -510,6 +526,7 @@
           "default": false
         },
         "widgets": { "$ref": "#/$defs/widgetMap" },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
       }

@@ -35,6 +35,7 @@ Item {
         property string state: "disconnected"
         property string designErrorString: ""
         property string errorString: ""
+        property var parseWarnings: []
         property var widgetModel: []
         property var activeStyle: QtObject {
             property string background:   "#123456"

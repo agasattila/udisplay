@@ -339,6 +339,20 @@ void DeviceController::setActiveStyle(const QString& name)
     emit activeStyleChanged();
 }
 
+QVariantMap DeviceController::effectiveStyleFor(int row)
+{
+    QModelIndex idx = m_model.index(row);
+    if (!idx.isValid())
+        return m_activeStyleMap;
+
+    const QString name = m_model.data(idx, WidgetModel::PropsRole).toMap()
+                              .value(QStringLiteral("style")).toString();
+    if (name.isEmpty() || !m_styles.contains(name))
+        return m_activeStyleMap;
+
+    return buildStyleVariantMap(m_styles.value(name));
+}
+
 /* ── Shared YAML → model helper ─────────────────────────────────────────── */
 
 DeviceController::ApplyResult DeviceController::applyParsedYaml(
@@ -362,6 +376,29 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
      * protocol compatibility, so a rejected connection now surfaces YAML
      * warnings it silently swallowed before. */
     const QList<YamlParser::ParseDiagnostic>& diags = m_yamlParser.diagnostics();
+
+    /* TODO-040: m_parseWarnings is the readable, always-current counterpart
+     * to the parseWarningsChanged signal below — a QML element constructed
+     * AFTER this parse (not listening at emit time) can still see what
+     * happened by reading controller.parseWarnings directly. Updated
+     * unconditionally (including back to empty, clearing stale warnings
+     * once fixed), but the signal itself only fires on an actual
+     * transition (new diagnostics, OR prior diagnostics now cleared) —
+     * preserves the existing "no signal for a clean parse with nothing to
+     * clear" contract (bootstrap_cleanYaml_noParseWarningsChanged). */
+    const bool hadPriorWarnings = !m_parseWarnings.isEmpty();
+    QVariantList warnings;
+    for (const auto& d : diags) {
+        QVariantMap w;
+        w[QStringLiteral("severity")]  = d.severity == YamlParser::Severity::Error
+                                              ? QStringLiteral("error") : QStringLiteral("warning");
+        w[QStringLiteral("widgetKey")] = d.widgetKey;
+        w[QStringLiteral("field")]     = d.field;
+        w[QStringLiteral("message")]   = d.message;
+        warnings.append(w);
+    }
+    m_parseWarnings = warnings;
+
     if (!diags.isEmpty()) {
         if (!designMode) {
             for (const auto& d : diags) {
@@ -372,6 +409,8 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
                          qPrintable(d.message));
             }
         }
+        emit parseWarningsChanged(diags);
+    } else if (hadPriorWarnings) {
         emit parseWarningsChanged(diags);
     }
 

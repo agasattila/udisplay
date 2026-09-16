@@ -65,6 +65,13 @@ if(QML_EXECUTABLE)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         TIMEOUT 10)
 
+    add_test(NAME test_qml_device_screen_warning_banner
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_device_screen_warning_banner.qml")
+    set_tests_properties(test_qml_device_screen_warning_banner PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10)
+
     add_test(NAME test_qml_button_face_children
              COMMAND ${QML_EXECUTABLE} -platform offscreen
                      "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_button_face_children.qml")
@@ -132,6 +139,14 @@ if(QML_EXECUTABLE)
     set_tests_properties(test_qml_version_label_visibility PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         TIMEOUT 10)
+
+    add_test(NAME test_qml_style_resolution
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_style_resolution.qml")
+    set_tests_properties(test_qml_style_resolution PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10
+        FAIL_REGULAR_EXPRESSION "Unable to assign .* to QColor")
 else()
     message(STATUS "qml executable not found — skipping QML layout regression tests")
 endif()

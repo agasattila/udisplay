@@ -63,7 +63,7 @@ static WidgetDef makeDisplay(uint8_t id)
     w.label    = QStringLiteral("Voltage");
     w.props[QStringLiteral("unit")]   = QStringLiteral("V");
     w.props[QStringLiteral("format")] = QStringLiteral("%.3f");
-    w.props[QStringLiteral("style")]  = QStringLiteral("large");
+    w.props[QStringLiteral("displayStyle")]  = QStringLiteral("large");
     return w;
 }
 
@@ -390,7 +390,7 @@ private slots:
         QVariantMap props = roleAt(m, 0, WidgetModel::PropsRole).toMap();
         QCOMPARE(props[QStringLiteral("unit")].toString(),   QStringLiteral("V"));
         QCOMPARE(props[QStringLiteral("format")].toString(), QStringLiteral("%.3f"));
-        QCOMPARE(props[QStringLiteral("style")].toString(),  QStringLiteral("large"));
+        QCOMPARE(props[QStringLiteral("displayStyle")].toString(),  QStringLiteral("large"));
     }
 
     void data_propsRole_button()
@@ -546,13 +546,13 @@ private slots:
         w.widgetId = 0;
         w.type     = WidgetType::Label;
         w.props[QStringLiteral("text")]  = QStringLiteral("Hello");
-        w.props[QStringLiteral("style")] = QStringLiteral("heading");
+        w.props[QStringLiteral("labelStyle")] = QStringLiteral("heading");
 
         WidgetModel m;
         m.setWidgets({ w });
         QVariantMap props = roleAt(m, 0, WidgetModel::PropsRole).toMap();
         QCOMPARE(props[QStringLiteral("text")].toString(),  QStringLiteral("Hello"));
-        QCOMPARE(props[QStringLiteral("style")].toString(), QStringLiteral("heading"));
+        QCOMPARE(props[QStringLiteral("labelStyle")].toString(), QStringLiteral("heading"));
     }
 
     /* ── childModel(): children as a real model, not props["items"] ───── */
