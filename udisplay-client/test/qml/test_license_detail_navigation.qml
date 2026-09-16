@@ -136,6 +136,13 @@ Item {
         Qt.callLater(step2_tapFirstDependency)
     }
 
+    property int firstDelegatePollAttempts: 0
+
+    // ListView only materializes delegate items once it runs a layout/polish
+    // pass, which isn't guaranteed to have happened by the next event-loop
+    // tick after StackView.push() -- a single Qt.callLater can race it (seen
+    // passing locally but failing in CI on a newer Qt). Poll with a bounded
+    // timeout instead of assuming a fixed delay is enough.
     function step2_tapFirstDependency() {
         var localStack = findByObjectName(mainWindow.contentItem, "discoveryLocalStack")
         if (!localStack || localStack.depth !== 2) {
@@ -152,11 +159,29 @@ Item {
         }
 
         var firstRow = depList.itemAtIndex(0)
-        if (!firstRow) {
-            fail("could not find delegate item at index 0 of licensesDependencyList")
+        if (firstRow) {
+            firstDelegatePollAttempts = 0
+            tapFirstDependency(firstRow)
             return
         }
 
+        firstDelegatePollAttempts++
+        if (firstDelegatePollAttempts > 50) {
+            fail("could not find delegate item at index 0 of licensesDependencyList")
+            return
+        }
+        firstDelegatePollTimer.depList = depList
+        firstDelegatePollTimer.start()
+    }
+
+    Timer {
+        id: firstDelegatePollTimer
+        interval: 20
+        property var depList: null
+        onTriggered: step2_tapFirstDependency()
+    }
+
+    function tapFirstDependency(firstRow) {
         // ItemDelegate is an AbstractButton -- invoking clicked() directly
         // fires the same onClicked handler a real tap would, exercising the
         // pushDetail callback DiscoveryScreen.qml wires into LicensesScreen.
