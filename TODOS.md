@@ -119,9 +119,12 @@ message *bytes* for this, but not *behavior over time* (when does a heartbeat
 miss get forgiven vs. counted, what's the exact reassembly-buffer-overflow
 contract).
 **Pros:** Closes the same risk class TODO-001 already closed for byte layout,
-for the piece that class doesn't cover. Makes `libudisplay.c` the documented
-reference instead of tribal C-reading knowledge for the next port (or the
-next contributor touching the heartbeat logic).
+for the piece that class doesn't cover. Makes protocol *behavior* — not just
+byte layout — an authoritative written spec, the same role `docs/protocol.md`
+already plays for wire format, with `libudisplay.c` and `udisplay_runtime.py`
+both checked against it as independent implementations, instead of tribal
+C-reading knowledge for the next port (or the next contributor touching the
+heartbeat logic).
 **Cons:** Real scope — a behavior/timing spec is harder to keep accurate than
 a byte-layout spec, and can go stale if only one implementation changes
 without the doc being updated alongside it.
