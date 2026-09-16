@@ -215,6 +215,11 @@ jobs:
         uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
         with:
           version: "${{ env.QT_VERSION }}"
+          # aqt's index moved mobile-target (android/ios/wasm) packages to the
+          # host-independent "all_os" category as of Qt 6.8 — without this,
+          # install-qt-action defaults to the runner OS ("linux"), whose
+          # android listing stops at 6.7.3 and 404s on newer versions.
+          host: "all_os"
           target: "android"
           arch: "android_arm64_v8a"
           modules: "qtconnectivity qttasktree"
