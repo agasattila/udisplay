@@ -19,7 +19,7 @@ Page {
      * hamburger-menu local stack when a device connects.
      *
      * main.qml's root StackView only ever pushes DeviceScreen OVER this
-     * DiscoveryScreen instance (main.qml:41 `stack.push(deviceScreen)`) and
+     * DiscoveryScreen instance (main.qml:43 `stack.push(deviceScreen)`) and
      * later pops back to this SAME instance (`stack.pop(null)`) -- it is
      * never destroyed/recreated. Without this reset, a device that connects
      * while the user is 2-3 levels deep in localStack (About/Licenses/
@@ -206,6 +206,7 @@ Page {
 
                     ListView {
                         id: deviceList
+                        objectName: "discoveryDeviceList"
                         Layout.fillWidth: true
                         implicitHeight: Math.min(contentHeight, 220)
                         model: discoveryModel
@@ -302,6 +303,7 @@ Page {
                         /* -- Host input -- */
                         TextField {
                             id: hostField
+                            objectName: "discoveryHostField"
                             Layout.fillWidth: true
                             implicitHeight: 40
                             padding: 8
@@ -344,6 +346,7 @@ Page {
                         /* -- Port input -- */
                         TextField {
                             id: portField
+                            objectName: "discoveryPortField"
                             Layout.fillWidth: true
                             implicitHeight: 40
                             padding: 8
@@ -370,6 +373,7 @@ Page {
                     }
 
                     Button {
+                        objectName: "discoveryConnectButton"
                         Layout.fillWidth: true
                         text: controller.state === "connecting"    ? "Connecting…"
                             : controller.state === "bootstrapping" ? "Loading UI…"
@@ -387,6 +391,7 @@ Page {
 
                 /* ── Error banner ────────────────────────────────────────── */
                 Rectangle {
+                    objectName: "discoveryErrorBanner"
                     Layout.fillWidth: true
                     height: errorLabel.implicitHeight + 16
                     color: "#2d1a1a"
