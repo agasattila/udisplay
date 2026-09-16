@@ -65,13 +65,23 @@ Page {
      * whose Connections handler assumes `stack.depth === 1` means
      * "showing DiscoveryScreen" to decide when to auto-push DeviceScreen
      * on connect; pushing a menu screen there would desync that check
-     * and strand a connected user on About/Licenses. */
+     * and strand a connected user on About/Licenses.
+     *
+     * Both the back and hamburger buttons live in the top-LEFT corner
+     * (never top-right): main.qml's versionLabel is anchored top-right
+     * over the whole window (z: 1, visible whenever not "running"), so a
+     * top-right header button would sit underneath/overlap it. A trailing
+     * spacer mirrors whichever button is visible so the title's fillWidth
+     * region stays symmetric around the ToolBar's true center, instead of
+     * merely centered in the space left over after a one-sided button —
+     * reviewer-flagged issue on PR #21. */
     header: ToolBar {
         Material.background: "#1a1a2e"
         RowLayout {
             anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
 
             ToolButton {
+                id: backButton
                 objectName: "discoveryBackButton"
                 text: "‹"
                 font.pixelSize: 20
@@ -79,19 +89,8 @@ Page {
                 onClicked: localStack.pop()
             }
 
-            Label {
-                objectName: "discoveryHeaderTitle"
-                Layout.fillWidth: true
-                text: localStack.depth > 1 ? localStack.currentItem.pageTitle
-                                            : "uDisplay"
-                font.pixelSize: localStack.depth > 1 ? 16 : 18
-                font.bold: true
-                color: "#00d4aa"
-                elide: Text.ElideRight
-                horizontalAlignment: Text.AlignHCenter
-            }
-
             ToolButton {
+                id: menuButton
                 objectName: "discoveryMenuButton"
                 text: "☰"
                 font.pixelSize: 20
@@ -113,6 +112,26 @@ Page {
                         onTriggered: localStack.push(licensesScreenComponent)
                     }
                 }
+            }
+
+            Label {
+                objectName: "discoveryHeaderTitle"
+                Layout.fillWidth: true
+                text: localStack.depth > 1 ? localStack.currentItem.pageTitle
+                                            : "uDisplay"
+                font.pixelSize: localStack.depth > 1 ? 16 : 18
+                font.bold: true
+                color: "#00d4aa"
+                elide: Text.ElideRight
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            /* Mirrors the visible left-side button's width so the title
+             * above is centered in the full ToolBar, not just in the
+             * space remaining after a single left-side button. */
+            Item {
+                Layout.preferredWidth: localStack.depth > 1 ? backButton.width
+                                                             : menuButton.width
             }
         }
     }
