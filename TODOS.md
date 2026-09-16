@@ -128,21 +128,21 @@ alongside the protocol port (Next Steps item 3 in the MicroPython design doc).
 
 ### TODO-005: QML UI test coverage (v1.1)
 **Status:** ⚠️ PARTIALLY DONE (organically, not as this task) — `udisplay-client/test/qml/`
-exists with 9 tests wired into CTest (`test/CMakeLists.txt`), but every one of them is a
+exists with 22 tests wired into CTest (`test/CMakeLists.txt`), but every one of them is a
 one-off regression test pinned to a specific bug found during development, not the
 systematic sweep this TODO scoped:
 - Covered incidentally: Row/Grid flex/align/nesting math (4 tests), button-face
   composition (3 tests), global-stylesheet reaching page chrome (1 test), version-label/
-  status-dot overlap (1 test).
+  status-dot overlap (1 test), style resolution (1 test).
 - **Discovery screen:** hamburger menu + About/Licenses/LicenseDetail navigation covered
   (`test_discovery_menu_navigation.qml`, `test_license_detail_navigation.qml`,
-  `test_discovery_menu_reset_on_connect.qml`, plus the GitHub/project-link failure-path
-  assertions folded into the first two), and the base "connect" content — device-list
-  ListView rendering, manual TCP host/port entry, the error banner — is now covered too
-  (`test_discovery_content_screen.qml`, added when that content moved into its own
-  StackView component during the issue #14 work). Remaining gap: tapping a discovered
-  device row (`connectDiscovered`) and the `"connecting"`/`"bootstrapping"` Connect-button
-  sub-states are still untested.
+  `test_discovery_menu_reset_on_connect.qml`, `test_discovery_menu_reset_on_error.qml`,
+  plus the GitHub/project-link failure-path assertions folded into the first two), and the
+  base "connect" content — device-list ListView rendering, manual TCP host/port entry, the
+  error banner — is now covered too (`test_discovery_content_screen.qml`, added when that
+  content moved into its own StackView component during the issue #14 work). Remaining
+  gap: tapping a discovered device row (`connectDiscovered`) and the
+  `"connecting"`/`"bootstrapping"` Connect-button sub-states are still untested.
 - **Bootstrap flow:** not covered in QML at all (covered in C++ via `test_bootstrap.cpp`/
   `test_device_controller.cpp`, but that's not a QML/UI test).
 - **Widget rendering, all types:** only the widgets that happened to be a bug-fix vehicle
