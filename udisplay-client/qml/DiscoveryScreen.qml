@@ -15,7 +15,19 @@ Page {
     Component.onCompleted:  discoveryModel.startScan()
     Component.onDestruction: discoveryModel.stopScan()
 
-    /* Stop scanning while a connection attempt is in progress */
+    /* Stop scanning while a connection attempt is in progress; reset the
+     * hamburger-menu local stack when a device connects.
+     *
+     * main.qml's root StackView only ever pushes DeviceScreen OVER this
+     * DiscoveryScreen instance (main.qml:41 `stack.push(deviceScreen)`) and
+     * later pops back to this SAME instance (`stack.pop(null)`) -- it is
+     * never destroyed/recreated. Without this reset, a device that connects
+     * while the user is 2-3 levels deep in localStack (About/Licenses/
+     * LicenseDetail) leaves that state untouched underneath DeviceScreen;
+     * on the next disconnect, DiscoveryScreen reappears exactly as left --
+     * stuck on a submenu with the hamburger button hidden
+     * (`visible: localStack.depth === 1`), instead of the device list the
+     * user expects to reconnect from. Found by adversarial review. */
     Connections {
         target: controller
         function onStateChanged() {
@@ -25,6 +37,11 @@ Page {
             else if (controller.state === "disconnected" ||
                      controller.state === "error")
                 discoveryModel.startScan()
+
+            if (controller.state === "running") {
+                menu.close()
+                localStack.pop(null)
+            }
         }
     }
 

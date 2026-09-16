@@ -210,7 +210,14 @@ freely, subject to the following restrictions:
  * udisplay-client/CMakeLists.txt's find_package()/FetchContent_Declare()
  * calls and each dependency's actual LICENSE file / package copyright
  * metadata — not guessed. Qt6::Bluetooth (BLE transport) is an optional
- * component of the same Qt6 entry, not a separate dependency. */
+ * component of the same Qt6 entry, not a separate dependency.
+ *
+ * `.pragma library` makes this array a singleton shared for the QML
+ * engine's whole process lifetime. LicensesScreen.qml hands entries to
+ * LicenseDetailScreen.qml BY REFERENCE, not by copy — nothing currently
+ * writes to a pushed `dependency`'s properties, and it must stay that way;
+ * a future write would silently corrupt this shared static data for the
+ * rest of the app's life. */
 var dependencies = [
     {
         name: "Qt6",
