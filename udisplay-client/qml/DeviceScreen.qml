@@ -99,12 +99,19 @@ Page {
      * parse already happened — see DeviceController.h's parseWarnings doc. */
     Rectangle {
         id: warningBanner
+        objectName: "warningBanner"
         anchors { top: parent.top; left: parent.left; right: parent.right }
         visible: controller.parseWarnings.length > 0 && !warningBanner.dismissed
         property bool dismissed: false
-        /* Re-show on the next parse that actually has something to say —
-         * a fixed-then-broken-again YAML shouldn't stay silently dismissed. */
-        onVisibleChanged: if (visible) dismissed = false
+        /* Re-arm on every parse (not just when visible flips true) — dismissed
+         * stayed true across a subsequent parse that also produced warnings,
+         * since visible never toggled to trigger a reset. parseWarningsChanged
+         * fires on every parse, including one that clears to empty, so this
+         * also harmlessly resets dismissed when there's nothing to show. */
+        Connections {
+            target: controller
+            function onParseWarningsChanged() { warningBanner.dismissed = false }
+        }
         height: visible ? bannerContent.implicitHeight + 16 : 0
         color: "#3a2a00"
         z: 2
