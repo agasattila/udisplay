@@ -239,6 +239,13 @@ jobs:
       #    trusting whatever the runner's preinstalled SDK/NDK resolves to.
       - name: Set up Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          # Action defaults to "tools platform-tools" — the legacy "tools"
+          # package has been pulled from Google's SDK repository, so
+          # `sdkmanager tools` 404s and fails the whole step. We never use
+          # legacy tools (NDK is installed explicitly below); only
+          # platform-tools is actually needed.
+          packages: "platform-tools"
 
       - name: Cache Android NDK
         id: cache_ndk
