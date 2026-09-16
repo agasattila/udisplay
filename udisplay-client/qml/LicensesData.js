@@ -206,7 +206,8 @@ freely, subject to the following restrictions:
    misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.`
 
-/* Third-party components bundled into udisplay-client. Verified against
+/* uDisplay Client's own license, followed by the third-party components it
+ * bundles. The dependency list is verified against
  * udisplay-client/CMakeLists.txt's find_package()/FetchContent_Declare()
  * calls and each dependency's actual LICENSE file / package copyright
  * metadata — not guessed. Qt6::Bluetooth (BLE transport) is an optional
@@ -219,6 +220,14 @@ freely, subject to the following restrictions:
  * a future write would silently corrupt this shared static data for the
  * rest of the app's life. */
 var dependencies = [
+    {
+        name: "uDisplay Client",
+        role: "This application",
+        url: "https://github.com/agasattila/udisplay",
+        copyright: "Copyright (c) 2026 Attila Agas",
+        licenseName: "GNU Lesser General Public License v3.0",
+        licenseText: LICENSE_LGPL3
+    },
     {
         name: "Qt6",
         role: "Application/UI toolkit (Core, Qml, Quick, QuickControls2, Network, Sql, Bluetooth)",

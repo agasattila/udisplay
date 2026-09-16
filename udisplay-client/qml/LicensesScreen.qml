@@ -6,9 +6,10 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "LicensesData.js" as LicensesData
 
-/* Pushed onto DiscoveryScreen's local StackView. Lists third-party
- * components; tapping one pushes LicenseDetailScreen.qml (also on the same
- * local stack) showing that dependency's full license text. */
+/* Pushed onto DiscoveryScreen's local StackView. Lists uDisplay Client's own
+ * license plus every third-party component it bundles; tapping one pushes
+ * LicenseDetailScreen.qml (also on the same local stack) showing that
+ * entry's full license text. */
 Item {
     id: root
     readonly property string pageTitle: "Licenses"
@@ -21,7 +22,7 @@ Item {
         Label {
             Layout.fillWidth: true
             Layout.margins: 16
-            text: "Third-party components used by uDisplay Client:"
+            text: "uDisplay Client and the third-party components it uses:"
             wrapMode: Text.WordWrap
             font.pixelSize: 13
             color: "#888"

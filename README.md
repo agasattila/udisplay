@@ -98,8 +98,9 @@ Copyright (c) 2026 Attila Agas
 | **demos** | MIT | `MIT` |
 
 Full license texts are in [`LICENSES/`](LICENSES/). The client app also surfaces
-this under its discovery screen's ☰ menu → **Licenses**, with the verbatim license
-text for each bundled dependency (Qt6, QtZeroConf, yaml-cpp, zlib).
+this under its discovery screen's ☰ menu → **Licenses**, with its own license plus
+the verbatim license text for each bundled dependency (Qt6, QtZeroConf, yaml-cpp,
+zlib).
 
 ### udisplay-client distribution note
 

@@ -8,7 +8,7 @@ import "../../qml/LicensesData.js" as LicensesData
  *
  * test_discovery_menu_navigation.qml already covers menu -> About -> back
  * and menu -> Licenses -> back at the LIST level (it asserts the dependency
- * list has 4 entries, but never taps a row). This test picks up from there:
+ * list has 5 entries, but never taps a row). This test picks up from there:
  * it taps the first dependency row, verifying the `pushDetail` callback
  * DiscoveryScreen.qml wires into LicensesScreen actually pushes
  * LicenseDetailScreen.qml onto the local stack (depth 3) with the right
@@ -152,8 +152,9 @@ Item {
         }
 
         var depList = findByObjectName(mainWindow.contentItem, "licensesDependencyList")
-        if (!depList || depList.count !== 4) {
-            fail("expected LicensesScreen's dependency list to have 4 entries, got " +
+        if (!depList || depList.count !== 5) {
+            fail("expected LicensesScreen's dependency list to have 5 entries " +
+                 "(uDisplay Client + 4 third-party), got " +
                  (depList ? depList.count : "<not found>"))
             return
         }

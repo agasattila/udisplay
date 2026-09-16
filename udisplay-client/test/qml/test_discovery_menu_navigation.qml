@@ -257,8 +257,9 @@ Item {
         }
 
         var depList = findByObjectName(mainWindow.contentItem, "licensesDependencyList")
-        if (!depList || depList.count !== 4) {
-            fail("expected LicensesScreen's dependency list to have 4 entries, got " +
+        if (!depList || depList.count !== 5) {
+            fail("expected LicensesScreen's dependency list to have 5 entries " +
+                 "(uDisplay Client + 4 third-party), got " +
                  (depList ? depList.count : "<not found>"))
             return
         }
