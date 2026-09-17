@@ -9,6 +9,7 @@
 #include <QVariant>
 
 #ifdef Q_OS_ANDROID
+#include <QCoreApplication>
 // #include <QtCore/private/qandroidextras_p.h>
 #endif
 
