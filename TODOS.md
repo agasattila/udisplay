@@ -66,7 +66,7 @@ while, and CI time/reliability becoming a real friction point.
 
 ## P1 — Blocking / Risk Validation
 
-### TODO-055: MicroPython backend disconnect->reconnect test
+### TODO-060: MicroPython backend disconnect->reconnect test
 **What:** A test exercising the full lifecycle of one `UDisplayDevice`/`TcpRx`
 instance across a disconnect followed by a fresh connect: `on_disconnect()`
 then a new `on_connect()` on the same object, confirming reassembly buffer
