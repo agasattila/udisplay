@@ -576,11 +576,23 @@ def test_style_implicit_default_accepted():
     assert validate(doc, SCHEMA) == []
 
 
-def test_style_on_row_rejected_by_schema():
+def test_style_on_row_accepted():
+    """Container-level style cascading (docs/designs/container-style-cascading.md):
+    row/grid/dpad now accept style: as a cascade root, even though they still
+    render no chrome of their own."""
     doc = {
         "device": {"name": "x"},
+        "style": {"alarm": {"accent": "#ff0000"}},
         "widgets": {"r": {"type": "row", "style": "alarm",
                            "widgets": {"a": {"type": "toggle"}}}},
+    }
+    assert validate(doc, SCHEMA) == []
+
+
+def test_style_on_button_rejected_by_schema():
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {"b": {"type": "button", "style": "alarm"}},
     }
     errors = schema_errors(doc, SCHEMA)
     assert errors
