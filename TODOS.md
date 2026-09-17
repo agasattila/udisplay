@@ -66,6 +66,30 @@ while, and CI time/reliability becoming a real friction point.
 
 ## P1 — Blocking / Risk Validation
 
+### TODO-055: MicroPython backend disconnect->reconnect test
+**What:** A test exercising the full lifecycle of one `UDisplayDevice`/`TcpRx`
+instance across a disconnect followed by a fresh connect: `on_disconnect()`
+then a new `on_connect()` on the same object, confirming reassembly buffer
+state, `comms_miss_count`, and handshake state are all correctly reset for
+the second connection rather than carrying over stale state from the first.
+**Why:** The MicroPython backend design's Test Plan (v0) called for this
+case explicitly; it was the one NOT DONE item the Plan Completion Audit
+found when `/ship` ran the Test Plan/Success Criteria check against
+`docs/designs/micropython-backend.md`. Every other item in the design's
+Next Steps/Test Plan/Success Criteria was DONE or CHANGED-with-reason.
+**Context:** Decided during `/ship` of `feature/micropython-backend`
+(2026-09-11) — user chose to ship without this test rather than block the
+PR on it, with the explicit condition that it becomes a tracked P1 TODO. The
+single-connection demo04 server currently only exercises one connect/feed/
+disconnect cycle per process lifetime, so a second connection reusing the
+same `UDisplayDevice` object (as opposed to a fresh one, which `main.py`'s
+`run()` actually does per-connection today) is untested.
+**Effort:** S (human: ~1-2h / CC: ~20 min)
+**Priority:** P1
+**Depends on:** Nothing blocking.
+
+---
+
 ### TODO-002: iOS BLE validation (Qt6)
 **What:** Build a minimal Qt6 iOS test app that scans for and connects to an ESP32 BLE GATT service. Confirm Qt6 Bluetooth works on iOS without native CoreBluetooth bridging.
 **Why:** If Qt6 BLE on iOS is broken/insufficient, the iOS strategy must pivot to native Swift.
@@ -95,9 +119,12 @@ message *bytes* for this, but not *behavior over time* (when does a heartbeat
 miss get forgiven vs. counted, what's the exact reassembly-buffer-overflow
 contract).
 **Pros:** Closes the same risk class TODO-001 already closed for byte layout,
-for the piece that class doesn't cover. Makes `libudisplay.c` the documented
-reference instead of tribal C-reading knowledge for the next port (or the
-next contributor touching the heartbeat logic).
+for the piece that class doesn't cover. Makes protocol *behavior* — not just
+byte layout — an authoritative written spec, the same role `docs/protocol.md`
+already plays for wire format, with `libudisplay.c` and `udisplay_runtime.py`
+both checked against it as independent implementations, instead of tribal
+C-reading knowledge for the next port (or the next contributor touching the
+heartbeat logic).
 **Cons:** Real scope — a behavior/timing spec is harder to keep accurate than
 a byte-layout spec, and can go stale if only one implementation changes
 without the doc being updated alongside it.
@@ -111,6 +138,95 @@ what's already true, not fixing anything broken.
 blocking the design itself.
 **Depends on:** None — can start any time; most useful if written before or
 alongside the protocol port (Next Steps item 3 in the MicroPython design doc).
+
+### TODO-056: WIDGET_ID collision for punctuation-normalized widget names (MicroPython backend)
+**What:** `python_backend.py`'s `WIDGET_ID_{_macro_name(path)}` constant naming
+uses `_shared._macro_name()`, which collapses any run of non-alphanumeric
+characters to a single underscore and uppercases. Schema-valid but
+differently-punctuated widget names (e.g. `pump_rate` and `pump__rate`, or a
+child `pump.rate`) normalize to the same constant name, and Python silently
+lets the later definition overwrite the earlier one — aliasing two distinct
+widgets onto one wire ID and one event-dispatch branch.
+**Why:** Found by Codex during `/ship`'s adversarial review of
+`feature/micropython-backend` (2026-09-11). `_macro_name()` itself predates
+this branch (shared with `cpp_backend.py`'s naming), but `python_backend.py`
+is the first consumer that builds a widget-ID namespace directly keyed by
+its output and relies on uniqueness — the C++ backend doesn't generate
+`WIDGET_ID_*` constants the same way.
+**Status:** ✅ DONE — per PR10 review (agasattila, 2026-09-14), not deferred.
+`python_backend.py`'s `_validate_python_identifiers()` now rejects any two
+widget/dropdown-item names (including nested paths) that normalize to the
+same generated constant, with a clear error naming both. Regression tests in
+`test_python_backend.py::TestIdentifierValidation`.
+**Depends on:** Nothing blocking.
+
+---
+
+### TODO-057: Reserved keyword / lifecycle-method-name collisions in generated widget attributes (MicroPython backend)
+**What:** `python_backend.py` interpolates widget path segments directly into
+Python attribute/class names (e.g. `self.{path}`) with no check against
+Python keywords or `UDisplayDevice`/`UI` lifecycle method names. A widget
+named `class` produces invalid Python syntax; a widget named `feed`,
+`heartbeat`, or `on_connect` silently replaces the corresponding instance
+method with a widget object; `on_client_ready` replaces the callback slot
+itself, making the generated forwarding method call a non-callable widget.
+**Why:** Found by Codex during `/ship`'s adversarial review of
+`feature/micropython-backend` (2026-09-11). These names are all schema-valid
+today — `validate.py` has no keyword/API-name check for widget paths.
+**Status:** ✅ DONE — per PR10 review (agasattila, 2026-09-14), not deferred.
+`_validate_python_identifiers()` rejects Python keywords and names reserved
+by the generated `UI`/`ButtonWidget`/`ButtonGroupWidget` API surface, at both
+the top-level (`self.<path>` on `UI`) and sub-member (`self.<path>.<sub_key>`
+on a button/button-group instance) scopes. Regression tests in
+`test_python_backend.py::TestIdentifierValidation`.
+**Depends on:** Nothing blocking.
+
+---
+
+### TODO-058: NaN/Inf validation on inbound SLIDER_CHANGE floats (MicroPython backend)
+**What:** `_dispatch_event`'s SLIDER_CHANGE decode (`struct.unpack("<f", ...)`)
+never checks for NaN/Inf before handing the value to `on_change`. In
+demo04's `on_rate_change`, the clamp logic (`if v < 0.1: v = 0.1`) is a
+no-op for NaN (every NaN comparison is `False`), so a NaN payload
+permanently corrupts `_base_rate_hz`; downstream, the tick-rate gate
+(`if update_acc < period: continue`) also always evaluates `False` for a
+NaN period, silently inverting "wait for the interval" into "fire every
+poll."
+**Why:** Found by the Claude adversarial subagent during `/ship` of
+`feature/micropython-backend` (2026-09-11). v0 has no auth, so this is
+remotely triggerable by any TCP client, and self-recovers only if a later
+valid slider value overwrites the corrupted state.
+**Context:** Deferred rather than fixed inline — the right layer for the
+fix (runtime-level float validation vs. app-level rejection in generated
+code vs. left to each device application, as demo04 currently does) is a
+design call.
+**Effort:** S (human: ~1-2h / CC: ~15 min)
+**Priority:** P2
+**Depends on:** Nothing blocking.
+
+---
+
+### TODO-059: Broaden demo04's exception handling around the per-connection serve loop
+**What:** `demos/demo04/main.py`'s `run()` only catches `OSError` around
+`_serve_one_connection()`. Any other exception raised synchronously from a
+user callback invoked via `_dispatch_event` (e.g. an out-of-range
+dropdown/button-group SELECTION_CHANGE index, which is never bounds-checked
+before being handed to `on_change`) propagates uncaught and kills the whole
+device process, not just the one connection.
+**Why:** Found by the Claude adversarial subagent during `/ship` of
+`feature/micropython-backend` (2026-09-11). Given v0's no-auth design, any
+latent application-callback bug becomes a remote, unauthenticated
+full-process crash, not just a connection drop.
+**Context:** Deferred rather than fixed inline — broadening to `except
+Exception` in the reference demo is mechanical, but the right general
+policy (should the runtime library itself guard callback invocation, or is
+that an app-level decision every generated device makes for itself) wasn't
+settled during this `/ship`.
+**Effort:** XS (human: ~30 min / CC: ~10 min)
+**Priority:** P2
+**Depends on:** Nothing blocking.
+
+---
 
 ## P2 — Post-Launch Distribution & Quality
 

@@ -25,12 +25,12 @@ The **v2.x** series is planned to introduce an MVVM architecture together with W
 | Component | Status | Notes |
 |-----------|--------|-------|
 | **libudisplay** | ✅ Ready | |
-| **udisplay-gen** | 🚧 Functional, not yet complete | MicroPython backend is still missing. |
+| **udisplay-gen** | 🚧 Functional, not yet complete | MicroPython backend (`--lang micropython`) shipped, TCP-only/no-auth v0; BLE and HMAC auth still to come. |
 | **udisplay-client** | 🚧 TCP/mDNS stable, BLE functional but still being stabilized | Current development focus. Extensive testing and bug fixing are in progress. |
 | **demo01–03** | ✅ Ready | Simple Linux command-line TCP demonstrations. |
-| **demo04** | ⏳ Planned | Depends on the MicroPython backend in `udisplay-gen`. |
+| **demo04** | ✅ Ready | MicroPython PC emulator, matches demo01's simulation. |
 | **demo05** | ✅ Ready | Simple BLE demonstration for ESP32. |
-| **demo06** | ⏳ Planned | Additional BLE demonstration for ESP32. |
+| **demo06** | ⏳ Planned | Blocked on ESP8266 hardware availability, not the codegen backend. |
 
 ---
 
