@@ -671,6 +671,146 @@ private slots:
         QCOMPARE(dc.effectiveStyleFor(1).value(QStringLiteral("accent")).toString(),
                   QStringLiteral("#222222"));
     }
+
+    /* ── Container-level style cascading — docs/designs/container-style-cascading.md ── */
+
+    /* Rows are appended pre-order (buildWidget appends the container before
+     * recursing into its children — see YamlParser.cpp), so row 0 = outer,
+     * row 1 = middle, row 2 = leaf below. */
+    void effectiveStyleFor_cascadesThroughUnstyledIntermediateAncestor()
+    {
+        DeviceController dc;
+        injectBootstrap(dc,
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  alarm:\n"
+            "    accent: \"#e05555\"\n"
+            "widgets:\n"
+            "  outer:\n"
+            "    type: row\n"
+            "    style: alarm\n"
+            "    widgets:\n"
+            "      middle:\n"
+            "        type: row\n"
+            "        widgets:\n"
+            "          leaf:\n"
+            "            type: toggle\n");
+        QCOMPARE(dc.effectiveStyleFor(2).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#e05555"));
+    }
+
+    void effectiveStyleFor_explicitStyleWinsOverStyledAncestor()
+    {
+        DeviceController dc;
+        injectBootstrap(dc,
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  alarm:\n"
+            "    accent: \"#e05555\"\n"
+            "  night:\n"
+            "    accent: \"#111111\"\n"
+            "widgets:\n"
+            "  outer:\n"
+            "    type: row\n"
+            "    style: alarm\n"
+            "    widgets:\n"
+            "      leaf:\n"
+            "        type: toggle\n"
+            "        style: night\n");
+        QCOMPARE(dc.effectiveStyleFor(1).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#111111"));
+    }
+
+    void effectiveStyleFor_nearestStyledAncestorWins()
+    {
+        DeviceController dc;
+        injectBootstrap(dc,
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  alarm:\n"
+            "    accent: \"#e05555\"\n"
+            "  warning:\n"
+            "    accent: \"#f5a623\"\n"
+            "widgets:\n"
+            "  outer:\n"
+            "    type: row\n"
+            "    style: alarm\n"
+            "    widgets:\n"
+            "      middle:\n"
+            "        type: row\n"
+            "        style: warning\n"
+            "        widgets:\n"
+            "          leaf:\n"
+            "            type: toggle\n");
+        /* rows: outer=0, middle=1, leaf=2 */
+        QCOMPARE(dc.effectiveStyleFor(2).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#f5a623"));
+    }
+
+    void effectiveStyleFor_outsideAnyStyledContainer_followsActiveStyle()
+    {
+        DeviceController dc;
+        injectBootstrap(dc,
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  alarm:\n"
+            "    accent: \"#e05555\"\n"
+            "widgets:\n"
+            "  outer:\n"
+            "    type: row\n"
+            "    style: alarm\n"
+            "    widgets:\n"
+            "      leaf:\n"
+            "        type: toggle\n"
+            "  sibling:\n"
+            "    type: toggle\n");
+        /* rows: outer=0, leaf=1, sibling=2 (sibling has no styled ancestor) */
+        dc.setActiveStyle(QStringLiteral("alarm"));
+        QCOMPARE(dc.effectiveStyleFor(2).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#e05555"));
+        dc.setActiveStyle(QStringLiteral("default"));
+        QCOMPARE(dc.effectiveStyleFor(2).value(QStringLiteral("accent")).toString(),
+                  QStringLiteral("#00d4aa"));
+    }
+
+    /* Depth cap: a leaf nested past kMaxStyleAncestorDepth (10) levels below
+     * a styled root falls back to activeStyle instead of walking further —
+     * defensive bound on this runtime walk, consistent with TODO-036's
+     * proposed nesting limit for the separate parse-time recursion guard. */
+    void effectiveStyleFor_deeplyNestedBeyondCap_fallsBackToActiveStyle()
+    {
+        QString yaml =
+            "style:\n"
+            "  default:\n"
+            "    accent: \"#00d4aa\"\n"
+            "  alarm:\n"
+            "    accent: \"#e05555\"\n"
+            "widgets:\n"
+            "  l0:\n"
+            "    type: row\n"
+            "    style: alarm\n";
+        /* 12 nested rows below the styled root — deeper than the 10-level cap. */
+        QString indent = QStringLiteral("    ");
+        for (int i = 1; i <= 12; ++i) {
+            yaml += indent + QStringLiteral("widgets:\n");
+            indent += QStringLiteral("  ");
+            yaml += indent + QStringLiteral("l%1:\n").arg(i);
+            indent += QStringLiteral("  ");
+            yaml += indent + (i < 12
+                ? QStringLiteral("type: row\n")
+                : QStringLiteral("type: toggle\n"));
+        }
+        const QByteArray yamlUtf8 = yaml.toUtf8();
+        DeviceController dc;
+        injectBootstrap(dc, yamlUtf8.constData());
+        /* Rows are pre-order: l0=0, l1=1, ..., l12=12 (the innermost toggle). */
+        QCOMPARE(dc.effectiveStyleFor(12).value(QStringLiteral("accent")).toString(),
+                  dc.activeStyle().value(QStringLiteral("accent")).toString());
+    }
 };
 
 QTEST_MAIN(TestDeviceController)
