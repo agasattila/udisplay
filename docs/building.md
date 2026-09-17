@@ -305,6 +305,13 @@ enables `Qt6::Bluetooth` and mDNS via Android NSD/JNI automatically, and copies
 permissions Android requires for scanning) into the package source dir at configure
 time. You do not need to edit `CMakeLists.txt` or the manifest to build for Android.
 
+The manifest only *declares* those permissions; Android still requires a runtime
+grant. `udisplay-client` requests Bluetooth and location permissions at point of
+use — when the discovery screen starts a BLE scan (`BleScanner::startScan()`), not
+at app launch — so the OS prompt appears the first time you actually try to
+discover a device. If you deny either permission, the discovery screen shows an
+actionable error instead of silently returning an empty device list.
+
 If you just want an APK to sideload instead of building locally, CI already builds one:
 the `build-android` job in
 [`udisplay-client-build.yml`](../.github/workflows/udisplay-client-build.yml) produces an
