@@ -90,6 +90,44 @@ same `UDisplayDevice` object (as opposed to a fresh one, which `main.py`'s
 
 ---
 
+### TODO-061: DeviceController::setError() missing value-guard causes double stateChanged() emission
+**What:** `DeviceController::setError()` unconditionally sets `m_state = "error"`
+and emits `stateChanged()` on every call, unlike `setState()` which guards with
+`if (m_state != s)`. A dropped TCP connection during bootstrap commonly fires
+both `Transport::errorOccurred` and `Transport::disconnected` for the same
+closure event; `BootstrapManager` relays both independently, so
+`DeviceController::onBootstrapFailed()` runs twice and calls `setError()` twice
+for the identical error. `teardown()` (called between the two `setError()`
+calls) doesn't disconnect `m_bootstrap`/`m_transport` signals, only schedules
+`deleteLater()`, so the second signal still reaches the still-alive
+`BootstrapManager`.
+**Why:** `DiscoveryScreen.qml`'s `onStateChanged` doesn't diff the value
+either — it re-checks `controller.state === "error"` on every firing, so a
+spurious second `stateChanged()` for the SAME error causes
+`discoveryModel.startScan()` to be called twice with no intervening
+`stopScan()`. On Android this collides with `BleScanner`'s new permission-
+request flow (`android-permission-handling`, TODO tracked separately) — two
+overlapping `qApp->requestPermission()` calls for the same still-Undetermined
+permission is unspecified/flaky across Android OEM permission-dialog
+implementations. `BleScanner.cpp`'s `requestAndroidPermissionsThenStart()`
+already documents this interaction in a comment pointing here.
+**Context:** Found by the Claude adversarial-review subagent while shipping
+`feature/android-permission-handling` (2026-09-17) — it specifically refuted
+that PR's initial assumption that `startScan()`/`stopScan()` are always
+correctly paired by `DiscoveryScreen.qml`'s own transitions; they are, but
+`DeviceController` can independently trigger the same effect via a redundant
+`stateChanged` emission. The fix belongs in `DeviceController`/
+`BootstrapManager` (e.g. disconnect `m_bootstrap`/`m_transport` signals in
+`teardown()` before `deleteLater()`, or guard `onBootstrapFailed()`/
+`setError()` against re-firing for an already-active error), not in
+`BleScanner` — out of scope for the Android-permissions PR since the root
+cause has nothing to do with Android permissions.
+**Effort:** S (human: ~2-3h / CC: ~20 min)
+**Priority:** P1
+**Depends on:** Nothing blocking.
+
+---
+
 ### TODO-002: iOS BLE validation (Qt6)
 **What:** Build a minimal Qt6 iOS test app that scans for and connects to an ESP32 BLE GATT service. Confirm Qt6 Bluetooth works on iOS without native CoreBluetooth bridging.
 **Why:** If Qt6 BLE on iOS is broken/insufficient, the iOS strategy must pivot to native Swift.
