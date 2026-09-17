@@ -13,7 +13,7 @@ widgets:
         align: left
       lbl_title:
         type: label
-        style: heading
+        labelStyle: heading
         text: "Welcome to demo04 (MicroPython)"
         align: center
       lbl_title_right:
@@ -37,7 +37,7 @@ widgets:
         label: "Temperature"
         format: "%.1f"
         unit: "°C"
-        style: large
+        displayStyle: large
         align: right
 
   sep2:
@@ -84,7 +84,7 @@ widgets:
         type: led
         label: "Active"
         align: center
-        
+
   sep4:
     type: separator
 
