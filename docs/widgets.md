@@ -516,7 +516,7 @@ Client selects item ──BUTTON_PRESS(item_id)──► Device
 | `label` | string | no | — | Optional group label shown above the group. Max 32 chars. |
 | `layout` | `"grid"` | no | `"grid"` | Items laid out in a wrapping grid. Only `"grid"` is supported. |
 | `items` | object | yes | — | Named items; minimum 2. Each item gets its own widget ID. |
-| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). Colors this group's own selection chrome (border, label). |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). Colors this group's own selection chrome (border, label), and cascades to its items (see [Container-level style cascading](#per-widget-style-reference)). |
 
 **`button-group-item` sub-attributes:**
 
@@ -1046,7 +1046,7 @@ works without it.
 | `label` | string | no | — | Section header label. Max 64 chars. |
 | `collapsible` | boolean | no | `false` | Whether the user can collapse the section. |
 | `widgets` | object | yes | — | Named child widgets. Same format as the top-level `widgets:` block. |
-| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). Colors this section's own header/border — does **not** cascade to children; an unstyled child still follows the app-wide active theme. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). Colors this section's own header/border, and cascades to children that have no `style:` of their own (see [Container-level style cascading](#per-widget-style-reference)). |
 
 **Example:**
 
@@ -1096,6 +1096,7 @@ works without it.
 | `type` | `"row"` | yes | — | |
 | `widgets` | object | yes | — | Named child widgets. |
 | `align` | string | no | `"left"` | Default content alignment (`"left"`\|`"right"`\|`"center"`) for children that don't stretch to fill their space. A child's own `align` (below) overrides this for that one child. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). A `row` renders no chrome of its own, so this only matters as a cascade root: children with no `style:` of their own inherit it (see [Container-level style cascading](#per-widget-style-reference)). |
 
 **Child flex/align:**
 
@@ -1150,6 +1151,7 @@ works without it.
 | `columns` | integer | yes | — | Number of columns. Minimum 1 — `columns: 1` renders as a single-column (ColumnWidget-style) layout. |
 | `widgets` | object | yes | — | Named child widgets. Auto-flow left-to-right, top-to-bottom. |
 | `align` | string | no | `"left"` | Default content alignment (`"left"`\|`"right"`\|`"center"`) for children that don't stretch to fill their cell. A child's own `align` overrides this for that one child. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). A `grid` renders no chrome of its own, so this only matters as a cascade root: children with no `style:` of their own inherit it (see [Container-level style cascading](#per-widget-style-reference)). |
 
 Children accept the same `flex`/`align` attributes as in `row` (optional). A `flex`
 ratio is only shared among children in the same virtual column (`index % columns`) —
@@ -1208,6 +1210,7 @@ works without it.
 |---|---|---|---|---|
 | `type` | `"dpad"` | yes | — | |
 | `widgets` | object | yes | — | Named `button` children; minimum 1. Each must declare a `position`. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). A `dpad` renders no chrome of its own, so this only matters as a cascade root: children with no `style:` of their own inherit it (see [Container-level style cascading](#per-widget-style-reference)). |
 
 **Child `button` attributes (in addition to [`button`](#button)'s own):**
 
@@ -1346,9 +1349,9 @@ settings UI) can select anything other than `default`.
 
 ### Per-widget style reference
 
-Any widget except `row`, `grid`, `dpad`, and `button` (those render no chrome of
-their own — a reference would be a no-op) accepts an optional `style:` property
-naming one of the themes declared in the top-level `style:` block:
+Any widget except `button` (a leaf-ish widget with only face-children, not a
+general subtree — a reference would be a no-op) accepts an optional `style:`
+property naming one of the themes declared in the top-level `style:` block:
 
 ```yaml
 style:
@@ -1380,7 +1383,46 @@ parse time too. This is a different property from `display`'s `displayStyle` or
 variant*, this picks a *color theme*; the two are independent and can be
 combined freely.
 
-Note that `style:` on a widget only colors that widget's own chrome — it does
-not cascade to a container's children. A `section` styled `alarm` colors its
-own header/border; children inside it that have no `style:` of their own still
-follow the app-wide active theme, not the section's.
+#### Container-level style cascading
+
+A `style:` on a container (`row`, `grid`, `dpad`, `section`, or `button-group`)
+also cascades to descendant widgets that have no `style:` of their own, at any
+nesting depth (up to a defensive 10-level ancestor-walk cap). Resolution order
+for any given widget is: **its own explicit `style:`, else the nearest styled
+ancestor's `style:`, else the app-wide active theme.**
+
+```yaml
+style:
+  default:
+    accent: "#00d4aa"
+  alarm:
+    accent: "#e05555"
+
+widgets:
+  alarm_panel:
+    type: section
+    label: "Alarms"
+    style: alarm        # cascade root
+    widgets:
+      fault_display:
+        type: display   # inherits "alarm" — no style: of its own
+      severity_row:
+        type: row       # unstyled row, just a layout container
+        widgets:
+          severity_display:
+            type: display
+            style: night  # explicit style wins over the "alarm" ancestor
+  status_display:
+    type: display        # outside alarm_panel — follows the app-wide active theme
+```
+
+`row`/`grid`/`dpad` render no chrome of their own, so `style:` on them is
+meaningful *only* as a cascade root for their subtree — it never changes their
+own (nonexistent) rendering. `section`/`button-group` still color their own
+chrome with it too, exactly as before.
+
+**Behavior change:** before this feature, an unstyled child of a styled
+`section`/`button-group` followed the app-wide active theme. It now inherits
+the container's style instead — no YAML edit required to see the new
+appearance on an existing device file that already set `style:` on one of
+those two container types.
