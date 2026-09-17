@@ -98,7 +98,10 @@ Copyright (c) 2026 Attila Agas
 | **udisplay-client** | LGPL v3 | `LGPL-3.0-only` |
 | **demos** | MIT | `MIT` |
 
-Full license texts are in [`LICENSES/`](LICENSES/).
+Full license texts are in [`LICENSES/`](LICENSES/). The client app also surfaces
+this under its discovery screen's ☰ menu → **Licenses**, with its own license plus
+the verbatim license text for each bundled dependency (Qt6, QtZeroConf, yaml-cpp,
+zlib).
 
 ### udisplay-client distribution note
 

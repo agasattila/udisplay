@@ -199,6 +199,10 @@ qt_add_qml_module(udisplay-client
         qml/main.qml
         qml/DiscoveryScreen.qml
         qml/DeviceScreen.qml
+        qml/AboutScreen.qml
+        qml/LicensesScreen.qml
+        qml/LicenseDetailScreen.qml
+        qml/LicensesData.js
         qml/widgets/DisplayWidget.qml
         qml/widgets/LedWidget.qml
         qml/widgets/RgbLedWidget.qml

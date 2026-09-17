@@ -147,6 +147,41 @@ if(QML_EXECUTABLE)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         TIMEOUT 10
         FAIL_REGULAR_EXPRESSION "Unable to assign .* to QColor")
+
+    add_test(NAME test_qml_discovery_menu_navigation
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_discovery_menu_navigation.qml")
+    set_tests_properties(test_qml_discovery_menu_navigation PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10)
+
+    add_test(NAME test_qml_license_detail_navigation
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_license_detail_navigation.qml")
+    set_tests_properties(test_qml_license_detail_navigation PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10)
+
+    add_test(NAME test_qml_discovery_menu_reset_on_connect
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_discovery_menu_reset_on_connect.qml")
+    set_tests_properties(test_qml_discovery_menu_reset_on_connect PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10)
+
+    add_test(NAME test_qml_discovery_menu_reset_on_error
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_discovery_menu_reset_on_error.qml")
+    set_tests_properties(test_qml_discovery_menu_reset_on_error PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10)
+
+    add_test(NAME test_qml_discovery_content_screen
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_discovery_content_screen.qml")
+    set_tests_properties(test_qml_discovery_content_screen PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10)
 else()
     message(STATUS "qml executable not found — skipping QML layout regression tests")
 endif()
