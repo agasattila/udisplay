@@ -156,14 +156,19 @@ public:
     Q_INVOKABLE void setActiveStyle(const QString& name);
 
     /* Resolves the effective style QVariantMap for the widget at flat-list
-     * `row`: its own explicit `style:` name if set (props["style"]),
-     * falling back to the app-wide activeStyle otherwise. Defensive against
-     * an invalid/out-of-range row or a style name absent from m_styles
-     * (both should be unreachable from a successfully-parsed YAML — the
-     * parser rejects an unknown stylesheet name at Severity::Error — but
-     * never crash regardless). QML bindings must depend on BOTH
-     * `activeStyle` and `widgetModel.generation` (see WidgetModel.h) to stay
-     * live — see docs/designs/unify-widget-style-handling.md. */
+     * `row`, walking the parentId ancestor chain: its own explicit `style:`
+     * name if set (props["style"]), else the nearest ancestor's `style:`
+     * (row/grid/dpad/section/button-group may all carry one), else the
+     * app-wide activeStyle. The walk is capped at kMaxStyleAncestorDepth
+     * levels — see docs/designs/container-style-cascading.md — a defensive
+     * bound on this one walk, independent of TODO-036's still-open parse-time
+     * nesting cap. Defensive against an invalid/out-of-range row or a style
+     * name absent from m_styles (both should be unreachable from a
+     * successfully-parsed YAML — the parser rejects an unknown stylesheet
+     * name at Severity::Error — but never crash regardless). QML bindings
+     * must depend on BOTH `activeStyle` and `widgetModel.generation` (see
+     * WidgetModel.h) to stay live — see
+     * docs/designs/unify-widget-style-handling.md. */
     Q_INVOKABLE QVariantMap effectiveStyleFor(int row);
 
     Q_INVOKABLE void sendButtonPress(int widgetId);

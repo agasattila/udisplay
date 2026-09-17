@@ -159,10 +159,14 @@ Loader {
     /* Leaf widget components — no cycle: none of these files reference WidgetDelegate.
      * effectiveStyle is threaded only to components whose .qml file actually
      * reads controller.activeStyle today (verified via grep) — buttonComp/
-     * dpadComp render color:"transparent" with no chrome of their own (see
-     * docs/designs/unify-widget-style-handling.md's Open Questions on why
-     * row/grid/dpad/button reject style: entirely), so threading it there
-     * would be dead, unread plumbing. */
+     * dpadComp render color:"transparent" with no chrome of their own, so
+     * threading it there would be dead, unread plumbing. row/grid/dpad DO
+     * accept `style:` now (docs/designs/container-style-cascading.md), but
+     * only as a cascade root consumed by descendants' own effectiveStyleFor()
+     * ancestor walk — rowComp/gridComp/dpadComp below still don't need the
+     * value threaded to themselves, since their own rendering stays
+     * unstyled. `button` still rejects style: entirely (leaf-ish, no general
+     * subtree to cascade to). */
     Component { id: displayComp;     DisplayWidget     { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; compact: root.compact; effectiveStyle: root._effectiveStyle } }
     Component { id: ledComp;         LedWidget         { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; compact: root.compact; effectiveStyle: root._effectiveStyle } }
     Component { id: rgbledComp;      RgbLedWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; compact: root.compact; effectiveStyle: root._effectiveStyle } }

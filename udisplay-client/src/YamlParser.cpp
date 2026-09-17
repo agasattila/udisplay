@@ -106,11 +106,15 @@ static int parseGridColumns(const YAML::Node& node, const std::string& key, Diag
     return columns;
 }
 
-/* style: (stylesheet reference) — common to every widget type except the
- * truly transparent containers (row/grid/dpad/button all render
- * color:"transparent" in QML with no chrome of their own, so a stylesheet
- * reference on them would be a silent no-op; see
- * docs/designs/unify-widget-style-handling.md's Open Questions). Shared by
+/* style: (stylesheet reference) — common to every widget type except
+ * `button` (a leaf-ish widget with only face-children, not a general
+ * subtree-theming container). row/grid/dpad render color:"transparent" in
+ * QML with no chrome of their own, but they DO carry `style:` as a cascade
+ * root: docs/designs/container-style-cascading.md's ancestor walk lets a
+ * styled row/grid/dpad propagate that style to descendant widgets that
+ * don't set their own — see docs/designs/unify-widget-style-handling.md's
+ * Open Questions for why they originally rejected it (v1 had no cascading
+ * consumer yet, so it would have been a silent no-op then). Shared by
  * buildWidget() AND buildAndAppendWidgets()'s hand-rolled top-level-section
  * construction — section widgets are NOT built via buildWidget(), so this
  * must be called from both sites rather than folded into buildWidget()
@@ -124,8 +128,7 @@ static void parseStyleProp(const YAML::Node& node, const std::string& key,
                            WidgetType type, QVariantMap& props, Diags& diags)
 {
     if (!node["style"] || !node["style"].IsScalar()) return;
-    if (type == WidgetType::Row || type == WidgetType::Grid ||
-        type == WidgetType::Dpad || type == WidgetType::Button) {
+    if (type == WidgetType::Button) {
         diag(diags, Severity::Error, key, "style",
              QStringLiteral("style: is not supported on '%1' widgets yet")
                  .arg(widgetTypeName(type)));

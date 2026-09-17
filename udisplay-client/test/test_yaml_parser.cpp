@@ -1751,23 +1751,62 @@ private slots:
         QCOMPARE(widgets[0].props[QStringLiteral("style")].toString(), QStringLiteral("alarm"));
     }
 
-    void style_onRowGridDpadButton_rejected()
+    void style_onButton_rejected()
     {
-        for (const char* type : { "row", "grid", "dpad", "button" }) {
-            const QString yamlStr = QStringLiteral(
-                "widgets:\n"
-                "  c:\n"
+        const QString yamlStr = QStringLiteral(
+            "widgets:\n"
+            "  c:\n"
+            "    type: button\n"
+            "    style: alarm\n");
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(yamlStr.toUtf8(), widgets, name, version));
+        bool hasError = false;
+        for (const auto& d : p.diagnostics())
+            if (d.field == QStringLiteral("style") &&
+                d.severity == YamlParser::Severity::Error) hasError = true;
+        QVERIFY(hasError);
+    }
+
+    /* row/grid/dpad accept style: as a cascade root now
+     * (docs/designs/container-style-cascading.md) — the client parser side
+     * of the restriction lift; cascading resolution itself is
+     * DeviceController::effectiveStyleFor()'s job, covered in
+     * test_device_controller.cpp. */
+    void style_onRowGridDpad_accepted()
+    {
+        for (const char* type : { "row", "grid", "dpad" }) {
+            QString widgetYaml = QStringLiteral(
                 "    type: %1\n"
                 "    style: alarm\n").arg(QString::fromLatin1(type));
+            if (qstrcmp(type, "grid") == 0)
+                widgetYaml += QStringLiteral("    columns: 1\n");
+            widgetYaml += (qstrcmp(type, "dpad") == 0)
+                ? QStringLiteral(
+                      "    widgets:\n"
+                      "      up:\n"
+                      "        type: button\n"
+                      "        position: top\n")
+                : QStringLiteral(
+                      "    widgets:\n"
+                      "      lbl:\n"
+                      "        type: label\n"
+                      "        text: hi\n");
+
+            const QString yamlStr = QStringLiteral(
+                "style:\n"
+                "  alarm:\n"
+                "    accent: '#ff0000'\n"
+                "widgets:\n"
+                "  c:\n") + widgetYaml;
             YamlParser p;
             QList<WidgetDef> widgets;
             QString name, version;
-            QVERIFY2(!p.parse(yamlStr.toUtf8(), widgets, name, version), type);
-            bool hasError = false;
-            for (const auto& d : p.diagnostics())
-                if (d.field == QStringLiteral("style") &&
-                    d.severity == YamlParser::Severity::Error) hasError = true;
-            QVERIFY2(hasError, type);
+            QVERIFY2(p.parse(yamlStr.toUtf8(), widgets, name, version), type);
+            const WidgetDef* c = findByKey(widgets, "c");
+            QVERIFY2(c, type);
+            QCOMPARE(c->props[QStringLiteral("style")].toString(), QStringLiteral("alarm"));
         }
     }
 

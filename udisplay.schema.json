@@ -106,7 +106,7 @@
     },
 
     "styleProp": {
-      "description": "Optional reference to a named stylesheet defined in the top-level style: block. The widget renders using that stylesheet's color tokens instead of the app-wide active style. Not supported on row/grid/dpad/button — those render no chrome of their own, so a reference would be a no-op. Must name a stylesheet actually declared in style: (enforced by udisplay-gen's semantic validation, not expressible in JSON Schema alone).",
+      "description": "Optional reference to a named stylesheet defined in the top-level style: block. The widget renders using that stylesheet's color tokens instead of the app-wide active style. On row/grid/dpad (which render no chrome of their own), this instead makes the container a cascade root: descendant widgets that don't set their own style: inherit this one, nearest styled ancestor wins. Not supported on button — a leaf-ish widget with no general subtree to cascade to. Must name a stylesheet actually declared in style: (enforced by udisplay-gen's semantic validation, not expressible in JSON Schema alone).",
       "type": "string",
       "minLength": 1
     },
@@ -540,6 +540,7 @@
       "properties": {
         "type": { "const": "row" },
         "widgets": { "$ref": "#/$defs/widgetMap" },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
       }
@@ -558,6 +559,7 @@
           "minimum": 1
         },
         "widgets": { "$ref": "#/$defs/widgetMap" },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
       }
@@ -581,6 +583,7 @@
       "properties": {
         "type": { "const": "dpad" },
         "widgets": { "$ref": "#/$defs/dpadWidgetMap" },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
       }

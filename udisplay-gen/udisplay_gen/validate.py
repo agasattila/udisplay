@@ -147,9 +147,11 @@ def schema_errors(doc: dict, schema: dict,
 # can skip a value that shouldn't exist in the first place, rather than
 # reporting a confusing "unknown stylesheet" on a field that's already a
 # schema violation). Mirrors udisplay-client's YamlParser.cpp exactly:
-# row/grid/dpad/button render color:"transparent" in QML, so style: would
-# be a no-op there.
-_STYLE_REJECTED_TYPES = {"row", "grid", "dpad", "button"}
+# `button` is a leaf-ish widget (face children only) with no general
+# subtree to cascade a style to. row/grid/dpad render color:"transparent"
+# themselves but DO accept style: as a cascade root — see
+# docs/designs/container-style-cascading.md.
+_STYLE_REJECTED_TYPES = {"button"}
 
 
 def _semantic_errors_in_map(widgets: dict, path_prefix: str,
