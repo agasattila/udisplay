@@ -9,6 +9,11 @@
 #include <QBluetoothUuid>
 #include <QElapsedTimer>
 #include <QTimer>
+#ifdef Q_OS_ANDROID
+#include <QBluetoothPermission>
+#include <QLocationPermission>
+#include <functional>
+#endif
 #endif
 
 /**
@@ -42,13 +47,33 @@ private slots:
 private:
     QString deviceKey(const QBluetoothDeviceInfo &info) const;
     void processDevice(const QBluetoothDeviceInfo& info);
+    void beginAgentScan();
+
+#ifdef Q_OS_ANDROID
+    /** Requests QBluetoothPermission, then QLocationPermission, then calls
+     *  beginAgentScan() once both are Granted. Emits scanError on Denied.
+     *  Guarded by m_scanGeneration so a late permission-request callback
+     *  from a scan the caller already stopped cannot start a new one. */
+    void requestAndroidPermissionsThenStart();
+
+    /** Shared check/request/continue logic for a single Qt runtime
+     *  permission — used for both QBluetoothPermission and
+     *  QLocationPermission so the two-permission chain in
+     *  requestAndroidPermissionsThenStart() doesn't duplicate it. */
+    template <typename Permission>
+    void requestPermissionThenContinue(const Permission& permission,
+                                        int generation,
+                                        const QString& deniedMessage,
+                                        std::function<void()> onGranted);
+
+    int m_scanGeneration = 0;
+#endif
 
     QBluetoothDeviceDiscoveryAgent* m_agent = nullptr;
 
     /* uDisplay GATT service UUID — must match libudisplay firmware. */
     static const QBluetoothUuid kUDisplaySvcUuid;
 
-    bool _permGranted;
     bool _started;
 
     struct DeviceEntry

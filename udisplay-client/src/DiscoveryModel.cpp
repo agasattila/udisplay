@@ -72,9 +72,15 @@ QVariant DiscoveryModel::deviceAt(int row) const
 void DiscoveryModel::startScan()
 {
     setScanError(QString());
+    /* setScanning(true) BEFORE the loop: a scanner can emit scanError
+     * synchronously from inside startScan() (e.g. BleScanner denying
+     * immediately on an already-Denied Android permission), which routes
+     * through onScanError() -> setScanning(false). Setting true afterward
+     * would clobber that back to true, leaving the UI's busy indicator
+     * spinning forever next to an error that already fired. */
+    setScanning(true);
     for (auto* s : m_scanners)
         s->startScan();
-    setScanning(true);
 }
 
 void DiscoveryModel::stopScan()
