@@ -92,10 +92,31 @@ Page {
             ToolButton {
                 id: menuButton
                 objectName: "discoveryMenuButton"
-                text: "☰"
-                font.pixelSize: 20
                 visible: localStack.depth === 1
                 onClicked: menu.open()
+
+                /* Drawn as three bars rather than the "☰" (U+2630) glyph:
+                 * Android's bundled Roboto font has no glyph for it, so the
+                 * button showed a tofu box there while desktop fontconfig
+                 * fallback papered over the gap. Bars render identically on
+                 * every platform since they don't depend on font coverage. */
+                contentItem: Item {
+                    implicitWidth: 20
+                    implicitHeight: 20
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: 4
+                        Repeater {
+                            model: 3
+                            Rectangle {
+                                width: 18
+                                height: 2
+                                radius: 1
+                                color: Material.foreground
+                            }
+                        }
+                    }
+                }
 
                 Menu {
                     id: menu
