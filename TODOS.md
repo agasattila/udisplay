@@ -345,7 +345,7 @@ import from.
 ---
 
 ### TODO-008: BLE Android OEM compatibility matrix (`docs/ble-compat.md`)
-**What:** A tracked compatibility matrix documenting known BLE quirks per Android OEM/version (Samsung NOTIFY drops after MTU negotiation, Xiaomi MIUI background BLE restrictions, etc.) and the corresponding workaround in libudisplay or the Qt client.
+**What:** A tracked compatibility matrix documenting known BLE quirks per Android OEM/version (Samsung NOTIFY drops after MTU negotiation (re-check against INDICATE, which the data characteristic now uses), Xiaomi MIUI background BLE restrictions, etc.) and the corresponding workaround in libudisplay or the Qt client.
 **Why:** BLE OEM bugs are invisible until a specific-model user files a bug report. A tracked matrix prevents the same bugs from being re-diagnosed and ensures workarounds get merged rather than re-discovered.
 **Pros:** Prevents duplicate debugging. Gives users self-service info for known issues.
 **Cons:** Requires ongoing maintenance — update as new devices are tested in the wild.
