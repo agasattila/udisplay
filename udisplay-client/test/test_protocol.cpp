@@ -638,6 +638,76 @@ private slots:
         QCOMPARE(out, msg);
     }
 
+    /* ── BLE framing: bleFeed tri-state ────────────────────────────────────── */
+
+    void bleFeed_MoreThenDone()
+    {
+        Proto::BleRxState state;
+        QByteArray out;
+        uint8_t id = 0xFF;
+        QByteArray msg(60, 'x');
+        const QVector<QByteArray> packets = Proto::bleFrame(msg, 20, id);
+        QVERIFY(packets.size() >= 3);
+        for (int i = 0; i < packets.size() - 1; ++i)
+            QCOMPARE(Proto::bleFeed(packets[i], state, out), Proto::BleRxResult::More);
+        QCOMPARE(Proto::bleFeed(packets.last(), state, out), Proto::BleRxResult::Done);
+        QCOMPARE(out, msg);
+    }
+
+    void bleFeed_ErrorCases()
+    {
+        Proto::BleRxState state;
+        QByteArray out;
+
+        /* too short for any header */
+        QCOMPARE(Proto::bleFeed(QByteArray(2, '\0'), state, out), Proto::BleRxResult::Error);
+        /* flags != 0 */
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("000000010001" "02"), state, out),
+                 Proto::BleRxResult::Error);
+        /* length 1025 */
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("000000010400" "02"), state, out),
+                 Proto::BleRxResult::Error);
+        /* orphan continuation */
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("02000000"), state, out),
+                 Proto::BleRxResult::Error);
+
+        const QByteArray first = QByteArray::fromHex("0000070600" "00" "0200");
+        /* wrong packet_id */
+        QCOMPARE(Proto::bleFeed(first, state, out), Proto::BleRxResult::More);
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("02000800"), state, out),
+                 Proto::BleRxResult::Error);
+        /* offset gap */
+        QCOMPARE(Proto::bleFeed(first, state, out), Proto::BleRxResult::More);
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("03000700"), state, out),
+                 Proto::BleRxResult::Error);
+        /* over-completion */
+        QCOMPARE(Proto::bleFeed(first, state, out), Proto::BleRxResult::More);
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("0200070000000000"), state, out),
+                 Proto::BleRxResult::Error);
+        /* huge offset must not overflow */
+        QCOMPARE(Proto::bleFeed(first, state, out), Proto::BleRxResult::More);
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("FFFF07010203"), state, out),
+                 Proto::BleRxResult::Error);
+
+        /* state was reset: a valid single-fragment message is accepted */
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("00000001000002"), state, out),
+                 Proto::BleRxResult::Done);
+    }
+
+    void bleFeed_ErrorClearsInFlightMessage()
+    {
+        Proto::BleRxState state;
+        QByteArray out;
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("000007060000" "0200"), state, out),
+                 Proto::BleRxResult::More);
+        /* a bad first fragment aborts the in-flight message */
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("00000001000102"), state, out),
+                 Proto::BleRxResult::Error);
+        /* so a continuation of the old message is now an orphan */
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("0200070000"), state, out),
+                 Proto::BleRxResult::Error);
+    }
+
     void bleUnframe_ConnectionReset()
     {
         /* After a connection reset (state cleared), first fragment with offset=0 is accepted */
