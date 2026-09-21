@@ -838,6 +838,94 @@ TEST_F(TransportTest, Feed_None_PassesThroughRaw)
     EXPECT_FALSE(g_transport_sent.empty());
 }
 
+/* 12a: BLE feed returns 0 for valid fragments, incl. a partial multi-fragment message */
+TEST_F(TransportTest, Feed_Ble_ValidFragmentsReturnZero)
+{
+    auto cfg = ble_cfg(45u);
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
+
+    uint8_t single[7] = { 0x00u, 0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x02u };
+    EXPECT_EQ(udisplay_feed(&ctx_, single, sizeof(single)), 0);
+
+    /* first fragment of a 4-byte message carrying 2 bytes, then the rest */
+    uint8_t first[8] = { 0x00u, 0x00u, 0x01u, 0x04u, 0x00u, 0x00u, 0x02u, 0x00u };
+    uint8_t cont[5]  = { 0x02u, 0x00u, 0x01u, 0x00u, 0x00u };
+    EXPECT_EQ(udisplay_feed(&ctx_, first, sizeof(first)), 0);
+    EXPECT_EQ(udisplay_feed(&ctx_, cont, sizeof(cont)), 0);
+}
+
+/* 12b: every BLE framing violation is reported as a link error (-1) and resets reassembly */
+TEST_F(TransportTest, Feed_Ble_FramingViolationsReturnMinusOne)
+{
+    auto cfg = ble_cfg(45u);
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
+
+    /* flags != 0 */
+    uint8_t badFlags[7] = { 0x00u, 0x00u, 0x00u, 0x01u, 0x00u, 0x01u, 0x02u };
+    EXPECT_EQ(udisplay_feed(&ctx_, badFlags, sizeof(badFlags)), -1);
+
+    /* declared length 1025 > UDISPLAY_MAX_MSG_SIZE */
+    uint8_t tooLong[7] = { 0x00u, 0x00u, 0x00u, 0x01u, 0x04u, 0x00u, 0x02u };
+    EXPECT_EQ(udisplay_feed(&ctx_, tooLong, sizeof(tooLong)), -1);
+
+    /* continuation with no first fragment */
+    uint8_t orphan[4] = { 0x02u, 0x00u, 0x00u, 0x00u };
+    EXPECT_EQ(udisplay_feed(&ctx_, orphan, sizeof(orphan)), -1);
+
+    /* too short to hold any header */
+    uint8_t tiny[1] = { 0x00u };
+    EXPECT_EQ(udisplay_feed(&ctx_, tiny, sizeof(tiny)), -1);
+
+    uint8_t first[8] = { 0x00u, 0x00u, 0x07u, 0x06u, 0x00u, 0x00u, 0x02u, 0x00u };
+
+    /* wrong packet_id on continuation */
+    EXPECT_EQ(udisplay_feed(&ctx_, first, sizeof(first)), 0);
+    uint8_t wrongId[4] = { 0x02u, 0x00u, 0x08u, 0x00u };
+    EXPECT_EQ(udisplay_feed(&ctx_, wrongId, sizeof(wrongId)), -1);
+
+    /* offset gap */
+    EXPECT_EQ(udisplay_feed(&ctx_, first, sizeof(first)), 0);
+    uint8_t gap[4] = { 0x03u, 0x00u, 0x07u, 0x00u };
+    EXPECT_EQ(udisplay_feed(&ctx_, gap, sizeof(gap)), -1);
+
+    /* over-completion: 2 bytes accumulated of 6, continuation carries 5 */
+    EXPECT_EQ(udisplay_feed(&ctx_, first, sizeof(first)), 0);
+    uint8_t over[8] = { 0x02u, 0x00u, 0x07u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u };
+    EXPECT_EQ(udisplay_feed(&ctx_, over, sizeof(over)), -1);
+
+    /* the error reset the state: a valid first fragment is accepted again */
+    uint8_t ok[7] = { 0x00u, 0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x02u };
+    EXPECT_EQ(udisplay_feed(&ctx_, ok, sizeof(ok)), 0);
+}
+
+/* 12c: u16 offset near 0xFFFF must not overflow the accumulate check */
+TEST_F(TransportTest, Feed_Ble_HugeOffsetContinuationIsError)
+{
+    auto cfg = ble_cfg(45u);
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
+
+    uint8_t first[8] = { 0x00u, 0x00u, 0x07u, 0x06u, 0x00u, 0x00u, 0x02u, 0x00u };
+    EXPECT_EQ(udisplay_feed(&ctx_, first, sizeof(first)), 0);
+    uint8_t huge[6] = { 0xFFu, 0xFFu, 0x07u, 0x01u, 0x02u, 0x03u };
+    EXPECT_EQ(udisplay_feed(&ctx_, huge, sizeof(huge)), -1);
+}
+
+/* 12d: TCP feed reports reassembly overflow as a link error */
+TEST_F(TransportTest, Feed_Tcp_OverflowReturnsMinusOne)
+{
+    auto cfg = tcp_cfg();
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
+
+    std::vector<uint8_t> junk(UDISPLAY_RX_BUF_SIZE + 1u, 0xFFu);
+    EXPECT_EQ(udisplay_feed(&ctx_, junk.data(), (uint16_t)junk.size()), -1);
+    uint8_t framed[3] = { 0x01u, 0x00u, 0x02u };
+    EXPECT_EQ(udisplay_feed(&ctx_, framed, sizeof(framed)), 0);
+}
+
 /* 13: udisplay_ble_set_mtu() rejects a value exceeding the fragment buffer capacity */
 TEST_F(TransportTest, Ble_SetMtu_RejectsOverCapacity)
 {
