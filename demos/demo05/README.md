@@ -1,7 +1,7 @@
 # demo05 — Minimal ESP32 BLE demo
 
 Button press toggles an LED. State is pushed to a connected uDisplay client
-over BLE using NimBLE GATT notifications.
+over BLE using NimBLE GATT indications (confirmed delivery; the firmware queues fragments and sends one at a time).
 
 ## Supported targets
 

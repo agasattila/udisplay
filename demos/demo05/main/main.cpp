@@ -155,7 +155,7 @@ static void led_init(void)
 /* ── BLE UUIDs (128-bit, NimBLE little-endian byte order) ─────────────────
  * Service: 29825AAA-D882-46F7-A4D6-EA8431AD3455
  * Control: 29825AAA-D882-46F7-A4D6-EA8431AD3456  (WRITE from client)
- * Data:    29825AAA-D882-46F7-A4D6-EA8431AD3457  (NOTIFY to client)
+ * Data:    29825AAA-D882-46F7-A4D6-EA8431AD3457  (INDICATE to client)
  */
 static const ble_uuid128_t g_svc_uuid = BLE_UUID128_INIT(
     0x55, 0x34, 0xAD, 0x31, 0x84, 0xEA, 0xD6, 0xA4,
@@ -178,7 +178,7 @@ static uint8_t  g_own_addr_type   = BLE_OWN_ADDR_PUBLIC;
 static uint8_t  g_led             = 0;
 
 /* uDisplay's own connected/active state starts only once the client
- * subscribes to notifications (see BLE_GAP_EVENT_SUBSCRIBE below), so the
+ * subscribes to indications (see BLE_GAP_EVENT_SUBSCRIBE below), so the
  * library's bootstrap watchdog has no visibility into the window between
  * radio-level connect and subscribe. g_subscribe_wait_ticks covers that
  * window independently, at the same 3-tick/~15s threshold as the library's
@@ -187,17 +187,127 @@ static bool     g_handshake_sent      = false;
 static uint8_t  g_subscribe_wait_ticks = 0;
 #define SUBSCRIBE_WAIT_TICKS_MAX 3u
 
-/* ── uDisplay transport callback ─────────────────────────────────────────── */
+/* ── uDisplay transport callback ───────────────────────────────────────────
+ *
+ * The data characteristic uses INDICATE: the peer's ATT layer confirms each
+ * one, and NimBLE allows only one unconfirmed indication at a time
+ * (ble_gatts_indicate_custom returns BLE_HS_EBUSY otherwise). The library
+ * calls send_cb once per fragment, possibly many times in a row and from the
+ * NimBLE host task, so send_cb can neither block nor drop. It copies each
+ * fragment into a byte ring; tx_pump() sends one and BLE_GAP_EVENT_NOTIFY_TX
+ * (confirmation) sends the next.
+ *
+ *   udisplay lib ──send_cb──► ring ──tx_pump──► indicate ──► peer
+ *                               ▲                               │
+ *                               └── NOTIFY_TX (EDONE) ◄─────────┘
+ *
+ * Anything that would lose or reorder a fragment (ring full, mbuf exhausted,
+ * indicate error, confirmation timeout) is a link error: disconnect.
+ *
+ * g_tx_lock guards only the ring and g_tx_inflight; BLE calls happen outside
+ * it. Whoever flips g_tx_inflight false -> true owns the next indicate call,
+ * which keeps fragments in order across tasks. */
+#define TX_RING_BYTES 2048u   /* 1 KB message at MTU 23: ~60 fragments, ~1.3 KB with length prefixes */
+#define TX_FRAG_MAX   UDISPLAY_MAX_MSG_SIZE
+
+static uint8_t    g_tx_ring[TX_RING_BYTES];
+static uint16_t   g_tx_head = 0;      /* next byte to read  */
+static uint16_t   g_tx_used = 0;      /* bytes queued (length prefixes included) */
+static bool       g_tx_inflight = false;
+static portMUX_TYPE g_tx_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static void link_error(const char* why)
+{
+    ESP_LOGE(TAG, "link error: %s — disconnecting", why);
+    if (g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+        ble_gap_terminate(g_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+    }
+}
+
+static void tx_reset(void)
+{
+    portENTER_CRITICAL(&g_tx_lock);
+    g_tx_head = 0;
+    g_tx_used = 0;
+    g_tx_inflight = false;
+    portEXIT_CRITICAL(&g_tx_lock);
+}
+
+static void ring_write(const uint8_t* src, uint16_t n)
+{
+    uint16_t tail = (uint16_t)((g_tx_head + g_tx_used) % TX_RING_BYTES);
+    for (uint16_t i = 0; i < n; i++) {
+        g_tx_ring[tail] = src[i];
+        tail = (uint16_t)((tail + 1u) % TX_RING_BYTES);
+    }
+    g_tx_used = (uint16_t)(g_tx_used + n);
+}
+
+static void ring_read(uint8_t* dst, uint16_t n)
+{
+    for (uint16_t i = 0; i < n; i++) {
+        dst[i] = g_tx_ring[g_tx_head];
+        g_tx_head = (uint16_t)((g_tx_head + 1u) % TX_RING_BYTES);
+    }
+    g_tx_used = (uint16_t)(g_tx_used - n);
+}
+
+/* Send the next queued fragment if no indication is unconfirmed. */
+static void tx_pump(void)
+{
+    /* Static: too big for the host task stack, and only the task that owns
+     * the false -> true g_tx_inflight flip touches it (it is fully copied into
+     * an mbuf before the confirmation that lets the next owner in). */
+    static uint8_t frag[TX_FRAG_MAX];
+    uint16_t len = 0;
+
+    portENTER_CRITICAL(&g_tx_lock);
+    if (!g_tx_inflight && g_tx_used > 0) {
+        uint8_t hdr[2];
+        ring_read(hdr, 2);
+        len = (uint16_t)(hdr[0] | (hdr[1] << 8));
+        ring_read(frag, len);
+        g_tx_inflight = true;
+    }
+    portEXIT_CRITICAL(&g_tx_lock);
+
+    if (len == 0) return;
+
+    struct os_mbuf* om = ble_hs_mbuf_from_flat(frag, len);
+    if (!om) {
+        link_error("mbuf alloc failed");
+        return;
+    }
+    int rc = ble_gatts_indicate_custom(g_conn_handle, g_data_attr_handle, om);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "ble_gatts_indicate_custom rc=%d", rc);
+        link_error("indicate failed");
+    }
+}
 
 static void send_cb(const uint8_t* data, uint16_t len, void* ud)
 {
     if (g_conn_handle == BLE_HS_CONN_HANDLE_NONE) return;
-    struct os_mbuf* om = ble_hs_mbuf_from_flat(data, len);
-    if (!om) {
-        ESP_LOGW(TAG, "send_cb: mbuf alloc failed");
+    if (len == 0 || len > TX_FRAG_MAX) {
+        link_error("send_cb fragment size out of range");
         return;
     }
-    ble_gatts_notify_custom(g_conn_handle, g_data_attr_handle, om);
+
+    bool ok;
+    portENTER_CRITICAL(&g_tx_lock);
+    ok = (uint32_t)g_tx_used + 2u + len <= TX_RING_BYTES;
+    if (ok) {
+        uint8_t hdr[2] = { (uint8_t)(len & 0xFFu), (uint8_t)(len >> 8) };
+        ring_write(hdr, 2);
+        ring_write(data, len);
+    }
+    portEXIT_CRITICAL(&g_tx_lock);
+
+    if (!ok) {
+        link_error("TX queue overflow");
+        return;
+    }
+    tx_pump();
 }
 
 /* ── uDisplay event handlers (assigned to `ui` in app_main) ───────────────── */
@@ -232,7 +342,7 @@ static void heartbeat_timer_cb(TimerHandle_t t)
 
     if (g_conn_handle != BLE_HS_CONN_HANDLE_NONE && !g_handshake_sent) {
         if (++g_subscribe_wait_ticks >= SUBSCRIBE_WAIT_TICKS_MAX) {
-            ESP_LOGW(TAG, "client never subscribed to notifications — giving up");
+            ESP_LOGW(TAG, "client never subscribed to indications — giving up");
             ble_gap_terminate(g_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         }
     }
@@ -248,7 +358,9 @@ static int ctrl_access(uint16_t conn_handle, uint16_t attr_handle,
     uint8_t buf[UDISPLAY_MAX_MSG_SIZE];
     if (len > sizeof(buf)) return BLE_ATT_ERR_INSUFFICIENT_RES;
     os_mbuf_copydata(ctxt->om, 0, len, buf);
-    ui.feed(buf, len);
+    if (udisplay_feed(ui.ctx(), buf, len) != 0) {
+        link_error("framing error on control write");
+    }
     return 0;
 }
 
@@ -281,7 +393,7 @@ static const struct ble_gatt_svc_def g_gatt_svcs[] = {
                 .access_cb    = data_access,
                 .arg          = NULL,
                 .descriptors  = NULL,
-                .flags        = BLE_GATT_CHR_F_NOTIFY,
+                .flags        = BLE_GATT_CHR_F_INDICATE,
                 .min_key_size = 0,
                 .val_handle   = &g_data_attr_handle,
                 .cpfd         = NULL,
@@ -332,11 +444,12 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
     case BLE_GAP_EVENT_CONNECT:
         if (ev->connect.status == 0) {
             g_conn_handle          = ev->connect.conn_handle;
+            tx_reset();
             g_handshake_sent       = false;
             g_subscribe_wait_ticks = 0;
             ESP_LOGI(TAG, "connected  handle=%d", g_conn_handle);
             /* Do NOT send HANDSHAKE here: the client hasn't subscribed to
-             * notifications yet, and a notify sent before the peer writes
+             * indications yet, and an indication sent before the peer writes
              * the CCCD is silently dropped by the BLE stack. Deferred to
              * BLE_GAP_EVENT_SUBSCRIBE below. */
         } else {
@@ -352,6 +465,7 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
                           * stayed on across a disconnect until the next
                           * button press or reconnect happened to sync it. */
         g_conn_handle          = BLE_HS_CONN_HANDLE_NONE;
+        tx_reset();
         g_handshake_sent       = false;
         g_subscribe_wait_ticks = 0;
         udisplay_on_disconnect(ui.ctx());
@@ -361,15 +475,31 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
     case BLE_GAP_EVENT_SUBSCRIBE:
         /* Fires on every CCCD write, including unsubscribe and, on some
          * stacks, a resubscribe mid-connection (e.g. after MTU
-         * renegotiation). Gate on notify-enable of the data characteristic,
+         * renegotiation). Gate on indicate-enable of the data characteristic,
          * and only send HANDSHAKE once per connection — udisplay_on_connect()
          * resets BLE fragment/reassembly state, so firing it twice would
          * corrupt an in-progress bootstrap. */
         if (ev->subscribe.attr_handle == g_data_attr_handle &&
-            ev->subscribe.cur_notify && !g_handshake_sent) {
+            ev->subscribe.cur_indicate && !g_handshake_sent) {
             g_handshake_sent = true;
             ESP_LOGI(TAG, "client subscribed — sending HANDSHAKE");
             udisplay_on_connect(ui.ctx());
+        }
+        break;
+
+    case BLE_GAP_EVENT_NOTIFY_TX:
+        if (ev->notify_tx.attr_handle != g_data_attr_handle) break;
+        if (ev->notify_tx.status == BLE_HS_EDONE) {
+            /* Peer confirmed the indication: send the next queued fragment. */
+            portENTER_CRITICAL(&g_tx_lock);
+            g_tx_inflight = false;
+            portEXIT_CRITICAL(&g_tx_lock);
+            tx_pump();
+        } else if (ev->notify_tx.status != 0) {
+            /* BLE_HS_ETIMEOUT (no confirmation within the ATT timeout) or a send error.
+             * status 0 only means "sent, awaiting confirmation". */
+            ESP_LOGE(TAG, "indication status=%d", ev->notify_tx.status);
+            link_error("indication not confirmed");
         }
         break;
 
