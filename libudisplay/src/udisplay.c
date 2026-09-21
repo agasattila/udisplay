@@ -197,7 +197,7 @@ void udisplay_on_disconnect(udisplay_t* ctx)
     rx_reset(ctx);
 }
 
-void udisplay_ble_feed(udisplay_t* ctx, const uint8_t* att_payload, uint16_t len)
+int udisplay_ble_feed(udisplay_t* ctx, const uint8_t* att_payload, uint16_t len)
 {
     ble_rx_status_t status = ble_rx_feed(&ctx->rx.ble_rx, att_payload, len);
     if (status == BLE_RX_DONE) {
@@ -205,7 +205,9 @@ void udisplay_ble_feed(udisplay_t* ctx, const uint8_t* att_payload, uint16_t len
         ble_rx_reset(&ctx->rx.ble_rx);
     } else if (status == BLE_RX_ERROR) {
         ble_rx_reset(&ctx->rx.ble_rx);
+        return -1;
     }
+    return 0;
 }
 
 int udisplay_ble_set_mtu(udisplay_t* ctx, uint16_t mtu_payload)
@@ -222,22 +224,23 @@ static void on_tcp_message(const uint8_t* msg, uint16_t msg_len, void* ud)
     udisplay_on_message(ctx, msg, msg_len);
 }
 
-void udisplay_feed(udisplay_t* ctx, const uint8_t* data, uint16_t len)
+int udisplay_feed(udisplay_t* ctx, const uint8_t* data, uint16_t len)
 {
     switch (ctx->cfg.transport) {
         case UDISPLAY_TRANSPORT_BLE:
-            udisplay_ble_feed(ctx, data, len);
-            break;
+            return udisplay_ble_feed(ctx, data, len);
         case UDISPLAY_TRANSPORT_TCP:
             if (tcp_rx_feed(&ctx->rx.tcp_rx, data, len, on_tcp_message, ctx) != 0) {
                 /* Overflow: stream desynced, cannot recover byte-by-byte. */
                 tcp_rx_reset(&ctx->rx.tcp_rx);
+                return -1;
             }
             break;
         default: /* TRANSPORT_NONE */
             udisplay_on_message(ctx, data, len);
             break;
     }
+    return 0;
 }
 
 void udisplay_on_message(udisplay_t* ctx, const uint8_t* msg, uint16_t len)

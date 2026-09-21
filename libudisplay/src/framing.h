@@ -11,7 +11,7 @@
  *
  * This header exposes the inbound BLE and TCP reassembly state machines,
  * which are internal to the library. Both are stream-oriented: BLE fragments
- * one ATT notification at a time (ble_rx_feed), TCP buffers arbitrary stream
+ * one ATT write at a time (ble_rx_feed), TCP buffers arbitrary stream
  * chunks and drains every complete length-prefixed message found in each
  * feed (tcp_rx_feed) -- a single TCP recv() can contain a partial message,
  * exactly one, or several back to back.
@@ -37,7 +37,7 @@ typedef enum {
 } ble_rx_status_t;
 
 /**
- * Feed one ATT notification into the reassembly state machine.
+ * Feed one ATT write into the reassembly state machine.
  *
  * BLE fragmentation format (v2.2, offset+packet_id scheme):
  *
