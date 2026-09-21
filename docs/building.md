@@ -366,7 +366,7 @@ sudo apt install -y \
 ### demo05 — minimal ESP32 BLE demo
 
 **Status: exists and works.** A button press toggles an LED; state is pushed to a
-connected uDisplay client over BLE via NimBLE GATT notifications. See
+connected uDisplay client over BLE via NimBLE GATT indications. See
 [`demos/demo05/README.md`](../demos/demo05/README.md) for supported ESP32 targets,
 flashing, and the manual smoke-test checklist.
 

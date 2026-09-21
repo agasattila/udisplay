@@ -70,9 +70,16 @@ Two characteristics:
 | Characteristic | UUID | Properties | Direction | Purpose |
 |---|---|---|---|---|
 | `control` | `29825AAA-D882-46F7-A4D6-EA8431AD3456` | WRITE_WITH_RESPONSE | client → device | Commands: handshake ack, hash request, chunk requests, events |
-| `data` | `29825AAA-D882-46F7-A4D6-EA8431AD3457` | NOTIFY | device → client | Responses: handshake, hash batch, chunk data, state updates, heartbeat, property messages |
+| `data` | `29825AAA-D882-46F7-A4D6-EA8431AD3457` | INDICATE | device → client | Responses: handshake, hash batch, chunk data, state updates, heartbeat, property messages |
 
 **MTU negotiation:** Client requests MTU = 512 bytes on connect. Device accepts up to its stack maximum (ESP-IDF supports up to 512). Effective payload per ATT packet = negotiated MTU − 3.
+
+**Reliability model.** Both directions use confirmed ATT operations: `control` is written with `WRITE_WITH_RESPONSE`, and `data` uses `INDICATE` (the client's ATT layer confirms each indication) instead of `NOTIFY`, which has no delivery guarantee. The client subscribes by writing `0x0002` to the `data` characteristic's CCCD. Each direction has at most one ATT operation outstanding, and the link delivers them in order. A confirmation means "delivered to the peer's host stack", not "consumed by the application". If a confirmation never arrives, ATT's 30 s transaction timeout terminates the connection, so a stalled link ends in a disconnect, never a silent hang.
+
+Consequences for implementers:
+- **Device send path:** only one indication may be unconfirmed at a time, so a device must queue the fragments of a message and send the next one when the previous is confirmed (on NimBLE: `BLE_GAP_EVENT_NOTIFY_TX` with status `BLE_HS_EDONE`). The queue must be bounded; overflow, an allocation failure, or an indication that ends in `BLE_HS_ETIMEOUT` is a link error (disconnect). See `demos/demo05`.
+- **No exactly-once across a reconnect.** If the link dies with a message in flight, neither side knows whether it was applied. That needs message-level sequence numbers or idempotent operations above the transport, and is out of scope here.
+- **Throughput** is roughly one fragment per connection interval per direction. A future optional fast path may add extra characteristics (for example `WRITE_WITHOUT_RESPONSE` / `NOTIFY` variants); a device would advertise support simply by exposing them, and the confirmed path would remain the fallback. It is not specified here.
 
 **`control` characteristic — WRITE_WITH_RESPONSE:** Every write to `control` uses ATT `WRITE_WITH_RESPONSE`, which provides ATT-level delivery confirmation. This eliminates the silent drop risk present in `WRITE_NO_RESPONSE` on Android (OEM-specific buffering behaviour). Client messages up to and including `HANDSHAKE_ACK(auth)` (35 bytes) exceed a single ATT packet at minimum MTU; all client→device messages are subject to the BLE framing rules below.
 
@@ -98,22 +105,26 @@ Header sizes: first fragment = 6 bytes; continuation fragment = 3 bytes. Minimum
 
 **Single-fragment messages:** When the entire message (including the 6-byte first-fragment header) fits in one ATT packet, it is sent as a single first fragment with no continuations. The receiver detects completion immediately: `offset (0) + fragment_payload_size == length`.
 
-**Completion rule:** The receiver assembles fragments until `offset + fragment_payload_size == length`. At that point the full message is complete and ready for protocol parsing. Any fragment whose payload would cause `accumulated_bytes > length` is a framing error — discard the in-flight message and reset state.
+**Completion rule:** The receiver assembles fragments until `offset + fragment_payload_size == length`. At that point the full message is complete and ready for protocol parsing. Any fragment whose payload would cause `accumulated_bytes > length` is a framing error (see the error rules below).
 
 **packet_id semantics and wrap-around:** `packet_id` is an 8-bit counter maintained independently by each transmitter (device for `data`; client for `control`). It increments by 1 for each new message and wraps from 255 to 0. All fragments of the same message carry the same `packet_id`. Wrap-around is a normal condition: a new message with `packet_id = 0` following `packet_id = 255` MUST be accepted as a fresh message, not confused with the preceding packet. `packet_id` counters on both sides reset to 0 on each new BLE connection.
 
-**Receiver error rules:** The receiver MUST discard an in-flight reassembly and reset to idle when any of the following occur:
+**Receiver error rules:** Because the link is reliable and ordered, a fragment that violates the framing rules can only mean an implementation bug or corrupt state. The receiver MUST treat any of the following as a **link error: discard the in-flight reassembly and disconnect**. It must not resynchronise on the next `offset = 0` fragment.
 
 | Condition | Action |
 |---|---|
-| `flags ≠ 0x00` in first fragment | Reject; wait for next fragment with `offset = 0` |
-| `length > 1024` (`UDISPLAY_MAX_MSG_SIZE`) in first fragment | Reject; wait for next fragment with `offset = 0` |
-| `offset > expected_next_offset` (gap in sequence) | Discard in-flight; process this as a potential new first fragment if `offset = 0` |
-| `offset ≠ expected_next_offset` (wrong, non-gap offset) | Discard in-flight; wait for next fragment with `offset = 0` |
-| Unexpected `packet_id` on continuation fragment | Discard in-flight; wait for next fragment with `offset = 0` |
-| `accumulated_bytes + fragment_payload_size > length` (over-completion) | Discard in-flight; wait for next fragment with `offset = 0` |
+| Fragment shorter than its header (fewer than 3 bytes, or a first fragment under 6 bytes) | Link error |
+| `flags ≠ 0x00` in first fragment | Link error |
+| `length > 1024` (`UDISPLAY_MAX_MSG_SIZE`) in first fragment | Link error |
+| First fragment payload larger than its declared `length` | Link error |
+| Continuation fragment with no message in flight | Link error |
+| `offset ≠ expected_next_offset` (gap or wrong position) | Link error |
+| Unexpected `packet_id` on a continuation fragment | Link error |
+| `accumulated_bytes + fragment_payload_size > length` (over-completion) | Link error |
 
-A fragment with `offset = 0` always starts a fresh reassembly, discarding any previously accumulated bytes for an incomplete message.
+Implementations MUST compute the accumulated size in a type wider than `u16` (`offset` can be up to `0xFFFF`), so that `offset + payload_len` cannot wrap and slip past the bounds check.
+
+A fragment with `offset = 0` always starts a fresh reassembly, discarding any previously accumulated bytes for an incomplete message (this is not an error). The `flags` byte stays reserved (MUST be 0) as a forward-compatibility hook: do not reuse or repurpose it.
 
 **Connection reset:** Both `packet_id` counters reset to 0 on BLE disconnect and reconnect. The first fragment of the first message after reconnect will have `offset = 0, packet_id = 0`; the receiver accepts it unconditionally.
 
@@ -314,7 +325,7 @@ sequentially into its hash array, relying on ordered delivery.
 If `chunk_index` is out of range (≥ chunk_count from HANDSHAKE), the device replies
 with `ERR_INVALID_CHUNK` (0xFF) instead.
 
-Over BLE, a 34-byte response is fragmented across two ATT notifications at MTU=23 (see BLE GATT § BLE fragmentation).
+Over BLE, a 34-byte response is fragmented across two ATT indications at MTU=23 (see BLE GATT § BLE fragmentation).
 
 ### CHUNK_REQUEST (0x20) — client → device
 
@@ -537,7 +548,7 @@ connected=0, active=0                ← disconnected (active always reset)
 - STATE_UPDATE pushes are blocked (`active=0`).
 - Incoming EVENT messages are silently dropped.
 - **Bootstrap-stall watchdog:** if the client connects but never progresses (no `HANDSHAKE_ACK`, `CLIENT_READY`, `CHUNK_HEADER_REQUEST`, or `CHUNK_REQUEST` arrives) for `UDISPLAY_HB_MISS_MAX` consecutive heartbeats, `on_comms_error` fires and the device gives up on the connection — the same recovery path as the post-active heartbeat-miss watchdog below, just triggered earlier. This shares one counter (`comms_miss_count`) and one threshold with the ACTIVE-state watchdog, since a connection is never in both states at once.
-- On BLE transport specifically, this watchdog only starts counting once the counted connection begins (`on_connect()` is called) — see the demo05 firmware notes below for the narrower window between radio-level connect and BLE notification subscribe, which this watchdog does not cover (firmware-level concern, not a library state).
+- On BLE transport specifically, this watchdog only starts counting once the counted connection begins (`on_connect()` is called) — see the demo05 firmware notes below for the narrower window between radio-level connect and BLE indication subscribe, which this watchdog does not cover (firmware-level concern, not a library state).
 
 **In ACTIVE state:**
 - All message types flow normally.
