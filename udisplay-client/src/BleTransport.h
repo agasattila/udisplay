@@ -19,13 +19,14 @@
  * Implements the Transport interface over a BLE GATT connection.
  * Outbound messages are fragmented via Proto::bleFrame() into ATT packets
  * written sequentially to the Control characteristic (WRITE_WITH_RESPONSE).
- * Inbound ATT notifications on the Data characteristic are reassembled via
- * Proto::bleUnframe() and emitted as messageReceived().
+ * Inbound ATT indications on the Data characteristic are reassembled via
+ * Proto::bleFeed() and emitted as messageReceived(). A framing error is a
+ * link error: the transport reports it and disconnects.
  *
  * GATT service / characteristic layout (must match libudisplay firmware):
  *   Service  29825AAA-D882-46F7-A4D6-EA8431AD3455
  *     Ctrl   29825AAA-D882-46F7-A4D6-EA8431AD3456  (WRITE_WITH_RESPONSE)
- *     Data   29825AAA-D882-46F7-A4D6-EA8431AD3457  (NOTIFY)
+ *     Data   29825AAA-D882-46F7-A4D6-EA8431AD3457  (INDICATE)
  */
 class BleTransport : public Transport
 {

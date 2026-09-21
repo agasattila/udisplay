@@ -219,12 +219,17 @@ struct BleRxState {
 QVector<QByteArray> bleFrame(const QByteArray& msg, uint8_t attPayloadSize,
                               uint8_t& packetId);
 
+enum class BleRxResult { More, Done, Error };
+
 /**
  * Feed one incoming ATT packet into the receiver state machine.
- * Returns true and sets out to the reassembled message when a complete message arrives.
- * Returns false when more fragments are needed or the fragment is discarded on error.
- * On error the state is reset; the next call with a valid first fragment starts fresh.
+ * Done: out holds the reassembled message. More: fragment accepted, message incomplete.
+ * Error: framing violation. The link is reliable and ordered, so the caller should
+ * drop the connection. State is reset regardless.
  */
+BleRxResult bleFeed(const QByteArray& attPkt, BleRxState& state, QByteArray& out);
+
+/** bleFeed() collapsed to bool: true only when a complete message arrived. */
 bool bleUnframe(const QByteArray& attPkt, BleRxState& state, QByteArray& out);
 
 } // namespace Proto
