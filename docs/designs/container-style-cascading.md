@@ -179,14 +179,51 @@ refs go unvalidated today, independent of this change). Full file-by-file plan, 
 and the validate.py dedup-regression hazard found while sketching the fix:
 `~/.gstack/projects/agasattila-udisplay/prog-main-design-20260923-113308.md`.
 
+**Eng review findings (folded into the plan, full text in the companion doc):**
+- **Architecture:** `ButtonGroupWidget.qml`'s per-item style lookup must be computed ONCE
+  per Repeater delegate and threaded to its 3 `effectiveStyle.*` reads — not called inline
+  3x. Mirrors `WidgetDelegate.qml`'s own computed-once pattern, the same one this doc's
+  Approach C rejection already established the project avoids re-litigating per-file. The
+  binding must ALSO include `controller.activeStyle` and `controller.widgetModel.generation`
+  as dummy dependency reads before calling `effectiveStyleFor()` — caught by the outside
+  voice (Codex) from the plan text and verified against `WidgetDelegate.qml`:134-138's own
+  documented rationale ("the same qml-invokable-no-notify staleness class PR9's adversarial
+  review already caught once"); my own first pass at this fix omitted them.
+- **Code quality (DRY):** extract a `_check_style_ref()` helper in `validate.py`, reused by
+  the existing per-widget check and both new button/button-group branches, instead of
+  duplicating the "style name must be declared" check a 3rd time.
+- **Validator scope (outside voice, verified):** the new button-face style-ref check must
+  use a fresh, button-local `seen_names` set, NOT the global one — verified via
+  `widget_ids.py`/`YamlParser.cpp` that widget identity is compound-path-based
+  (`button_a.icon` != `button_b.icon`), so folding face children into the global set
+  would reject valid YAML (two buttons each with an `icon` face child) as a false
+  duplicate. No button-group items name check is needed at all.
+- **Test gaps (CRITICAL, added directly per the regression rule):** (1) no test currently
+  asserts the D1 invariant — a styled `button`'s own `ButtonFace.qml` chrome stays
+  unaffected by its own `style:`; (2) no test covers a button-group item with NO `style:`
+  of its own still rendering the *group's* cascaded style once sibling items gain
+  per-item lookups; (3) two different buttons sharing a face-child name, confirming that's
+  accepted not flagged. All added to the test plan in the companion doc.
+- **Accepted, not actioned:** outside voice raised visual contrast (styled face content on
+  an unstyled button background) — same shape row/grid/dpad already ship with today,
+  unflagged; accepted as consistent with precedent rather than routed to
+  `/plan-design-review`. Also independently found (and logged to TODOS.md, not fixed
+  here): the client's `parseStyleProp()` is context-blind, so a row/grid nested inside a
+  button's face can already accept `style:` at parse time even though the schema forbids
+  authoring it there — pre-existing from PR22's original row/grid/dpad work, out of scope
+  for this PR.
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | not run (schema/architecture change, no product-direction decision) |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR | see below |
-| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | not run (no new UI surface) |
+| Codex Review | `/codex review` | Independent 2nd opinion | 1 | issues_found | 5 findings; 2 confirmed real bugs (missing QML reactivity deps, wrong validator scope) and applied after verification, 1 accepted as already-settled precedent, 1 folded into TODO-061, 1 N/A (already-settled by original PR22 scope) |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR | 2 issues (computed-once QML pattern, validate.py DRY helper), both folded; 2 CRITICAL test gaps added directly per regression rule (D1 own-chrome invariant, sibling-item style regression) |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | not run (visual-contrast concern raised by outside voice, accepted as consistent with row/grid/dpad's already-shipped precedent rather than routed here) |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | not run |
+
+**CROSS-MODEL:** Codex's plan-text-only pass (sandbox blocked repo access) caught 2 things my own multi-section review missed: the new `_itemStyle` binding needed the same `activeStyle`/`widgetModel.generation` dummy dependency reads `WidgetDelegate.qml`'s existing `_effectiveStyle` documents as required (Q_INVOKABLE calls aren't auto-tracked by QML's binding engine); and the validator fix's `seen_names` scope needed to be button-local, not global, since widget identity is compound-path-based (verified against `widget_ids.py`/`YamlParser.cpp`) — folding into the global set would have rejected valid multi-button YAML. Both verified against the actual code (Codex couldn't) before being applied. 2 other points were already-settled by the original PR22 design (depth cap, no style-reset mechanism) and 1 (visual contrast) was accepted as matching already-shipped precedent rather than acted on.
 
 **VERDICT:** ENG CLEARED — ready to implement.
 

@@ -228,6 +228,41 @@ settled during this `/ship`.
 
 ---
 
+### TODO-061: Close the client/schema asymmetry for style: on face-nested row/grid containers
+**What:** `YamlParser.cpp`'s `parseStyleProp()` decides whether to accept `style:` purely
+from `WidgetType` (Row/Grid/Dpad/etc.), with no awareness of whether a given row/grid is
+top-level or nested inside a `button`'s face. Since PR22 lifted the row/grid/dpad
+rejection, a row/grid *nested inside a button's face* can now also parse `style:` at the
+live client, even though `udisplay.schema.json`'s `buttonFaceRowContainer`/
+`buttonFaceGridContainer` `$defs` (deliberately, per the original cascading design)
+don't include a `style` property — `udisplay-gen validate` rejects that YAML as an
+unknown property while the client silently accepts and uses it.
+**Why:** Found during `/plan-eng-review` of PR22's button-cascading revision (2026-09-23),
+independently corroborated by Codex's outside-voice pass raising the same "parser/schema
+parity" class of concern. Pre-dates that revision — it's a latent asymmetry from PR22's
+original row/grid/dpad work, not something the button change introduces or worsens.
+**Pros:** Closes a real divergence between what `udisplay-gen validate` accepts and what
+the live client actually does — today a device could ship YAML that passes validation but
+behaves differently than validated, or (this direction) YAML that validation rejects but
+the client would have rendered correctly.
+**Cons:** Not a one-liner — `parseStyleProp()` doesn't currently know its container
+context, so fixing it means threading "is this row/grid inside a button face" down to
+the check (or, alternatively, deciding face-nested row/grid SHOULD accept `style:` too and
+updating the schema instead of the parser — a real design choice, not just a bug fix).
+**Context:** The client parses device-supplied YAML directly, with no schema validation
+at runtime (`YamlParser.cpp`'s own comments note this elsewhere) — so this asymmetry is
+low-severity in practice (only matters for hand-authored/malformed device YAML that
+bypasses `udisplay-gen`), but real. Start by reading `YamlParser.cpp`'s `buildWidget()`
+`Row`/`Grid` cases and `parseStyleProp()`'s call site, and `udisplay.schema.json`'s
+`buttonFaceRowContainer`/`buttonFaceGridContainer` `$defs`. Decide direction first
+(restrict the client to match the schema, or loosen the schema to match the client) before
+touching code — either is a legitimate fix, they're not equivalent.
+**Effort:** S (human: ~2-4 hrs / CC: ~30-45 min)
+**Priority:** P3 — no reported need yet, narrow authoring-time gap, not a runtime bug.
+**Depends on:** Nothing blocking.
+
+---
+
 ## P2 — Post-Launch Distribution & Quality
 
 ### TODO-004: Package manager distribution (v1.1)
