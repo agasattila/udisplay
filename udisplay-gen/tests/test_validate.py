@@ -589,13 +589,166 @@ def test_style_on_row_accepted():
     assert validate(doc, SCHEMA) == []
 
 
-def test_style_on_button_rejected_by_schema():
+def test_style_on_grid_accepted():
+    """Same acceptance as row, exercised separately: the C++ client and this
+    JSON schema are two independently maintained implementations
+    ("mirrors udisplay-client's YamlParser.cpp exactly" per schema.json's
+    own comments) — a client-side loop test covering all 3 types does not
+    exercise the schema.json entries at all, so each needs its own
+    dedicated schema-level test."""
     doc = {
         "device": {"name": "x"},
+        "style": {"alarm": {"accent": "#ff0000"}},
+        "widgets": {"g": {"type": "grid", "columns": 1, "style": "alarm",
+                           "widgets": {"a": {"type": "toggle"}}}},
+    }
+    assert validate(doc, SCHEMA) == []
+
+
+def test_style_on_dpad_accepted():
+    doc = {
+        "device": {"name": "x"},
+        "style": {"alarm": {"accent": "#ff0000"}},
+        "widgets": {"d": {"type": "dpad", "style": "alarm",
+                           "widgets": {"u": {"type": "button", "position": "top"}}}},
+    }
+    assert validate(doc, SCHEMA) == []
+
+
+def test_style_unknown_stylesheet_name_on_newly_accepting_types_rejected():
+    """The unknown-stylesheet-name check is a shared code path
+    (_check_style_ref(), called from the same top-of-loop site for every
+    widget type), so risk is low — but row/grid/dpad/button only gained
+    style: acceptance in this feature, and the existing unknown-name test
+    only covers the pre-existing `display` type. Exercise the combination
+    directly rather than trusting the shared path by inference alone."""
+    for wtype, extra in (
+        ("row", {"widgets": {"a": {"type": "toggle"}}}),
+        ("grid", {"columns": 1, "widgets": {"a": {"type": "toggle"}}}),
+        ("dpad", {"widgets": {"u": {"type": "button", "position": "top"}}}),
+        ("button", {}),
+    ):
+        doc = {
+            "device": {"name": "x"},
+            "widgets": {"w": {"type": wtype, "style": "nope", **extra}},
+        }
+        errors = validate(doc, SCHEMA)
+        assert errors, wtype
+        assert any("nope" in e for e in errors), wtype
+
+
+def test_style_on_button_accepted():
+    """`button` was the last type style: was rejected on — lifted for the
+    same reason row/grid/dpad's rejection was lifted (docs/designs/
+    container-style-cascading.md, Revision): a transparent frame becomes a
+    valid cascade root once cascading exists. button's own chrome is
+    unaffected — only its face children inherit."""
+    doc = {
+        "device": {"name": "x"},
+        "style": {"alarm": {"accent": "#ff0000"}},
         "widgets": {"b": {"type": "button", "style": "alarm"}},
     }
-    errors = schema_errors(doc, SCHEMA)
+    assert validate(doc, SCHEMA) == []
+
+
+def test_style_on_button_face_child_accepted():
+    doc = {
+        "device": {"name": "x"},
+        "style": {"alarm": {"accent": "#ff0000"}},
+        "widgets": {"b": {"type": "button", "style": "alarm",
+                           "widgets": {"lbl": {"type": "label", "text": "hi"}}}},
+    }
+    assert validate(doc, SCHEMA) == []
+
+
+def test_style_on_button_face_child_unknown_stylesheet_rejected():
+    """Closes a pre-existing gap: _semantic_errors_in_map() never recursed
+    into button/button-group before (neither was in CONTAINER_TYPES), so a
+    face child's unknown style: name went unvalidated regardless of button's
+    own style: acceptance."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {"b": {"type": "button",
+                           "widgets": {"lbl": {"type": "label", "text": "hi",
+                                                "style": "nope"}}}},
+    }
+    errors = validate(doc, SCHEMA)
     assert errors
+    assert any("nope" in e for e in errors)
+
+
+def test_style_on_button_group_item_accepted():
+    doc = {
+        "device": {"name": "x"},
+        "style": {"alarm": {"accent": "#ff0000"}},
+        "widgets": {"g": {"type": "button-group",
+                           "items": {"a": {"label": "A", "style": "alarm"},
+                                     "b": {"label": "B"}}}},
+    }
+    assert validate(doc, SCHEMA) == []
+
+
+def test_style_on_button_group_item_unknown_stylesheet_rejected():
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {"g": {"type": "button-group",
+                           "items": {"a": {"label": "A", "style": "nope"},
+                                     "b": {"label": "B"}}}},
+    }
+    errors = validate(doc, SCHEMA)
+    assert errors
+    assert any("nope" in e for e in errors)
+
+
+def test_style_duplicate_leaf_name_still_caught_for_button():
+    """Regression: the button branch added to _semantic_errors_in_map() must
+    fall through to the existing seen_names check for its OWN key, not
+    early-`continue` past it (the same mistake the CONTAINER_TYPES branch's
+    shape would produce if copied literally)."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "dup": {"type": "button"},
+            "row1": {"type": "row", "widgets": {"dup": {"type": "toggle"}}},
+        },
+    }
+    errors = validate(doc, SCHEMA)
+    assert errors
+    assert any("dup" in e and "duplicate" in e for e in errors)
+
+
+def test_style_duplicate_leaf_name_still_caught_for_button_group_itself():
+    """Same regression, the button-group branch: it must ALSO fall through
+    to seen_names for its own key. Previously this was asserted by the test
+    name/docstring above without actually exercising a button-group widget —
+    caught by the pre-landing testing specialist during /ship."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "dup": {"type": "button-group",
+                    "items": {"a": {"label": "A"}, "b": {"label": "B"}}},
+            "row1": {"type": "row", "widgets": {"dup": {"type": "toggle"}}},
+        },
+    }
+    errors = validate(doc, SCHEMA)
+    assert errors
+    assert any("dup" in e and "duplicate" in e for e in errors)
+
+
+def test_style_two_buttons_same_face_child_name_accepted():
+    """Widget identity is compound-path-based (widget_ids.py's assign(),
+    YamlParser.cpp's collectPathsRecursive()): "btn_a.icon" != "btn_b.icon".
+    The button branch's fresh LOCAL seen_names set must not reject this as
+    a false global duplicate — the mistake outside-voice review caught in
+    the original plan sketch."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "btn_a": {"type": "button", "widgets": {"icon": {"type": "label", "text": "A"}}},
+            "btn_b": {"type": "button", "widgets": {"icon": {"type": "label", "text": "B"}}},
+        },
+    }
+    assert validate(doc, SCHEMA) == []
 
 
 def test_style_on_section_accepted():

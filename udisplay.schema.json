@@ -106,7 +106,7 @@
     },
 
     "styleProp": {
-      "description": "Optional reference to a named stylesheet defined in the top-level style: block. The widget renders using that stylesheet's color tokens instead of the app-wide active style. On row/grid/dpad (which render no chrome of their own), this instead makes the container a cascade root: descendant widgets that don't set their own style: inherit this one, nearest styled ancestor wins. Not supported on button — a leaf-ish widget with no general subtree to cascade to. Must name a stylesheet actually declared in style: (enforced by udisplay-gen's semantic validation, not expressible in JSON Schema alone).",
+      "description": "Optional reference to a named stylesheet defined in the top-level style: block. The widget renders using that stylesheet's color tokens instead of the app-wide active style. On row/grid/dpad/button (which render no chrome of their own), this instead makes the widget a cascade root: descendant widgets that don't set their own style: inherit this one, nearest styled ancestor wins. On button specifically, this only affects its face children — the button's own chrome stays driven by the global style: block's button/button_text tokens, unaffected. Must name a stylesheet actually declared in style: (enforced by udisplay-gen's semantic validation, not expressible in JSON Schema alone).",
       "type": "string",
       "minLength": 1
     },
@@ -252,7 +252,7 @@
     },
 
     "buttonWidget": {
-      "description": "Momentary push button. Sends a `button_press` EVENT to the device on tap. No optimistic state — the device drives any resulting state change via STATE_UPDATE. Supports optional child widgets (led, rgbled, display, label, or a nested row/grid of those) rendered inline, at compact scale, on the button face. Button color is controlled globally via the top-level `style:` block (`button` token).",
+      "description": "Momentary push button. Sends a `button_press` EVENT to the device on tap. No optimistic state — the device drives any resulting state change via STATE_UPDATE. Supports optional child widgets (led, rgbled, display, label, or a nested row/grid of those) rendered inline, at compact scale, on the button face. Button color is controlled globally via the top-level `style:` block (`button` token) — `style:` on the button itself only affects its face children (see the `styleProp` $def).",
       "type": "object",
       "required": ["type"],
       "additionalProperties": false,
@@ -273,6 +273,7 @@
           "description": "Optional child widgets rendered inline on the button face — led, rgbled, display, label, or a nested row/grid of those (recursively restricted to the same types). Any number of children (matches the client's existing rendering support).",
           "$ref": "#/$defs/buttonFaceWidgetMap"
         },
+        "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" },
         "position": {
@@ -284,7 +285,7 @@
     },
 
     "buttonGroupWidget": {
-      "description": "Exclusive-select button group. Exactly one item is active at a time. Sends a `button_press` EVENT with the selected item's widget_id when the selection changes. Renders as a segmented control (grid layout). For a directional pad, use the `dpad` container type instead.",
+      "description": "Exclusive-select button group. Exactly one item is active at a time. Sends a `button_press` EVENT with the selected item's widget_id when the selection changes. Renders as a segmented control (grid layout). For a directional pad, use the `dpad` container type instead. `style:` (see the `styleProp` $def) colors this group's own selection chrome AND cascades to items that don't set their own `style:`.",
       "type": "object",
       "required": ["type", "items"],
       "additionalProperties": false,
@@ -327,6 +328,10 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 32
+        },
+        "style": {
+          "description": "Overrides the group's cascaded/explicit style for this item only — explicit item style always wins over the group's style, matching every other widget's resolution order (see the `styleProp` $def).",
+          "$ref": "#/$defs/styleProp"
         }
       }
     },
@@ -509,7 +514,7 @@
     },
 
     "sectionContainer": {
-      "description": "Named collapsible group container. Children get widget IDs as if they were top-level (section name excluded from ID path). Requires capabilities: [layout-v2].",
+      "description": "Named collapsible group container. Children get widget IDs as if they were top-level (section name excluded from ID path). Requires capabilities: [layout-v2]. `style:` (see the `styleProp` $def) colors this section's own header/border chrome AND cascades to children that don't set their own `style:`.",
       "type": "object",
       "required": ["type", "widgets"],
       "additionalProperties": false,

@@ -142,16 +142,19 @@ def schema_errors(doc: dict, schema: dict,
     return errors
 
 
-# Widget types that reject style: entirely (schema also enforces this via
-# additionalProperties: false — kept here too so the semantic check below
-# can skip a value that shouldn't exist in the first place, rather than
-# reporting a confusing "unknown stylesheet" on a field that's already a
-# schema violation). Mirrors udisplay-client's YamlParser.cpp exactly:
-# `button` is a leaf-ish widget (face children only) with no general
-# subtree to cascade a style to. row/grid/dpad render color:"transparent"
-# themselves but DO accept style: as a cascade root — see
-# docs/designs/container-style-cascading.md.
-_STYLE_REJECTED_TYPES = {"button"}
+def _check_style_ref(style_ref: str | None, style_names: set[str],
+                      widget_path: str) -> list[str]:
+    """Shared "style: names a declared stylesheet" check — every widget type
+    accepts style: now (button, the last rejected type, was lifted in
+    docs/designs/container-style-cascading.md's Revision). Factored out
+    since this same check now runs from 3 sites: the main per-widget loop
+    below, the button-face recursion, and the button-group items loop."""
+    if style_ref is None or style_ref in style_names:
+        return []
+    return [
+        f"  {widget_path}: style '{style_ref}' is not declared in the "
+        f"top-level style: block"
+    ]
 
 
 def _semantic_errors_in_map(widgets: dict, path_prefix: str,
@@ -161,7 +164,15 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
     - slider min < max
     - dpad's button children must all have position
     - leaf widget names globally unique across all container scopes
-    - style: (if present and the type allows it) names a declared stylesheet
+      (scoped to CONTAINER_TYPES's transparent-prefix subtree — see the
+      `button` branch below for why a `button`'s own face children get a
+      FRESH local scope instead of sharing this one)
+    - style: names a declared stylesheet
+    - button face children and button-group items — previously invisible to
+      every check above (CONTAINER_TYPES never included button/button-group,
+      so this function never recursed into them) — now get the style check
+      too, closing a pre-existing gap independent of button's own style:
+      acceptance
     """
     errors: list[str] = []
 
@@ -171,13 +182,7 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
         wtype = widget.get("type")
         widget_path = f"{path_prefix}.{key}" if path_prefix else f"widgets.{key}"
 
-        style_ref = widget.get("style")
-        if style_ref is not None and wtype not in _STYLE_REJECTED_TYPES:
-            if style_ref not in style_names:
-                errors.append(
-                    f"  {widget_path}: style '{style_ref}' is not declared in the "
-                    f"top-level style: block"
-                )
+        errors.extend(_check_style_ref(widget.get("style"), style_names, widget_path))
 
         if wtype in CONTAINER_TYPES:
             sub_widgets = widget.get("widgets", {})
@@ -193,6 +198,39 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
                     )
             errors.extend(_semantic_errors_in_map(sub_widgets, widget_path, seen_names, style_names))
             continue
+
+        if wtype == "button":
+            # `button` is NOT a prefix-transparent container (widget_ids.py's
+            # assign() and YamlParser.cpp's collectPathsRecursive() both key
+            # identity on the full compound path, e.g. "button_a.icon" !=
+            # "button_b.icon") — unlike CONTAINER_TYPES, where a short key IS
+            # the full identity path. Recursing with the GLOBAL seen_names
+            # set would reject valid YAML where two different buttons each
+            # have a same-named face child (e.g. "icon") as a false
+            # duplicate. A fresh, button-local set still correctly catches
+            # the real collision case: two sibling containers *inside this
+            # same button's face* reusing a name.
+            errors.extend(_semantic_errors_in_map(
+                widget.get("widgets", {}), widget_path, set(), style_names))
+            # Falls through (no early `continue`) to the seen_names check
+            # below for the button's OWN key, in the global/outer scope —
+            # exactly like every other non-container widget.
+
+        if wtype == "button-group":
+            # Items are hand-built (no `type:` key, per buttonGroupItem's
+            # schema) and have no sub-widgets of their own to recurse into —
+            # just check each item's own style: ref. No name-uniqueness
+            # check is needed here: YAML mapping keys are already unique
+            # within one button-group, and different groups never share a
+            # path prefix (each gets its own "group_key.item_key"), so
+            # there's nothing for seen_names to usefully catch across items.
+            for item_key, item in widget.get("items", {}).items():
+                if not isinstance(item, dict):
+                    continue
+                item_path = f"{widget_path}.{item_key}"
+                errors.extend(_check_style_ref(item.get("style"), style_names, item_path))
+            # Falls through to the seen_names check below for the group's
+            # OWN key, same as the button branch above.
 
         if wtype in DECORATION_TYPES:
             continue
