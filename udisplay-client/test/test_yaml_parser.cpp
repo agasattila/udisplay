@@ -1734,6 +1734,38 @@ private slots:
         QVERIFY(hasError);
     }
 
+    /* The unknown-stylesheet-name post-pass (YamlParser::parse(), after
+     * stylesOut and the full flat list both exist) is a single shared
+     * check applied to every widget's props["style"] regardless of type —
+     * but row/grid/dpad/button only gained style: acceptance in the
+     * container-style-cascading feature, and the test above only exercises
+     * the pre-existing `display` type. Exercise the combination directly. */
+    void style_unknownStylesheetName_onNewlyAcceptingTypes_failsParse()
+    {
+        const char* cases[][2] = {
+            { "row",   "    widgets:\n      a:\n        type: toggle\n" },
+            { "grid",  "    columns: 1\n    widgets:\n      a:\n        type: toggle\n" },
+            { "dpad",  "    widgets:\n      u:\n        type: button\n        position: top\n" },
+            { "button", "" },
+        };
+        for (const auto& c : cases) {
+            const QString yamlStr = QStringLiteral(
+                "widgets:\n"
+                "  w:\n"
+                "    type: %1\n"
+                "    style: nope\n%2").arg(QString::fromLatin1(c[0]), QString::fromLatin1(c[1]));
+            YamlParser p;
+            QList<WidgetDef> widgets;
+            QString name, version;
+            QVERIFY2(!p.parse(yamlStr.toUtf8(), widgets, name, version), c[0]);
+            bool hasError = false;
+            for (const auto& d : p.diagnostics())
+                if (d.field == QStringLiteral("style") &&
+                    d.severity == YamlParser::Severity::Error) hasError = true;
+            QVERIFY2(hasError, c[0]);
+        }
+    }
+
     void style_knownStylesheetName_parsesOk()
     {
         const char* yaml =
@@ -1751,13 +1783,84 @@ private slots:
         QCOMPARE(widgets[0].props[QStringLiteral("style")].toString(), QStringLiteral("alarm"));
     }
 
-    void style_onButton_rejected()
+    /* `button` was the last rejected type — same "transparent frame, no
+     * cascade consumer" shape as row/grid/dpad, lifted for the same reason
+     * (docs/designs/container-style-cascading.md, Revision). This is the
+     * PR22 reviewer's own example: a button's style: cascades to its face
+     * children (`effectiveStyleFor_buttonFaceChild_inheritsButtonStyle` in
+     * test_device_controller.cpp covers the resolution itself). */
+    void style_onButton_accepted()
     {
         const QString yamlStr = QStringLiteral(
+            "style:\n"
+            "  alarm:\n"
+            "    accent: '#ff0000'\n"
             "widgets:\n"
             "  c:\n"
             "    type: button\n"
             "    style: alarm\n");
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(p.parse(yamlStr.toUtf8(), widgets, name, version));
+        const WidgetDef* c = findByKey(widgets, "c");
+        QVERIFY(c);
+        QCOMPARE(c->props[QStringLiteral("style")].toString(), QStringLiteral("alarm"));
+    }
+
+    /* Button-group items are hand-built (no `type:` key), so they need
+     * their own parseStyleProp() call site (YamlParser.cpp's ButtonGroup
+     * case) — this is the client-parser half of what
+     * `effectiveStyleFor_buttonGroupItem_explicitOverridesGroup_
+     * siblingInherits` (test_device_controller.cpp) exercises for
+     * resolution. */
+    void style_onButtonGroupItem_accepted()
+    {
+        const QString yamlStr = QStringLiteral(
+            "style:\n"
+            "  alarm:\n"
+            "    accent: '#ff0000'\n"
+            "widgets:\n"
+            "  grp:\n"
+            "    type: button-group\n"
+            "    items:\n"
+            "      a:\n"
+            "        label: A\n"
+            "        style: alarm\n"
+            "      b:\n"
+            "        label: B\n");
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(p.parse(yamlStr.toUtf8(), widgets, name, version));
+        const WidgetDef* a = findByKey(widgets, "grp.a");
+        QVERIFY(a);
+        QCOMPARE(a->props[QStringLiteral("style")].toString(), QStringLiteral("alarm"));
+        /* Item "b" has no style: — props shouldn't even contain the key
+         * (matches every other unstyled widget's parseStyleProp() no-op). */
+        const WidgetDef* b = findByKey(widgets, "grp.b");
+        QVERIFY(b);
+        QVERIFY(!b->props.contains(QStringLiteral("style")));
+    }
+
+    /* Negative-path counterpart to style_onButtonGroupItem_accepted — the
+     * Python/schema side already had this
+     * (test_style_on_button_group_item_unknown_stylesheet_rejected), but the
+     * C++ side didn't, unlike row/grid/dpad/button which got explicit
+     * negative tests on both. Caught by the pre-landing testing specialist
+     * during /ship. */
+    void style_onButtonGroupItem_unknownName_rejected()
+    {
+        const QString yamlStr = QStringLiteral(
+            "widgets:\n"
+            "  grp:\n"
+            "    type: button-group\n"
+            "    items:\n"
+            "      a:\n"
+            "        label: A\n"
+            "        style: nope\n"
+            "      b:\n"
+            "        label: B\n");
         YamlParser p;
         QList<WidgetDef> widgets;
         QString name, version;
@@ -1767,6 +1870,36 @@ private slots:
             if (d.field == QStringLiteral("style") &&
                 d.severity == YamlParser::Severity::Error) hasError = true;
         QVERIFY(hasError);
+    }
+
+    /* Two DIFFERENT buttons each with a same-named face child — a valid,
+     * non-colliding pattern (widget identity is compound-path-based:
+     * "btn_a.icon" != "btn_b.icon", per widget_ids.py/YamlParser.cpp's
+     * collectPathsRecursive()) that must keep parsing cleanly now that
+     * button face children are visible to more of the pipeline. Client-side
+     * counterpart to test_validate.py's equivalent udisplay-gen check. */
+    void style_twoButtonsSameFaceChildName_accepted()
+    {
+        const QString yamlStr = QStringLiteral(
+            "widgets:\n"
+            "  btn_a:\n"
+            "    type: button\n"
+            "    widgets:\n"
+            "      icon:\n"
+            "        type: label\n"
+            "        text: A\n"
+            "  btn_b:\n"
+            "    type: button\n"
+            "    widgets:\n"
+            "      icon:\n"
+            "        type: label\n"
+            "        text: B\n");
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(p.parse(yamlStr.toUtf8(), widgets, name, version));
+        QVERIFY(findByKey(widgets, "btn_a.icon"));
+        QVERIFY(findByKey(widgets, "btn_b.icon"));
     }
 
     /* row/grid/dpad accept style: as a cascade root now

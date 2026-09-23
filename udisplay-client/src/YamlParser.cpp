@@ -106,35 +106,35 @@ static int parseGridColumns(const YAML::Node& node, const std::string& key, Diag
     return columns;
 }
 
-/* style: (stylesheet reference) — common to every widget type except
- * `button` (a leaf-ish widget with only face-children, not a general
- * subtree-theming container). row/grid/dpad render color:"transparent" in
- * QML with no chrome of their own, but they DO carry `style:` as a cascade
- * root: docs/designs/container-style-cascading.md's ancestor walk lets a
- * styled row/grid/dpad propagate that style to descendant widgets that
- * don't set their own — see docs/designs/unify-widget-style-handling.md's
- * Open Questions for why they originally rejected it (v1 had no cascading
- * consumer yet, so it would have been a silent no-op then). Shared by
- * buildWidget() AND buildAndAppendWidgets()'s hand-rolled top-level-section
- * construction — section widgets are NOT built via buildWidget(), so this
- * must be called from both sites rather than folded into buildWidget()
- * alone (a lesson from TODO-037: container-transparency logic in this file
- * already has more than one construction path for the same widget type).
+/* style: (stylesheet reference) — every widget type accepts it now. No type
+ * rejects style: any more: row/grid/dpad render color:"transparent" in QML
+ * with no chrome of their own, but carry style: as a cascade root
+ * (docs/designs/container-style-cascading.md's ancestor walk lets a styled
+ * row/grid/dpad propagate that style to descendant widgets that don't set
+ * their own). `button` was the last remaining rejected type — same
+ * "transparent frame, no cascade consumer" shape as row/grid/dpad, so it
+ * was rejected for the same stale reason (v1 had no cascading consumer yet,
+ * see docs/designs/unify-widget-style-handling.md's Open Questions) and the
+ * PR22 review that shipped row/grid/dpad's acceptance missed generalizing
+ * it to button too. Lifting it: button becomes a pure cascade root for its
+ * face widgets — no change to the button's own chrome, which stays driven
+ * by the global activeStyle's button/button_text tokens via ButtonFace.qml
+ * (docs/designs/container-style-cascading.md's Revision section, D1).
+ * Shared by buildWidget(), buildAndAppendWidgets()'s hand-rolled
+ * top-level-section construction, AND the button-group item construction
+ * loop below — section widgets and button-group items are NOT built via
+ * buildWidget(), so this must be called from all three sites rather than
+ * folded into buildWidget() alone (a lesson from TODO-037: container-
+ * transparency logic in this file already has more than one construction
+ * path for the same widget type).
  * Only checks whether style: was WRITTEN here — validating that the name
  * refers to an actually-declared stylesheet happens in a post-pass in
  * YamlParser::parse(), once the full style: block (stylesOut) and the full
  * flat widget list both exist. */
-static void parseStyleProp(const YAML::Node& node, const std::string& key,
-                           WidgetType type, QVariantMap& props, Diags& diags)
+static void parseStyleProp(const YAML::Node& node, QVariantMap& props)
 {
     if (!node["style"] || !node["style"].IsScalar()) return;
-    if (type == WidgetType::Button) {
-        diag(diags, Severity::Error, key, "style",
-             QStringLiteral("style: is not supported on '%1' widgets yet")
-                 .arg(widgetTypeName(type)));
-    } else {
-        props[QStringLiteral("style")] = nodeStr(node, "style");
-    }
+    props[QStringLiteral("style")] = nodeStr(node, "style");
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -481,7 +481,7 @@ static int buildWidget(const std::string& key,
         break;
     }
 
-    parseStyleProp(node, key, w.type, w.props, diags);
+    parseStyleProp(node, w.props);
 
     /* debug_state: optional design-mode preview value, per-type coercion.
      * Per-field try-catch so a type mismatch emits a Warning instead of
@@ -579,6 +579,16 @@ static int buildWidget(const std::string& key,
                 item.label    = nodeStr(ii->second, "label");
                 item.parentId = myRow;
                 item.props[QStringLiteral("position")] = nodeStr(ii->second, "position");
+                /* Container-level style cascading (docs/designs/
+                 * container-style-cascading.md, Revision): an item's own
+                 * explicit style: overrides the group's cascaded/explicit
+                 * style — the same "explicit widget style wins" resolution
+                 * order every other widget already gets, since item.parentId
+                 * = myRow (the group's own row) puts it directly in the
+                 * ancestor walk. Button-group items are hand-built (no
+                 * type: key), so this call site needs its own
+                 * parseStyleProp(), same as top-level sections. */
+                parseStyleProp(ii->second, item.props);
                 out.append(item);
             }
             if (itemCount < 2) {
@@ -679,7 +689,7 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
                 collapsible = node["collapsible"].as<bool>();
             s.props[QStringLiteral("collapsible")] = collapsible;
             s.parentId = parentId;
-            parseStyleProp(node, key, s.type, s.props, diags);
+            parseStyleProp(node, s.props);
             out.append(s);
             int sectionRow = out.size() - 1;
             if (node["widgets"] && node["widgets"].IsMap())
