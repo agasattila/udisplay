@@ -146,6 +146,24 @@ Item {
         props: ({})
     }
 
+    /* D1 invariant (docs/designs/container-style-cascading.md, Revision):
+     * a button carrying its own `style:` (now schema-legal, used as a
+     * cascade root for face widgets) must NOT recolor its own chrome —
+     * ButtonFace.qml's accentColor is wired to controller.activeStyle only
+     * (verified above, ButtonFace.qml:34), never to any per-widget resolved
+     * style. `style: "warning"` sitting unused in props is exactly the
+     * point: WidgetDelegate.qml's buttonComp doesn't even pass an
+     * effectiveStyle property to ButtonWidget (unlike display/led/label/
+     * etc.), so there is nothing for a per-widget style to plug into here. */
+    W.ButtonWidget {
+        id: styledButton
+        x: 350; y: 60
+        widgetId: 98
+        label: "Styled"
+        enabled: true
+        props: ({ style: "warning" })
+    }
+
     Timer {
         interval: 300
         running: true
@@ -239,7 +257,20 @@ Item {
             if (controller.lastClickId !== 99)
                 { fail("ButtonWidget's onButtonClicked should call sendButtonClick(99), got " + controller.lastClickId); return }
 
-            console.log("PASS: shape radius formula, disabled/enabled opacity+MouseArea, unpressed fill, showLabel (hidden/visible/empty), label size aliases, label color, plain-label ButtonWidget, signal wiring all correct")
+            /* D1 invariant: styledButton's props.style is "warning", but its
+             * ButtonFace must still render with the plain global
+             * controller.activeStyle.button — identical to plainLabelButton,
+             * which has no style at all. */
+            var styledFace = filterByType(toArray(styledButton.children), "ButtonFace_QML")[0]
+            if (!styledFace) { fail("could not find styledButton's ButtonFace"); return }
+            if (styledFace.color.toString() !== controller.activeStyle.button)
+                { fail("D1 invariant: a button's own style: must not recolor its chrome — expected activeStyle.button (" +
+                       controller.activeStyle.button + "), got " + styledFace.color); return }
+            if (styledFace.accentColor.toString() !== plainFace.accentColor.toString())
+                { fail("D1 invariant: styled and unstyled buttons should have identical accentColor, got " +
+                       styledFace.accentColor + " vs " + plainFace.accentColor); return }
+
+            console.log("PASS: shape radius formula, disabled/enabled opacity+MouseArea, unpressed fill, showLabel (hidden/visible/empty), label size aliases, label color, plain-label ButtonWidget, signal wiring, D1 own-chrome invariant all correct")
             Qt.exit(0)
         }
     }

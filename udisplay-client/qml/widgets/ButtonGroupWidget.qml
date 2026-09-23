@@ -69,12 +69,39 @@ Rectangle {
                 delegate: ButtonFace {
                     required property var model
 
+                    /* Container-level style cascading (docs/designs/
+                     * container-style-cascading.md, Revision): this item's
+                     * own resolved style — its own explicit style: if set,
+                     * else the nearest styled ancestor (typically the
+                     * group's own style:), else the app-wide active style.
+                     * Computed ONCE here per delegate and threaded to the 3
+                     * reads below, mirroring WidgetDelegate.qml's
+                     * _effectiveStyle pattern exactly — including its two
+                     * dummy dependency reads. effectiveStyleFor() is a
+                     * Q_INVOKABLE call, so QML's binding engine tracks
+                     * nothing inside it automatically; reading
+                     * controller.activeStyle and
+                     * controller.widgetModel.generation here forces this
+                     * property to re-evaluate on setActiveStyle() and on a
+                     * full YAML reload (row indices aren't stable across a
+                     * reparse) — without them this would silently go stale,
+                     * the same qml-invokable-no-notify class PR9's
+                     * adversarial review already caught once for
+                     * _childModel. model.row (not the Repeater's local
+                     * index) is correct here regardless of which model the
+                     * Repeater is bound to (WidgetModel.h's RowRole). */
+                    property var _itemStyle: {
+                        controller.activeStyle
+                        controller.widgetModel.generation
+                        return controller.effectiveStyleFor(model.row)
+                    }
+
                     width:  110; height: 36
                     enabled: root.enabled
                     showLabel: false
 
                     border.color: root.value === model.widgetId
-                                  ? effectiveStyle.button : effectiveStyle.border
+                                  ? _itemStyle.button : _itemStyle.border
                     border.width: 1
 
                     onButtonPressed:  controller.sendButtonPress(model.widgetId)
@@ -85,10 +112,14 @@ Rectangle {
                         anchors.centerIn: parent
                         text: model.label
                         /* button_text unconditionally — fill is always
-                         * activeStyle.button (via ButtonFace) now regardless
-                         * of selection, so activeStyle.text (meant for the
-                         * old dark "surface" fill) would be unreadable here. */
-                        color: effectiveStyle.button_text
+                         * activeStyle.button (via ButtonFace's hardwired
+                         * accentColor, unaffected by _itemStyle — see the D1
+                         * invariant) regardless of selection or per-item
+                         * style, so activeStyle.text (meant for the old dark
+                         * "surface" fill) would be unreadable here. Only the
+                         * label text color and the selection border read
+                         * _itemStyle. */
+                        color: _itemStyle.button_text
                         font.pixelSize: 13
                         font.bold: root.value === model.widgetId
                     }
