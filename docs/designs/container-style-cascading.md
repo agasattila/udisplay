@@ -34,7 +34,7 @@ parameter... nothing sets or consumes it yet." This design is that follow-up.
    list names `row`/`grid`/`dpad` as candidates for carrying a cascade-root `style:` even
    though they render `color:"transparent"` with no chrome of their own. `button` is not on
    that list — it's a leaf-ish widget (face children only, no general subtree), so it stays
-   in the reject list. *Agreed.*
+   in the reject list. *Agreed at the time — reversed on PR22 review, see Revision below.*
 4. **This is a documented behavior change, not an opt-in.** Existing YAML with `style:` on
    a `section`/`button-group` today has unstyled children following the app-wide active
    style; after this ships, those same unchanged children start inheriting the container's
@@ -143,6 +143,41 @@ draw founder signal from. The premises and approach above follow directly from t
 design doc's own stated intent ("resolver accepts an inherited-style parameter... additive
 later pass") and TODOS.md's already-drafted TODO-055 entry, both written during the
 issue #11 session — this design mostly formalizes decisions already staged there.
+
+## Revision (2026-09-23): PR22 change request — button support
+
+@agasattila requested changes on PR22: Premise 3 above was wrong to exclude `button`.
+`button` renders `color:"transparent"` at its own root exactly like row/grid/dpad — the
+same "silent no-op before cascading existed" reasoning that got lifted for them applies
+identically to `button`; PR22 under-generalized its own insight. Validated directly against
+this branch's code (`effectiveStyleFor()`'s ancestor walk is type-agnostic; button face
+children already get `parentId` = the button's own row) before agreeing — full trace,
+adversarially reviewed 3 rounds (10/10), in the companion doc.
+
+**Decisions** (durable log: `a65a1396-ce24-4912-a4bf-9414755e13e0`):
+- **Must-do (the literal PR22 ask):** `button` accepts `style:`, becomes a pure cascade
+  root for its face widgets — no change to the button's own chrome (`ButtonFace.qml` stays
+  on the global `button`/`button_text` tokens, matching row/grid/dpad's transparency, not
+  section/button-group's self-coloring).
+- **Adjacent, confirmed in-PR:** `button-group` items also gain their own overridable
+  `style:` — flagged mid-session that this needs a `ButtonGroupWidget.qml` Repeater change
+  (it applies the group's single `effectiveStyle` uniformly today, not per-item), re-
+  confirmed with the corrected scope before proceeding.
+- **Approach chosen: clean up + unify.** Same functional change as the minimal mirror, plus
+  deleting `_STYLE_REJECTED_TYPES`/the client's reject-branch entirely rather than leaving
+  it permanently empty — `button` was its last member. Matches issue #11's clean-break
+  precedent. A reusable per-item style API (for future custom-repeater containers) was
+  considered and rejected as speculative — no second consumer exists today.
+
+**Next steps** (supersedes this doc's own Next Steps 2-4 for `button`/`button-group`):
+lift `button` from `parseStyleProp()` and the schema/validator reject lists; wire
+`button-group` items through the same `parseStyleProp()` call plus the `ButtonGroupWidget.qml`
+per-item lookup; fix two pre-existing gaps found along the way — the shared `styleProp`
+schema description's stale "not supported on button" text, and `validate.py`'s semantic
+checker never recursing into `button`/`button-group` children at all (so face/item `style:`
+refs go unvalidated today, independent of this change). Full file-by-file plan, test list,
+and the validate.py dedup-regression hazard found while sketching the fix:
+`~/.gstack/projects/agasattila-udisplay/prog-main-design-20260923-113308.md`.
 
 ## GSTACK REVIEW REPORT
 
