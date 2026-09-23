@@ -378,13 +378,17 @@ Firmware wires up only the handlers it needs. Unused handlers stay NULL and are 
 | `label` | string | no | — | Text on the button face. Max 32 chars. |
 | `shape` | `"rect"` \| `"circle"` \| `"square"` | no | `"rect"` | `"circle"` for icon/action buttons; `"square"` for gamepad-style layouts. |
 | `widgets` | object | no | — | Named child widgets — `led`, `rgbled`, `display`, `label`, or a nested `row`/`grid` of those (see note above). `led`/`rgbled`/`display` children (at any depth) get a `parent.child` ID path and setter; `label` children get no ID (same as a standalone `label`); a nested `row`/`grid` container itself gets no ID (transparent, same as a top-level container). |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). A `button` renders no chrome of its own, so this only matters as a cascade root: face children with no `style:` of their own inherit it (see [Container-level style cascading](#per-widget-style-reference)). Does **not** recolor the button's own face — see the note below. |
 
 Button color is **not** a per-widget attribute. It comes from the global `style:`
 block's `button` / `button_text` tokens (see [Global Stylesheet](#global-stylesheet)
 below) — every button on the device shares the same color from the active theme.
 An earlier revision of this schema had a per-button `color:` hex attribute; it was
 removed when the global stylesheet feature shipped, so a button no longer picks its
-own accent color independent of the rest of the UI.
+own accent color independent of the rest of the UI. A button's own `style:` (added
+above) doesn't reopen that — it only cascades to unstyled face children, the same
+"transparent frame" role row/grid/dpad already play; it never recolors the button's
+own fill/border.
 
 `udisplay-gen validate` is the hard gate for excluded interactive types — the client
 itself parses device-supplied YAML directly, with no runtime schema validation, so it
@@ -523,6 +527,7 @@ Client selects item ──BUTTON_PRESS(item_id)──► Device
 | Attribute | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `label` | string | yes | — | Text on the item button. Max 32 chars. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block. Overrides the group's cascaded/explicit style for this item only — explicit item style always wins, matching every other widget's resolution order (see [Container-level style cascading](#per-widget-style-reference)). |
 
 **Example:**
 
@@ -1349,9 +1354,8 @@ settings UI) can select anything other than `default`.
 
 ### Per-widget style reference
 
-Any widget except `button` (a leaf-ish widget with only face-children, not a
-general subtree — a reference would be a no-op) accepts an optional `style:`
-property naming one of the themes declared in the top-level `style:` block:
+Every widget type accepts an optional `style:` property naming one of the
+themes declared in the top-level `style:` block:
 
 ```yaml
 style:
@@ -1385,11 +1389,11 @@ combined freely.
 
 #### Container-level style cascading
 
-A `style:` on a container (`row`, `grid`, `dpad`, `section`, or `button-group`)
-also cascades to descendant widgets that have no `style:` of their own, at any
-nesting depth (up to a defensive 10-level ancestor-walk cap). Resolution order
-for any given widget is: **its own explicit `style:`, else the nearest styled
-ancestor's `style:`, else the app-wide active theme.**
+A `style:` on a container (`row`, `grid`, `dpad`, `section`, `button-group`, or
+`button`) also cascades to descendant widgets that have no `style:` of their
+own, at any nesting depth (up to a defensive 10-level ancestor-walk cap).
+Resolution order for any given widget is: **its own explicit `style:`, else
+the nearest styled ancestor's `style:`, else the app-wide active theme.**
 
 ```yaml
 style:
@@ -1397,6 +1401,8 @@ style:
     accent: "#00d4aa"
   alarm:
     accent: "#e05555"
+  night:
+    accent: "#111111"
 
 widgets:
   alarm_panel:
@@ -1416,13 +1422,18 @@ widgets:
     type: display        # outside alarm_panel — follows the app-wide active theme
 ```
 
-`row`/`grid`/`dpad` render no chrome of their own, so `style:` on them is
-meaningful *only* as a cascade root for their subtree — it never changes their
-own (nonexistent) rendering. `section`/`button-group` still color their own
-chrome with it too, exactly as before.
+`row`/`grid`/`dpad`/`button` render no chrome of their own from `style:` — it's
+meaningful *only* as a cascade root for their subtree (a button's face
+children, for `button` specifically) — it never changes their own rendering.
+A button's fill/border still comes entirely from the global `style:` block's
+`button`/`button_text` tokens (see [`button`](#button) above), unaffected by
+its own `style:`. `section`/`button-group` still color their own chrome with
+it too, exactly as before.
 
 **Behavior change:** before this feature, an unstyled child of a styled
 `section`/`button-group` followed the app-wide active theme. It now inherits
 the container's style instead — no YAML edit required to see the new
 appearance on an existing device file that already set `style:` on one of
-those two container types.
+those two container types. `style:` on `button`/`button-group` items is new
+acceptance, not a behavior change — both were previously rejected outright
+with a parse-time diagnostic.

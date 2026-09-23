@@ -944,10 +944,12 @@ Android CI job could be considered fully done.
 ### TODO-055: Container-level style cascading (row/grid/section theming their subtree)
 **Status:** ✅ DONE — issue #20, `docs/designs/container-style-cascading.md`.
 `DeviceController::effectiveStyleFor()` now walks the `parentId` ancestor chain
-(capped at 10 levels); `row`/`grid`/`dpad` accept `style:` as a cascade root
-(client parser, schema, and `udisplay-gen` validator all updated); `button`
-still rejects it. Resolution order: explicit widget style → nearest styled
-ancestor → app-wide active style. Documented as an intentional behavior change
-in `docs/widgets.md`'s Container-level style cascading section — no opt-in
-flag, matching this project's clean-break precedent.
+(capped at 10 levels); `row`/`grid`/`dpad`/`button` all accept `style:` as a
+cascade root (client parser, schema, and `udisplay-gen` validator all
+updated — `button` was extended in response to PR22's review, see
+`docs/designs/container-style-cascading.md`'s Revision section). Resolution
+order: explicit widget style → nearest styled ancestor → app-wide active
+style. Documented as an intentional behavior change in `docs/widgets.md`'s
+Container-level style cascading section — no opt-in flag, matching this
+project's clean-break precedent.
 **Depends on:** Issue #11 / `docs/designs/unify-widget-style-handling.md`'s v1 landing first.
