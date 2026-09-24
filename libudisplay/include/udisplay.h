@@ -21,10 +21,13 @@
  *   // Framing and fragmentation are handled automatically by the library.
  *   //
  *   static void my_send(const uint8_t* data, uint16_t len, void* ud) {
- *       // BLE: each call is one ATT notification (already fragmented, v2.2 scheme).
+ *       // BLE: each call is one ATT indication payload (already fragmented,
+ *       // v2.2 scheme). Only one indication may be unconfirmed at a time, so
+ *       // real firmware queues here and drains on BLE_GAP_EVENT_NOTIFY_TX;
+ *       // this direct call is only valid for a single in-flight fragment.
  *       // TCP: each call is one length-prefixed message.
- *       ble_gatts_notify_custom(conn_handle, data_attr_handle,
- *                               ble_hs_mbuf_from_flat(data, len));
+ *       ble_gatts_indicate_custom(conn_handle, data_attr_handle,
+ *                                 ble_hs_mbuf_from_flat(data, len));
  *   }
  *
  *   // Provide event callback (called when client interacts with a widget)
@@ -54,6 +57,7 @@
  *       // On BLE connect:    udisplay_on_connect(&g_ui)
  *       // On BLE disconnect: udisplay_on_disconnect(&g_ui)
  *       // On BLE ATT write from client: udisplay_feed(&g_ui, data, len)
+ *       //   (returns -1 on a framing error: disconnect)
  *       // From timer (e.g. every 5s): udisplay_heartbeat(&g_ui)
  *       // From sensor loop: udisplay_send_float(&g_ui, WIDGET_ID_READING, value)
  *       // On BLE MTU event:  udisplay_ble_set_mtu(&g_ui, mtu_value - 3)
@@ -167,9 +171,16 @@ typedef struct {
 } udisplay_event_t;
 
 /**
- * Transport send function. Called by the library to transmit a complete
- * (already-framed) message. The implementation writes to the BLE
- * characteristic or TCP socket.
+ * Transport send function. Called by the library to transmit one
+ * already-framed unit: one BLE ATT fragment, or one length-prefixed TCP
+ * message. The library may call it many times in a row (once per fragment)
+ * and possibly from inside the BLE host task, so it MUST NOT block.
+ *
+ * Contract: accept (copy) @p data before returning, or fail loudly (drop the
+ * connection). Silently discarding a fragment corrupts the peer's
+ * reassembly. On BLE the data characteristic uses INDICATE, which allows one
+ * unconfirmed indication at a time: queue the fragments and send the next one
+ * when the previous is confirmed (see demos/demo05).
  */
 typedef void (*udisplay_send_fn)(const uint8_t* data, uint16_t len, void* userdata);
 
@@ -395,20 +406,28 @@ void udisplay_on_disconnect(udisplay_t* ctx);
  * Call this from your transport's receive callback (BLE GATT write on the
  * `control` characteristic, or TCP socket read) regardless of which
  * transport is configured — this is the one entry point firmware needs.
+ *
+ * @return 0 on success, -1 on a link error: a BLE framing violation (bad
+ *         flags, length > UDISPLAY_MAX_MSG_SIZE, orphan continuation, wrong
+ *         offset or packet_id, over-completion) or a TCP reassembly
+ *         overflow. Both links are reliable and ordered, so this means a
+ *         bug or corrupt state: the caller should drop the connection.
+ *         Reassembly state has already been reset.
  */
-void udisplay_feed(udisplay_t* ctx, const uint8_t* data, uint16_t len);
+int udisplay_feed(udisplay_t* ctx, const uint8_t* data, uint16_t len);
 
 /* ── BLE transport ───────────────────────────────────────────────────────── */
 
 /**
- * Feed a raw BLE ATT notification into the library. Internally reassembles
+ * Feed a raw BLE ATT write into the library. Internally reassembles
  * fragmented messages (v2.2 offset+packet_id scheme) and calls
  * udisplay_on_message() when a complete message is ready.
+ * @return 0 on success, -1 on a framing error (see udisplay_feed()).
  *
  * Lower-level primitive — most firmware should call udisplay_feed() instead
  * and let it dispatch here based on the configured transport.
  */
-void udisplay_ble_feed(udisplay_t* ctx, const uint8_t* att_payload, uint16_t len);
+int udisplay_ble_feed(udisplay_t* ctx, const uint8_t* att_payload, uint16_t len);
 
 /**
  * Update the BLE ATT MTU payload size after MTU negotiation.
@@ -473,8 +492,8 @@ void udisplay_reset_property(udisplay_t* ctx, uint8_t target_id, uint8_t propert
 /* ── BLE framing utilities (exposed for transport adapters and tests) ─────── */
 
 /**
- * Fragment @p msg_len bytes from @p msg into BLE ATT notifications using the
- * v2.2 offset+packet_id scheme. Each notification fits within @p mtu_payload
+ * Fragment @p msg_len bytes from @p msg into BLE ATT payloads using the
+ * v2.2 offset+packet_id scheme. Each fragment fits within @p mtu_payload
  * bytes (ATT payload = negotiated_mtu - 3). @p packet_id is embedded in every
  * fragment header; the caller is responsible for incrementing it per message.
  *
