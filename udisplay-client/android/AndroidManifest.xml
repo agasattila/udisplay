@@ -12,10 +12,15 @@
   Android 6–11: BLUETOOTH + BLUETOOTH_ADMIN + ACCESS_FINE_LOCATION (required for
     scanning even when not using location — Android platform requirement).
   Android 12+ (API 31+): BLUETOOTH_SCAN + BLUETOOTH_CONNECT replace BLUETOOTH_ADMIN.
-    ACCESS_FINE_LOCATION still required for scan results that include device addresses.
-    usesPermissionFlags="neverForLocation" can suppress the location requirement only
-    when scan results are filtered to not return addresses — we do not set this flag
-    because we use the BT address as the stable uniqueId for deduplication.
+    Location is NOT a general Android 12+ BLE requirement: an app that declares
+    BLUETOOTH_SCAN with usesPermissionFlags="neverForLocation" scans without it.
+    uDisplay does not set that flag (we use the BT address as the stable uniqueId
+    for deduplication), and without it Android 12+ still delivers scan results
+    only to apps holding ACCESS_FINE_LOCATION. So this is a uDisplay-specific
+    requirement on API 31+. It must be PRECISE: an approximate-only (COARSE) grant
+    still yields zero results. FINE and COARSE are both declared because Android
+    recommends requesting them together on 31+ (Qt's QLocationPermission::Precise
+    does so).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -31,7 +36,8 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"
                      android:minSdkVersion="31" />
 
-    <!-- Location permission required for BLE scan on all Android versions -->
+    <!-- Location: Android requirement for BLE scan on API <= 30; uDisplay-specific
+         requirement on API 31+ (no neverForLocation flag, see header comment) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 

@@ -14,11 +14,6 @@
 #include <QBluetoothDeviceInfo>
 #endif
 
-#ifdef Q_OS_ANDROID
-#include <QBluetoothPermission>
-#include <QLocationPermission>
-#endif
-
 int main(int argc, char* argv[])
 {
     QGuiApplication app(argc, argv);
@@ -31,15 +26,11 @@ int main(int argc, char* argv[])
     app.setApplicationVersion(QStringLiteral(UDISPLAY_CLIENT_DISPLAY_VERSION));
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/app.png")));
 
-#ifdef Q_OS_ANDROID
-    QLocationPermission locationPermission;
-    locationPermission.setAccuracy(QLocationPermission::Precise);
-    qApp->requestPermission(locationPermission, [](const QPermission &permission) {
-        if (permission.status() == Qt::PermissionStatus::Granted) {
-                //ok
-            }
-        });
-#endif
+    /* Runtime permissions (Bluetooth, Location) are requested at point of
+     * use in BleScanner::startScan() — see BleScanner.cpp — not here at
+     * startup, so the OS prompt only appears when the user actually opens
+     * the discovery screen, and denial is routed to scanError instead of
+     * being silently discarded. */
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("uDisplay Client"));

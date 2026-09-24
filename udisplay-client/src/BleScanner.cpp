@@ -9,6 +9,7 @@
 #include <QVariant>
 
 #ifdef Q_OS_ANDROID
+#include <QCoreApplication>
 // #include <QtCore/private/qandroidextras_p.h>
 #endif
 
@@ -32,17 +33,111 @@ void BleScanner::startScan()
 
     _devices.clear();
 
-    this->_permGranted = false;
+#ifdef Q_OS_ANDROID
+    /* BLUETOOTH_SCAN/BLUETOOTH_CONNECT (API 31+) and ACCESS_FINE_LOCATION
+     * are declared in AndroidManifest.xml but are runtime-dangerous
+     * permissions — declaring them does not grant them. Request explicitly
+     * before starting the agent; starting without a granted permission is
+     * what silently returns zero scan results on-device. */
+    requestAndroidPermissionsThenStart();
+#else
+    beginAgentScan();
+#endif
+}
+
+void BleScanner::stopScan()
+{
+    if (m_agent) {
+        _started = false;
+        m_agent->stop();
+        _availabilityTimer.stop();
+    }
+#ifdef Q_OS_ANDROID
+    /* Invalidate any permission-request callback still in flight so it
+     * cannot start a scan after the caller has already stopped/left. */
+    ++m_scanGeneration;
+#endif
+}
 
 #ifdef Q_OS_ANDROID
-#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    /* On Android 12+ Qt 6.5+ surfaces runtime permission requests automatically
-     * through QBluetoothDeviceDiscoveryAgent::start().  No explicit request
-     * needed here — the agent will emit error(InputOutputError) if the user
-     * denies and the caller can surface the message from the scanError signal. */
-#endif
+template <typename Permission>
+void BleScanner::requestPermissionThenContinue(const Permission& permission,
+                                                int generation,
+                                                const QString& deniedMessage,
+                                                std::function<void()> onGranted)
+{
+    auto proceed = [this, generation, permission, deniedMessage, onGranted]() {
+        if (generation != m_scanGeneration)
+            return; /* stopScan() or a newer startScan() ran meanwhile */
+
+        if (qApp->checkPermission(permission) != Qt::PermissionStatus::Granted) {
+            emit scanError(deniedMessage);
+            return;
+        }
+        onGranted();
+    };
+
+    if (qApp->checkPermission(permission) == Qt::PermissionStatus::Undetermined) {
+        qApp->requestPermission(permission, [proceed](const QPermission&) { proceed(); });
+    } else {
+        proceed();
+    }
+}
+
+void BleScanner::requestAndroidPermissionsThenStart()
+{
+    /* Known narrow limitation: if startScan() is called again while an OS
+     * permission dialog from a PRIOR call is still on screen (no stopScan()
+     * in between), this newer call's generation wins — the older request's
+     * callback becomes stale and no-ops — but it also issues a second
+     * qApp->requestPermission() call for the same still-Undetermined
+     * permission. DiscoveryScreen.qml's OWN transitions always pair
+     * startScan() with a stopScan() first, but DeviceController can emit a
+     * redundant stateChanged("error") for the SAME error (setError() has no
+     * value-guard, unlike setState()) when a dropped TCP connection fires
+     * both Transport::errorOccurred and Transport::disconnected — QML's
+     * onStateChanged doesn't diff the value either, so that can call
+     * startScan() twice with no stopScan() between them. See TODOS.md for
+     * the DeviceController-side fix (out of scope here — the affected code
+     * has nothing to do with Android permissions); an in-flight guard here
+     * would only be needed if that fix isn't landed first. */
+    const int generation = ++m_scanGeneration;
+
+    QBluetoothPermission btPermission;
+    btPermission.setCommunicationModes(QBluetoothPermission::Access);
+
+    /* Precise location is a uDisplay requirement, not a general Android 12+
+     * BLE one: BLUETOOTH_SCAN alone suffices for apps that declare
+     * usesPermissionFlags="neverForLocation". We don't (see the manifest —
+     * the BT address is our stable device id), and without that flag
+     * Android 12+ still drops scan results for callers lacking
+     * ACCESS_FINE_LOCATION, exactly as on API <= 30. So location is not
+     * optional here on any API level. An "Approximate only" grant leaves
+     * Precise un-Granted and lands in the denied branch below, which is
+     * correct: coarse alone still yields zero results. For Precise on
+     * API 31+, Qt's Android backend (qtbase qpermissions_android.cpp)
+     * requests FINE together with
+     * COARSE, as Android recommends; both are declared in the manifest. */
+    QLocationPermission locPermission;
+    locPermission.setAccuracy(QLocationPermission::Precise);
+
+    requestPermissionThenContinue(btPermission, generation,
+        QStringLiteral("Bluetooth permission denied — enable it in Android "
+                       "Settings to discover devices."),
+        [this, generation, locPermission]() {
+            requestPermissionThenContinue(locPermission, generation,
+                QStringLiteral("Precise location permission denied — uDisplay "
+                               "needs it to receive Bluetooth scan results "
+                               "(approximate location is not enough). Enable "
+                               "precise location in Settings to discover "
+                               "devices."),
+                [this]() { beginAgentScan(); });
+        });
+}
 #endif
 
+void BleScanner::beginAgentScan()
+{
     m_agent = new QBluetoothDeviceDiscoveryAgent(this);
     m_agent->setLowEnergyDiscoveryTimeout(0);
 
@@ -66,15 +161,6 @@ void BleScanner::startScan()
 
     m_agent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
     _started = true;
-}
-
-void BleScanner::stopScan()
-{
-    if (m_agent) {
-        _started = false;
-        m_agent->stop();
-        _availabilityTimer.stop();
-    }
 }
 
 QString BleScanner::deviceKey(const QBluetoothDeviceInfo &info) const

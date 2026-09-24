@@ -99,6 +99,16 @@ if(Qt6Bluetooth_FOUND)
     set(HAVE_BLE ON)
 endif()
 
+# Android BLE requests runtime permissions via QBluetoothPermission (Qt 6.5)
+# with setCommunicationModes(Access) (Qt 6.6 — without it Qt also requests the
+# undeclared BLUETOOTH_ADVERTISE). Desktop keeps the 6.4 floor above; only the
+# Android BLE path needs 6.6. Fail at configure time rather than mid-compile.
+if(ANDROID AND HAVE_BLE AND Qt6_VERSION VERSION_LESS 6.6)
+    message(FATAL_ERROR
+        "Android BLE builds require Qt 6.6 or newer (found ${Qt6_VERSION}): "
+        "BleScanner uses QBluetoothPermission::setCommunicationModes().")
+endif()
+
 if(HAVE_BLE)
     message(STATUS "BLE: Qt6::Bluetooth found — BleTransport enabled")
 else()
