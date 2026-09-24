@@ -42,6 +42,15 @@ Item {
             property string button_text:  "#0d0d1a"
         }
         property var widgetModel: FakeWidgetModel {}
+        /* effectiveStyleFor(row) stand-in: row 1 (the "top" cell) carries
+         * its own style; every other row falls back to activeStyle. */
+        property var upStyle: QtObject {
+            property string button:      "#ff8800"
+            property string button_text: "#101010"
+        }
+        function effectiveStyleFor(row) {
+            return row === 1 ? upStyle : activeStyle
+        }
         property int lastPressId: -1
         property int lastReleaseId: -1
         property int lastClickId: -1
@@ -63,9 +72,9 @@ Item {
         id: dpadItems
         property bool ready: false
         Component.onCompleted: {
-            append({ widgetId: 0x20, type: "button", label: "Up",   enabled: true,  widgetVisible: true, value: 0,
+            append({ widgetId: 0x20, row: 1, type: "button", label: "Up",   enabled: true,  widgetVisible: true, value: 0,
                      flex: 0, align: "", props: { position: "top" } })
-            append({ widgetId: 0x21, type: "button", label: "Down", enabled: false, widgetVisible: true, value: 0,
+            append({ widgetId: 0x21, row: 2, type: "button", label: "Down", enabled: false, widgetVisible: true, value: 0,
                      flex: 0, align: "", props: { position: "bottom" } })
             ready = true
         }
@@ -186,7 +195,16 @@ Item {
                 { fail("dpad cell dimensions must never be below 44px, got " +
                        cellAt(dpad, 1).width + "x" + cellAt(dpad, 1).height); return }
 
-            console.log("PASS: dpad cells forward their own widgetId (no group selection); unpopulated/corner cells are invisible+disabled; cellSize never drops below the 44px touch-target floor")
+            /* Each cell's own effective style colors its own ButtonFace
+             * (docs/designs/container-style-cascading.md, Revision 2): the
+             * styled "top" cell fills with upStyle, "bottom" with activeStyle. */
+            var topFace = topBtn.children[0], bottomFace = bottomBtn.children[0]
+            if (topFace.color.toString() !== controller.upStyle.button)
+                { fail("'top' cell should fill with its own effective style (" + controller.upStyle.button + "), got " + topFace.color); return }
+            if (bottomFace.color.toString() !== controller.activeStyle.button)
+                { fail("'bottom' cell should fill with activeStyle.button, got " + bottomFace.color); return }
+
+            console.log("PASS: dpad cells forward their own widgetId (no group selection); unpopulated/corner cells are invisible+disabled; cellSize never drops below the 44px touch-target floor; per-cell effective style colors each cell's fill")
             Qt.exit(0)
         }
     }

@@ -89,7 +89,9 @@ Rectangle {
                      * adversarial review already caught once for
                      * _childModel. model.row (not the Repeater's local
                      * index) is correct here regardless of which model the
-                     * Repeater is bound to (WidgetModel.h's RowRole). */
+                     * Repeater is bound to (WidgetModel.h's RowRole).
+                     * Also colors this item's own ButtonFace fill (Revision
+                     * 2: a widget's effective style drives its own chrome). */
                     property var _itemStyle: {
                         controller.activeStyle
                         controller.widgetModel.generation
@@ -99,6 +101,7 @@ Rectangle {
                     width:  110; height: 36
                     enabled: root.enabled
                     showLabel: false
+                    effectiveStyle: _itemStyle
 
                     border.color: root.value === model.widgetId
                                   ? _itemStyle.button : _itemStyle.border
@@ -112,13 +115,10 @@ Rectangle {
                         anchors.centerIn: parent
                         text: model.label
                         /* button_text unconditionally — fill is always
-                         * activeStyle.button (via ButtonFace's hardwired
-                         * accentColor, unaffected by _itemStyle — see the D1
-                         * invariant) regardless of selection or per-item
-                         * style, so activeStyle.text (meant for the old dark
-                         * "surface" fill) would be unreadable here. Only the
-                         * label text color and the selection border read
-                         * _itemStyle. */
+                         * _itemStyle.button (via ButtonFace's accentColor)
+                         * regardless of selection, so _itemStyle.text (meant
+                         * for the old dark "surface" fill) would be
+                         * unreadable here. */
                         color: _itemStyle.button_text
                         font.pixelSize: 13
                         font.bold: root.value === model.widgetId

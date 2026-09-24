@@ -316,10 +316,8 @@ Item {
              * single effectiveStyle uniformly. Checked via border.color and
              * label color, the same two channels the group-level style
              * already used (see the "selection shows only via border color"
-             * assertions above) — FILL stays global always: ButtonFace.qml's
-             * accentColor (ButtonFace.qml:34) is hardwired to
-             * controller.activeStyle.button, shared unchanged with
-             * standalone ButtonWidget under D1, never per-item. Both items
+             * assertions above), plus FILL: each item's effective style
+             * also colors its own ButtonFace chrome (Revision 2). Both items
              * are unselected here (cascadeGroup.value is null), so
              * border.color reads _itemStyle.border for each — a fallback to
              * activeStyle.border here would mean the per-item lookup isn't
@@ -341,6 +339,10 @@ Item {
             if (ownFace.border.color.toString() === controller.activeStyle.border ||
                 inheritFace.border.color.toString() === controller.activeStyle.border)
                 { fail("neither cascade item should fall back to activeStyle.border — per-item lookup isn't happening"); return }
+            if (ownFace.color.toString() !== controller.ownStyle.button)
+                { fail("item with own style: should fill with ownStyle.button, got " + ownFace.color); return }
+            if (inheritFace.color.toString() !== controller.groupStyle.button)
+                { fail("item with no style: should fill with groupStyle.button (inherited), got " + inheritFace.color); return }
             var ownLabel = labelOf(ownFace), inheritLabel = labelOf(inheritFace)
             if (!ownLabel || !inheritLabel) { fail("could not find cascade item labels"); return }
             if (ownLabel.color.toString() !== controller.ownStyle.button_text)
@@ -353,7 +355,7 @@ Item {
              * must re-render with the NEW border color — proves
              * _itemStyle's controller.activeStyle dummy dependency read
              * actually forces re-evaluation, not just that the binding
-             * compiled once. Border, not fill, for the same reason as above. */
+             * compiled once. Fill must follow too (own-chrome rule). */
             var lFacesBefore = facesOf(liveGroup)
             if (lFacesBefore.length !== 2) { fail("expected 2 ButtonFace items in live group, got " + lFacesBefore.length); return }
             if (lFacesBefore[0].border.color.toString() !== controller.defaultStyle.border)
@@ -373,6 +375,8 @@ Item {
             var lFacesAfter = facesOf(liveGroup)
             if (lFacesAfter[0].border.color.toString() !== "#123456")
                 { fail("live group item should re-render with the new activeStyle.border after setActiveStyle(), got " + lFacesAfter[0].border.color); return }
+            if (lFacesAfter[0].color.toString() !== "#123456")
+                { fail("live group item fill should re-render with the new activeStyle.button after setActiveStyle(), got " + lFacesAfter[0].color); return }
 
             /* Generation dependency: the scenario above only proves the
              * controller.activeStyle dummy dependency read works. This
@@ -404,7 +408,7 @@ Item {
                 { fail("row 5 should re-render with the override color after widgetModel.generation bumps, got " +
                        lRow5After.border.color + " — the generation dummy dependency read may be missing"); return }
 
-            console.log("PASS: button-group grid items share button's fill/opacity; selection is border-only; signal wiring forwards correct widgetIds; per-item style cascading resolves independently; live setActiveStyle() and widgetModel.generation bump both re-render")
+            console.log("PASS: button-group grid items share button's fill/opacity; selection is border-only; signal wiring forwards correct widgetIds; per-item style cascading resolves independently (border, label, fill); live setActiveStyle() and widgetModel.generation bump both re-render")
             Qt.exit(0)
         }
     }

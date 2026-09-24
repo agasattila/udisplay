@@ -146,15 +146,16 @@ Item {
         props: ({})
     }
 
-    /* D1 invariant (docs/designs/container-style-cascading.md, Revision):
-     * a button carrying its own `style:` (now schema-legal, used as a
-     * cascade root for face widgets) must NOT recolor its own chrome —
-     * ButtonFace.qml's accentColor is wired to controller.activeStyle only
-     * (verified above, ButtonFace.qml:34), never to any per-widget resolved
-     * style. `style: "warning"` sitting unused in props is exactly the
-     * point: WidgetDelegate.qml's buttonComp doesn't even pass an
-     * effectiveStyle property to ButtonWidget (unlike display/led/label/
-     * etc.), so there is nothing for a per-widget style to plug into here. */
+    /* Own-chrome rule (docs/designs/container-style-cascading.md, Revision
+     * 2 — reverses the earlier D1 invariant): a button's effective style
+     * colors its OWN chrome. WidgetDelegate.qml's buttonComp threads the
+     * resolved style in as effectiveStyle; this stands in for that with a
+     * "warning" style deliberately distinct from activeStyle. */
+    QtObject {
+        id: warningStyle
+        property string button:      "#ff8800"
+        property string button_text: "#101010"
+    }
     W.ButtonWidget {
         id: styledButton
         x: 350; y: 60
@@ -162,6 +163,7 @@ Item {
         label: "Styled"
         enabled: true
         props: ({ style: "warning" })
+        effectiveStyle: warningStyle
     }
 
     Timer {
@@ -257,20 +259,22 @@ Item {
             if (controller.lastClickId !== 99)
                 { fail("ButtonWidget's onButtonClicked should call sendButtonClick(99), got " + controller.lastClickId); return }
 
-            /* D1 invariant: styledButton's props.style is "warning", but its
-             * ButtonFace must still render with the plain global
-             * controller.activeStyle.button — identical to plainLabelButton,
-             * which has no style at all. */
+            /* Own-chrome rule: styledButton's resolved "warning" style
+             * drives its ButtonFace fill and label color; the unstyled
+             * plainLabelButton keeps the app-wide activeStyle. */
             var styledFace = filterByType(toArray(styledButton.children), "ButtonFace_QML")[0]
             if (!styledFace) { fail("could not find styledButton's ButtonFace"); return }
-            if (styledFace.color.toString() !== controller.activeStyle.button)
-                { fail("D1 invariant: a button's own style: must not recolor its chrome — expected activeStyle.button (" +
-                       controller.activeStyle.button + "), got " + styledFace.color); return }
-            if (styledFace.accentColor.toString() !== plainFace.accentColor.toString())
-                { fail("D1 invariant: styled and unstyled buttons should have identical accentColor, got " +
-                       styledFace.accentColor + " vs " + plainFace.accentColor); return }
+            if (styledFace.color.toString() !== warningStyle.button)
+                { fail("a button's effective style should color its own fill — expected " +
+                       warningStyle.button + ", got " + styledFace.color); return }
+            var styledLabelText = labelTextOf(styledFace)
+            if (!styledLabelText || styledLabelText.color.toString() !== warningStyle.button_text)
+                { fail("a button's effective style should color its own label — expected " +
+                       warningStyle.button_text + ", got " + (styledLabelText ? styledLabelText.color : "none")); return }
+            if (plainFace.color.toString() !== controller.activeStyle.button)
+                { fail("unstyled button should fill with activeStyle.button, got " + plainFace.color); return }
 
-            console.log("PASS: shape radius formula, disabled/enabled opacity+MouseArea, unpressed fill, showLabel (hidden/visible/empty), label size aliases, label color, plain-label ButtonWidget, signal wiring, D1 own-chrome invariant all correct")
+            console.log("PASS: shape radius formula, disabled/enabled opacity+MouseArea, unpressed fill, showLabel (hidden/visible/empty), label size aliases, label color, plain-label ButtonWidget, signal wiring, effective style on own chrome all correct")
             Qt.exit(0)
         }
     }

@@ -86,6 +86,20 @@ Rectangle {
 
                 readonly property real naturalSize: Math.max(btn.implicitWidth, btn.implicitHeight)
 
+                /* This cell button's own resolved style (its own style:, else
+                 * the dpad's, else an outer ancestor's, else activeStyle) —
+                 * colors its ButtonFace chrome. Same computed-once pattern
+                 * and dummy dependency reads as WidgetDelegate.qml's
+                 * _effectiveStyle / ButtonGroupWidget.qml's _itemStyle:
+                 * effectiveStyleFor() is a Q_INVOKABLE, so without them this
+                 * would go stale on setActiveStyle() or a YAML reload. */
+                property var _cellStyle: {
+                    controller.activeStyle
+                    controller.widgetModel.generation
+                    return btnItem ? controller.effectiveStyleFor(btnItem.row)
+                                   : controller.activeStyle
+                }
+
                 implicitWidth:  grid.cellSize
                 implicitHeight: grid.cellSize
 
@@ -97,6 +111,7 @@ Rectangle {
                     label:    cell.btnItem ? cell.btnItem.label : ""
                     enabled:  cell.btnItem ? cell.btnItem.enabled !== false : false
                     props:    cell.btnItem ? cell.btnItem.props : ({})
+                    effectiveStyle: cell._cellStyle
                 }
             }
         }

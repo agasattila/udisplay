@@ -116,10 +116,9 @@ static int parseGridColumns(const YAML::Node& node, const std::string& key, Diag
  * was rejected for the same stale reason (v1 had no cascading consumer yet,
  * see docs/designs/unify-widget-style-handling.md's Open Questions) and the
  * PR22 review that shipped row/grid/dpad's acceptance missed generalizing
- * it to button too. Lifting it: button becomes a pure cascade root for its
- * face widgets — no change to the button's own chrome, which stays driven
- * by the global activeStyle's button/button_text tokens via ButtonFace.qml
- * (docs/designs/container-style-cascading.md's Revision section, D1).
+ * it to button too. Lifting it: button's effective style colors its own
+ * ButtonFace chrome AND cascades to its face widgets
+ * (docs/designs/container-style-cascading.md's Revision 2).
  * Shared by buildWidget(), buildAndAppendWidgets()'s hand-rolled
  * top-level-section construction, AND the button-group item construction
  * loop below — section widgets and button-group items are NOT built via
