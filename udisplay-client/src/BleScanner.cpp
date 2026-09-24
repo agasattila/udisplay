@@ -106,6 +106,18 @@ void BleScanner::requestAndroidPermissionsThenStart()
     QBluetoothPermission btPermission;
     btPermission.setCommunicationModes(QBluetoothPermission::Access);
 
+    /* Precise location is a uDisplay requirement, not a general Android 12+
+     * BLE one: BLUETOOTH_SCAN alone suffices for apps that declare
+     * usesPermissionFlags="neverForLocation". We don't (see the manifest —
+     * the BT address is our stable device id), and without that flag
+     * Android 12+ still drops scan results for callers lacking
+     * ACCESS_FINE_LOCATION, exactly as on API <= 30. So location is not
+     * optional here on any API level. An "Approximate only" grant leaves
+     * Precise un-Granted and lands in the denied branch below, which is
+     * correct: coarse alone still yields zero results. For Precise on
+     * API 31+, Qt's Android backend (qtbase qpermissions_android.cpp)
+     * requests FINE together with
+     * COARSE, as Android recommends; both are declared in the manifest. */
     QLocationPermission locPermission;
     locPermission.setAccuracy(QLocationPermission::Precise);
 
@@ -114,9 +126,11 @@ void BleScanner::requestAndroidPermissionsThenStart()
                        "Settings to discover devices."),
         [this, generation, locPermission]() {
             requestPermissionThenContinue(locPermission, generation,
-                QStringLiteral("Location permission denied — Android requires "
-                               "it for Bluetooth scanning. Enable it in "
-                               "Settings to discover devices."),
+                QStringLiteral("Precise location permission denied — uDisplay "
+                               "needs it to receive Bluetooth scan results "
+                               "(approximate location is not enough). Enable "
+                               "precise location in Settings to discover "
+                               "devices."),
                 [this]() { beginAgentScan(); });
         });
 }

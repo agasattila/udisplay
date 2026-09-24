@@ -186,6 +186,14 @@ instruction) rather than stopping to ask — recorded here for the record:
    establishes why this app still needs location explicitly (BT address as
    uniqueId, no `neverForLocation`) — Approach A's separate request is
    correct and now required, not just convenient.
+   *PR #31 review clarification:* on API 31+ location is a uDisplay-specific
+   requirement (no `neverForLocation`, so Android withholds scan results from
+   apps without `ACCESS_FINE_LOCATION`), not a general Android BLE one. It
+   stays mandatory and must be *precise*: an approximate-only grant still
+   yields zero results and surfaces as the denied error. `Precise` makes Qt
+   request FINE+COARSE together on 31+, per Android guidance. The
+   `setCommunicationModes()` call needs Qt 6.6, so Android BLE builds now
+   require Qt 6.6+ (CMake `FATAL_ERROR` + `#error` guard); desktop stays 6.4.
 4. **Permission-request lifecycle needs explicit state, not just "continue
    in the callback."** Must guard against: `startScan()` called again while
    a permission request is pending (no duplicate dialogs); `stopScan()`

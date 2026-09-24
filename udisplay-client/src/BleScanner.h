@@ -10,6 +10,9 @@
 #include <QElapsedTimer>
 #include <QTimer>
 #ifdef Q_OS_ANDROID
+#if QT_VERSION < QT_VERSION_CHECK(6, 6, 0)
+#error "Android BLE requires Qt 6.6+ (QBluetoothPermission::setCommunicationModes)"
+#endif
 #include <QBluetoothPermission>
 #include <QLocationPermission>
 #include <functional>

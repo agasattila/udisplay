@@ -312,6 +312,16 @@ at app launch — so the OS prompt appears the first time you actually try to
 discover a device. If you deny either permission, the discovery screen shows an
 actionable error instead of silently returning an empty device list.
 
+Location must be granted as **precise**, on every API level. On Android 12+ this is
+a uDisplay requirement rather than a general Android one: the manifest does not declare
+`neverForLocation` (the Bluetooth address is the device's stable id), and without that
+flag Android only delivers BLE scan results to apps holding `ACCESS_FINE_LOCATION`.
+If the user grants only approximate location, the scan reports a permission error.
+
+Android BLE builds require **Qt 6.6+** (`QBluetoothPermission::setCommunicationModes`);
+CMake fails at configure time on older Android kits. Desktop builds keep the Qt 6.4
+minimum. CI builds Android with Qt 6.11.
+
 If you just want an APK to sideload instead of building locally, CI already builds one:
 the `build-android` job in
 [`udisplay-client-build.yml`](../.github/workflows/udisplay-client-build.yml) produces an
