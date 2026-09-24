@@ -36,10 +36,10 @@ Item {
     QtObject {
         id: controller
         property var styles: ({
-            "default": { accent: "#00d4aa", text_muted: "#888888" },
-            "alarm":   { accent: "#e05555", text_muted: "#888888" },
-            "warning": { accent: "#f5a623", text_muted: "#888888" },
-            "night":   { accent: "#111111", text_muted: "#888888" }
+            "default": { accent: "#00d4aa", text_muted: "#888888", button: "#00d4aa", button_text: "#0d0d1a" },
+            "alarm":   { accent: "#e05555", text_muted: "#888888", button: "#e05555", button_text: "#ffffff" },
+            "warning": { accent: "#f5a623", text_muted: "#888888", button: "#f5a623", button_text: "#000000" },
+            "night":   { accent: "#111111", text_muted: "#888888", button: "#111111", button_text: "#eeeeee" }
         })
         property var activeStyle: styles["default"]
         property var widgetModel: FakeWidgetModel {}
@@ -49,7 +49,7 @@ Item {
          * are pinned; row 2 is deliberately absent from this table (no
          * explicit style:), matching a real parse where props.style is
          * simply unset for that widget. */
-        property var _rowStyleNames: ({ 0: "alarm", 1: "warning" })
+        property var _rowStyleNames: ({ 0: "alarm", 1: "warning", 3: "alarm" })
         function effectiveStyleFor(row) {
             var name = _rowStyleNames[row]
             return (name !== undefined && name in styles) ? styles[name] : activeStyle
@@ -91,6 +91,11 @@ Item {
             /* row 2: unpinned — follows controller.activeStyle */
             append({ row: 2, widgetId: 0x12, type: "display", label: "", enabled: true, widgetVisible: true, value: 3,
                      flex: 0, align: "", props: { format: "%.0f" } })
+            /* row 3: button pinned "alarm" — WidgetDelegate's buttonComp
+             * must thread _effectiveStyle into ButtonWidget so the
+             * button's own face fills with alarm's button token. */
+            append({ row: 3, widgetId: 0x13, type: "button", label: "Go", enabled: true, widgetVisible: true, value: 0,
+                     flex: 0, align: "", props: { style: "alarm" } })
             ready = true
         }
     }
@@ -120,7 +125,7 @@ Item {
         running: true
         onTriggered: {
             var ds = delegates()
-            if (ds.length !== 3) { fail("expected 3 delegates, got " + ds.length); return }
+            if (ds.length !== 4) { fail("expected 4 delegates, got " + ds.length); return }
 
             /* ── Initial state ───────────────────────────────────────── */
             if (accentOf(ds[0]) !== "#e05555")
@@ -129,6 +134,13 @@ Item {
                 { fail("row 1 (pinned warning) initial accent should be #f5a623, got " + accentOf(ds[1])); return }
             if (accentOf(ds[2]) !== "#00d4aa")
                 { fail("row 2 (unpinned) initial accent should follow default (#00d4aa), got " + accentOf(ds[2])); return }
+
+            /* Button (row 3): WidgetDelegate threads the resolved style
+             * through ButtonWidget into its ButtonFace fill. */
+            var btnFace = ds[3].item ? filterByType(toArray(ds[3].item.children), "ButtonFace_QML")[0] : null
+            if (!btnFace) { fail("could not find row 3 button's ButtonFace"); return }
+            if (btnFace.color.toString() !== "#e05555")
+                { fail("row 3 (button pinned alarm) face should fill with alarm.button #e05555, got " + btnFace.color); return }
 
             /* ── Switch the app-wide active style ────────────────────── */
             controller.setActiveStyle("night")
@@ -140,7 +152,10 @@ Item {
             if (accentOf(ds[2]) !== "#111111")
                 { fail("row 2 (unpinned) must follow setActiveStyle(\"night\"), got " + accentOf(ds[2])); return }
 
-            console.log("PASS: pinned widgets (alarm, warning) stayed pinned; unpinned widget followed setActiveStyle")
+            if (btnFace.color.toString() !== "#e05555")
+                { fail("row 3 (button pinned alarm) must stay pinned after setActiveStyle, got " + btnFace.color); return }
+
+            console.log("PASS: pinned widgets (alarm, warning, alarm button face) stayed pinned; unpinned widget followed setActiveStyle")
             Qt.exit(0)
         }
     }

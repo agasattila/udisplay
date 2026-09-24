@@ -103,8 +103,11 @@ Rectangle {
                     showLabel: false
                     effectiveStyle: _itemStyle
 
+                    /* Selected ring uses button_text, the on-fill contrast
+                     * token: fill is _itemStyle.button, so a button-colored
+                     * ring would be invisible against it. */
                     border.color: root.value === model.widgetId
-                                  ? _itemStyle.button : _itemStyle.border
+                                  ? _itemStyle.button_text : _itemStyle.border
                     border.width: 1
 
                     onButtonPressed:  controller.sendButtonPress(model.widgetId)

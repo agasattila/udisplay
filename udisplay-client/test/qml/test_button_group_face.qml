@@ -54,7 +54,16 @@ Item {
          * setActiveStyle() test below can swap it and prove _itemStyle
          * re-evaluates. */
         property var activeStyle: defaultStyle
-        function setActiveStyle(s) { activeStyle = s }
+        /* Opaque store for the fake resolver below. A real
+         * DeviceController::effectiveStyleFor() is a C++ Q_INVOKABLE, so
+         * QML's binding engine tracks nothing it reads. A JS function
+         * reading notifying QML properties WOULD be tracked, which would
+         * let the dummy-dependency tests pass even with the production
+         * dummy reads deleted. Mutating a plain JS object's fields in
+         * place emits no change signal, so reads from _opaque behave like
+         * the real C++ boundary. */
+        property var _opaque: ({})
+        function setActiveStyle(s) { _opaque.active = s; activeStyle = s }  // store first, then notify — matches C++ order
 
         /* Own-style / group-style stand-ins for the cascading test below —
          * deliberately distinct from activeStyle's colors so a test failure
@@ -83,19 +92,18 @@ Item {
          * to WITHOUT touching activeStyle, isolating the
          * widgetModel.generation dummy-dependency read from the activeStyle
          * one (the live-restyle scenario above only proves the latter). */
-        property var _row5Override: null
 
         /* effectiveStyleFor(row) stand-in: the two rows used by the
          * cascading test below resolve to their designated stand-in style;
-         * row 5 resolves to _row5Override once set; every other row (the
+         * row 5 resolves to _opaque.row5 once set; every other row (the
          * fill/opacity/selection test's items, and the live-setActiveStyle
          * test's item) falls back to activeStyle, matching "outside any
          * styled container follows activeStyle". */
         function effectiveStyleFor(row) {
             if (row === 2) return ownStyle       // styled item
             if (row === 3) return groupStyle     // unstyled item, inherits group
-            if (row === 5 && _row5Override) return _row5Override
-            return activeStyle
+            if (row === 5 && _opaque.row5) return _opaque.row5
+            return _opaque.active || defaultStyle
         }
     }
 
@@ -259,9 +267,13 @@ Item {
             if (selected.color.toString() !== controller.activeStyle.button)
                 { fail("item fill should equal activeStyle.button, got " + selected.color); return }
 
-            /* Selection shows only via border color. */
-            if (selected.border.color.toString() !== controller.activeStyle.button)
-                { fail("selected item border should be activeStyle.button, got " + selected.border.color); return }
+            /* Selection shows via border color: button_text (the on-fill
+             * contrast token), never the fill color itself, which would
+             * make the ring invisible. */
+            if (selected.border.color.toString() !== controller.activeStyle.button_text)
+                { fail("selected item border should be activeStyle.button_text, got " + selected.border.color); return }
+            if (selected.border.color.toString() === selected.color.toString())
+                { fail("selected item border must differ from its fill, both " + selected.color); return }
             if (unselected.border.color.toString() !== controller.activeStyle.border)
                 { fail("unselected item border should be activeStyle.border, got " + unselected.border.color); return }
 
@@ -395,7 +407,7 @@ Item {
             if (lRow5Before.border.color.toString() !== "#123456")
                 { fail("row 5 should still be on the post-restyle activeStyle.border before the generation bump, got " + lRow5Before.border.color); return }
 
-            controller._row5Override = Qt.createQmlObject(
+            controller._opaque.row5 = Qt.createQmlObject(
                 'import QtQuick; QtObject { property string border: "#7788aa"; property string button: "#7788aa"; property string button_text: "#000000" }',
                 liveGroup, "genOverrideStyle")
             controller.widgetModel.generation = controller.widgetModel.generation + 1
