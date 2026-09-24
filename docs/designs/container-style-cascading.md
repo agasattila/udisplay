@@ -213,6 +213,47 @@ and the validate.py dedup-regression hazard found while sketching the fix:
   authoring it there — pre-existing from PR22's original row/grid/dpad work, out of scope
   for this PR.
 
+## Revision 2 (2026-09-24): PR22 change request — effective style drives own chrome
+
+@agasattila's second PR22 review reversed D1 above. With D1, `style: warning` on a plain
+`button` with only `label:` had no visible effect at all — no face child to inherit it,
+and the button's own fill/label stayed on the app-wide `activeStyle`. The reviewer's rule,
+adopted as-is:
+
+> A widget's effective style is used for the widget's own rendering wherever that widget
+> consumes style tokens, and the same effective style is also the inherited style context
+> for its descendants.
+
+Resolution order is unchanged (explicit → nearest styled ancestor → app-wide active);
+only its *consumers* grow.
+
+**Decisions:**
+- **`ButtonFace.qml` gains an `effectiveStyle` input** (default `controller.activeStyle`,
+  so callers with no resolver in hand keep today's behavior) and reads `button`/
+  `button_text` from it instead of `controller.activeStyle`.
+- **Standalone button:** `WidgetDelegate.qml`'s `buttonComp` now threads `_effectiveStyle`
+  into `ButtonWidget`, which passes it to its `ButtonFace`. Face children are untouched —
+  they already resolve their own style through the generic `effectiveStyleFor()` ancestor
+  walk, which reaches the button's row.
+- **Button-group items:** the per-item `_itemStyle` already computed in
+  `ButtonGroupWidget.qml` is now also passed to `ButtonFace`, so item fill follows the
+  item's own style → group style → active style, same as border/label already did.
+- **Dpad buttons:** by the same rule, each dpad cell resolves
+  `effectiveStyleFor(btnItem.row)` (computed once per cell, with the same `activeStyle`/
+  `widgetModel.generation` dummy dependency reads) and passes it to its `ButtonWidget`.
+  Without this, dpad buttons would have been the one button form still ignoring `style:`.
+- **No implicit label child for `label:`.** Rejected per the review: it would only fix
+  label color, not fill.
+- **Behavior change (documented in `docs/widgets.md`):** a button inside a styled
+  container (row/grid/dpad/section/button-group) now fills with that container's
+  `button` token instead of the app-wide one.
+
+**Tests:** `test_button_face.qml`'s D1 assertion flipped — a styled button's fill and
+label follow its effective style, and an unstyled button still uses `activeStyle`.
+`test_button_group_face.qml` asserts per-item fill for own-style vs. inherited items plus
+fill re-render on `setActiveStyle()`. `test_dpad_widget.qml` asserts a styled cell's fill
+differs from an unstyled sibling's.
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |

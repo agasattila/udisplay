@@ -947,7 +947,8 @@ Android CI job could be considered fully done.
 (capped at 10 levels); `row`/`grid`/`dpad`/`button` all accept `style:` as a
 cascade root (client parser, schema, and `udisplay-gen` validator all
 updated — `button` was extended in response to PR22's review, see
-`docs/designs/container-style-cascading.md`'s Revision section). Resolution
+`docs/designs/container-style-cascading.md`'s Revision section; Revision 2
+makes each button's effective style also color its own face). Resolution
 order: explicit widget style → nearest styled ancestor → app-wide active
 style. Documented as an intentional behavior change in `docs/widgets.md`'s
 Container-level style cascading section — no opt-in flag, matching this

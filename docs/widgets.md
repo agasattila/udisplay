@@ -378,17 +378,26 @@ Firmware wires up only the handlers it needs. Unused handlers stay NULL and are 
 | `label` | string | no | — | Text on the button face. Max 32 chars. |
 | `shape` | `"rect"` \| `"circle"` \| `"square"` | no | `"rect"` | `"circle"` for icon/action buttons; `"square"` for gamepad-style layouts. |
 | `widgets` | object | no | — | Named child widgets — `led`, `rgbled`, `display`, `label`, or a nested `row`/`grid` of those (see note above). `led`/`rgbled`/`display` children (at any depth) get a `parent.child` ID path and setter; `label` children get no ID (same as a standalone `label`); a nested `row`/`grid` container itself gets no ID (transparent, same as a top-level container). |
-| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). A `button` renders no chrome of its own, so this only matters as a cascade root: face children with no `style:` of their own inherit it (see [Container-level style cascading](#per-widget-style-reference)). Does **not** recolor the button's own face — see the note below. |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). Colors the button's own face (fill/label via the theme's `button`/`button_text` tokens) and cascades to face children with no `style:` of their own (see [Container-level style cascading](#per-widget-style-reference)). |
 
-Button color is **not** a per-widget attribute. It comes from the global `style:`
-block's `button` / `button_text` tokens (see [Global Stylesheet](#global-stylesheet)
-below) — every button on the device shares the same color from the active theme.
-An earlier revision of this schema had a per-button `color:` hex attribute; it was
-removed when the global stylesheet feature shipped, so a button no longer picks its
-own accent color independent of the rest of the UI. A button's own `style:` (added
-above) doesn't reopen that — it only cascades to unstyled face children, the same
-"transparent frame" role row/grid/dpad already play; it never recolors the button's
-own fill/border.
+Button color is **not** a free-form per-widget attribute. It comes from the
+`button` / `button_text` tokens of the button's *effective* theme (see
+[Global Stylesheet](#global-stylesheet) below): its own `style:`, else the nearest
+styled ancestor's, else the app-wide active theme. An earlier revision of this
+schema had a per-button `color:` hex attribute; it was removed when the global
+stylesheet feature shipped — to recolor a button, point its `style:` (or an
+ancestor's) at a named theme instead:
+
+```yaml
+delete_btn:
+  type: button
+  label: "Delete"
+  style: warning        # button face uses warning's button/button_text
+  widgets:
+    text:
+      type: label
+      text: "Delete"    # inherits warning; set style: here to override
+```
 
 `udisplay-gen validate` is the hard gate for excluded interactive types — the client
 itself parses device-supplied YAML directly, with no runtime schema validation, so it
@@ -520,7 +529,7 @@ Client selects item ──BUTTON_PRESS(item_id)──► Device
 | `label` | string | no | — | Optional group label shown above the group. Max 32 chars. |
 | `layout` | `"grid"` | no | `"grid"` | Items laid out in a wrapping grid. Only `"grid"` is supported. |
 | `items` | object | yes | — | Named items; minimum 2. Each item gets its own widget ID. |
-| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). Colors this group's own selection chrome (border, label), and cascades to its items (see [Container-level style cascading](#per-widget-style-reference)). |
+| `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). Colors this group's own chrome (item fill, border, label), and cascades to its items (see [Container-level style cascading](#per-widget-style-reference)). |
 
 **`button-group-item` sub-attributes:**
 
@@ -1422,18 +1431,20 @@ widgets:
     type: display        # outside alarm_panel — follows the app-wide active theme
 ```
 
-`row`/`grid`/`dpad`/`button` render no chrome of their own from `style:` — it's
-meaningful *only* as a cascade root for their subtree (a button's face
-children, for `button` specifically) — it never changes their own rendering.
-A button's fill/border still comes entirely from the global `style:` block's
-`button`/`button_text` tokens (see [`button`](#button) above), unaffected by
-its own `style:`. `section`/`button-group` still color their own chrome with
-it too, exactly as before.
+A widget's effective style is used both for its **own** rendering and as
+the style its descendants inherit. `row`/`grid`/`dpad` render no chrome of
+their own, so for them `style:` matters only as a cascade root. `button`,
+`section`, and `button-group` color their own chrome with it too — a
+button's face (and each button-group item's / dpad button's face) uses its
+effective theme's `button`/`button_text` tokens.
 
 **Behavior change:** before this feature, an unstyled child of a styled
 `section`/`button-group` followed the app-wide active theme. It now inherits
 the container's style instead — no YAML edit required to see the new
 appearance on an existing device file that already set `style:` on one of
 those two container types. `style:` on `button`/`button-group` items is new
-acceptance, not a behavior change — both were previously rejected outright
-with a parse-time diagnostic.
+acceptance — both were previously rejected outright with a parse-time
+diagnostic. Button faces (standalone, button-group items, and dpad buttons)
+now also follow their *effective* theme's `button`/`button_text` tokens: a
+button inside a styled container picks up that container's button colors,
+where it previously always used the app-wide active theme's.

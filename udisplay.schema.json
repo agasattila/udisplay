@@ -106,7 +106,7 @@
     },
 
     "styleProp": {
-      "description": "Optional reference to a named stylesheet defined in the top-level style: block. The widget renders using that stylesheet's color tokens instead of the app-wide active style. On row/grid/dpad/button (which render no chrome of their own), this instead makes the widget a cascade root: descendant widgets that don't set their own style: inherit this one, nearest styled ancestor wins. On button specifically, this only affects its face children — the button's own chrome stays driven by the global style: block's button/button_text tokens, unaffected. Must name a stylesheet actually declared in style: (enforced by udisplay-gen's semantic validation, not expressible in JSON Schema alone).",
+      "description": "Optional reference to a named stylesheet defined in the top-level style: block. The widget renders using that stylesheet's color tokens instead of the app-wide active style. On any widget with children (row/grid/dpad/button/section/button-group), the same style also cascades: descendant widgets that don't set their own style: inherit it, nearest styled ancestor wins. row/grid/dpad render no chrome of their own, so for them style: matters only as a cascade root; a button's own fill/label use its effective style's button/button_text tokens. Must name a stylesheet actually declared in style: (enforced by udisplay-gen's semantic validation, not expressible in JSON Schema alone).",
       "type": "string",
       "minLength": 1
     },
