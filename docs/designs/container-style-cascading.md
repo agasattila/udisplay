@@ -156,7 +156,8 @@ adversarially reviewed 3 rounds (10/10), in the companion doc.
 
 **Decisions** (durable log: `a65a1396-ce24-4912-a4bf-9414755e13e0`):
 - **Must-do (the literal PR22 ask):** `button` accepts `style:`, becomes a pure cascade
-  root for its face widgets — no change to the button's own chrome (`ButtonFace.qml` stays
+  root for its face widgets — *(superseded by Revision 2 below: the button's effective style
+  now colors its own chrome too)* — no change to the button's own chrome (`ButtonFace.qml` stays
   on the global `button`/`button_text` tokens, matching row/grid/dpad's transparency, not
   section/button-group's self-coloring).
 - **Adjacent, confirmed in-PR:** `button-group` items also gain their own overridable
@@ -199,7 +200,7 @@ and the validate.py dedup-regression hazard found while sketching the fix:
   would reject valid YAML (two buttons each with an `icon` face child) as a false
   duplicate. No button-group items name check is needed at all.
 - **Test gaps (CRITICAL, added directly per the regression rule):** (1) no test currently
-  asserts the D1 invariant — a styled `button`'s own `ButtonFace.qml` chrome stays
+  asserts the D1 invariant *(superseded by Revision 2)* — a styled `button`'s own `ButtonFace.qml` chrome stays
   unaffected by its own `style:`; (2) no test covers a button-group item with NO `style:`
   of its own still rendering the *group's* cascaded style once sibling items gain
   per-item lookups; (3) two different buttons sharing a face-child name, confirming that's
@@ -242,6 +243,8 @@ only its *consumers* grow.
   `effectiveStyleFor(btnItem.row)` (computed once per cell, with the same `activeStyle`/
   `widgetModel.generation` dummy dependency reads) and passes it to its `ButtonWidget`.
   Without this, dpad buttons would have been the one button form still ignoring `style:`.
+- **Selected button-group ring uses `button_text`**, not `button`: with the fill now on
+  `_itemStyle.button`, a `button`-colored ring was invisible (found in `/review`).
 - **No implicit label child for `label:`.** Rejected per the review: it would only fix
   label color, not fill.
 - **Behavior change (documented in `docs/widgets.md`):** a button inside a styled

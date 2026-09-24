@@ -1447,4 +1447,6 @@ acceptance — both were previously rejected outright with a parse-time
 diagnostic. Button faces (standalone, button-group items, and dpad buttons)
 now also follow their *effective* theme's `button`/`button_text` tokens: a
 button inside a styled container picks up that container's button colors,
-where it previously always used the app-wide active theme's.
+where it previously always used the app-wide active theme's. A named theme
+that omits `button`/`button_text` fills them in from `default` (like every
+other token), not from whichever theme is currently active.

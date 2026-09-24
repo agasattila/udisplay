@@ -641,8 +641,8 @@ def test_style_on_button_accepted():
     """`button` was the last type style: was rejected on — lifted for the
     same reason row/grid/dpad's rejection was lifted (docs/designs/
     container-style-cascading.md, Revision): a transparent frame becomes a
-    valid cascade root once cascading exists. button's own chrome is
-    unaffected — only its face children inherit."""
+    valid cascade root once cascading exists. Per Revision 2, the style
+    also colors the button's own face chrome."""
     doc = {
         "device": {"name": "x"},
         "style": {"alarm": {"accent": "#ff0000"}},
