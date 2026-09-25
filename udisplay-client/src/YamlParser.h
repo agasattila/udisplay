@@ -5,7 +5,9 @@
  * Parse a decompressed uDisplay YAML blob into a list of WidgetDef.
  *
  * Widget ID assignment matches udisplay-gen exactly:
- *   1. Collect all key paths (top-level, button children, button-group items).
+ *   1. Collect all key paths — every widget (IdScheme::EveryWidget, issue
+ *      #43), or only value-bearing widgets for pre-v5 devices
+ *      (IdScheme::LeafOnly).
  *   2. Sort alphabetically.
  *   3. Assign IDs 0x10, 0x11, ... in sort order.
  *
@@ -25,6 +27,24 @@ class YamlParser
 {
 public:
     enum class Severity { Warning, Error };
+
+    /* Widget ID derivation scheme. The YAML blob does not say which scheme
+     * the firmware's generated header used — the device's HANDSHAKE
+     * proto_version does:
+     *   LeafOnly    (proto < 0x05): containers (section/row/grid/dpad) and
+     *               decorations (label/separator) get no ID (widgetId 0).
+     *   EveryWidget (proto >= 0x05): every widget gets an ID; containers
+     *               are still transparent to their children's ID paths. */
+    enum class IdScheme { LeafOnly, EveryWidget };
+
+    static IdScheme idSchemeForProtoVersion(uint8_t protoVersion)
+    {
+        return protoVersion >= 0x05 ? IdScheme::EveryWidget : IdScheme::LeafOnly;
+    }
+
+    /** Scheme used by subsequent parse() calls. Default: EveryWidget. */
+    void setIdScheme(IdScheme scheme) { m_idScheme = scheme; }
+    IdScheme idScheme() const { return m_idScheme; }
 
     struct ParseDiagnostic {
         Severity severity;
@@ -82,6 +102,7 @@ public:
     QList<ParseDiagnostic> diagnostics() const { return m_diagnostics; }
 
 private:
+    IdScheme               m_idScheme = IdScheme::EveryWidget;
     QString                m_error;
     QList<ParseDiagnostic> m_diagnostics;
 };

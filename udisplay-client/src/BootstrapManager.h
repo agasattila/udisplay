@@ -102,6 +102,11 @@ public:
 
     State state() const { return m_state; }
 
+    /** proto_version from the device's most recent HANDSHAKE (0 before one
+     *  arrives). Selects the YAML widget-ID scheme — see
+     *  YamlParser::idSchemeForProtoVersion(). */
+    uint8_t deviceProtoVersion() const { return m_deviceProtoVersion; }
+
 signals:
     /** Bootstrap complete. merkleRoot is the verified root; compressedBlob is the raw zlib-compressed YAML. */
     void succeeded(QByteArray merkleRoot, QByteArray compressedBlob);
@@ -137,6 +142,7 @@ private:
     State      m_state = State::Idle;
 
     /* From HANDSHAKE */
+    uint8_t    m_deviceProtoVersion = 0;
     QByteArray m_merkleRoot;
     uint16_t   m_chunkCount = 0;
     uint16_t   m_chunkSize  = 0;

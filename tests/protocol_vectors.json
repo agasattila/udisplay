@@ -93,7 +93,48 @@
   },
   "widget_id_fixtures": {
     "nesting_and_dpad": {
-      "description": "Golden fixture for the widget-ID cross-check between udisplay-gen's widget_ids.assign() and udisplay-client's YamlParser collectPaths()/ID assignment: multi-level container nesting (section > row > grid, section > dpad), no-ID decoration types (label, separator), a button-group with items, a dpad with button children, and a dropdown (whose items are excluded from ID assignment). Both implementations MUST assign identical IDs to identical paths \u2014 any divergence is a protocol-routing bug (see the dpad-split design doc's golden-fixture cross-check task).",
+      "description": "Golden fixture for the widget-ID cross-check between udisplay-gen's widget_ids.assign() and udisplay-client's YamlParser collectPaths()/ID assignment (v5 scheme, PROTO_VERSION >= 0x05, issue #43): multi-level container nesting (section > row > grid, section > dpad), where every container and decoration (label, separator) gets its own ID while staying transparent to its children's paths, a button-group with items, a dpad with button children, and a dropdown (whose items are excluded from ID assignment). Both implementations MUST assign identical IDs to identical paths \u2014 any divergence is a protocol-routing bug.",
+      "yaml": "device:\n  name: dpad and nesting fixture\nwidgets:\n  sensors:\n    type: section\n    label: Sensors\n    widgets:\n      temp:\n        type: display\n        label: Temp\n      ctrl_row:\n        type: row\n        widgets:\n          relay:\n            type: toggle\n          note:\n            type: label\n            text: hi\n          inner_grid:\n            type: grid\n            columns: 2\n            widgets:\n              led1:\n                type: led\n              led2:\n                type: led\n      dir_pad:\n        type: dpad\n        widgets:\n          up_btn:\n            type: button\n            label: Up\n            position: top\n          down_btn:\n            type: button\n            label: Down\n            position: bottom\n          left_btn:\n            type: button\n            label: Left\n            position: left\n  mode_sel:\n    type: button-group\n    items:\n      dc:\n        label: DCV\n      ac:\n        label: ACV\n  divider:\n    type: separator\n  net_dropdown:\n    type: dropdown\n    items:\n      sta: Station\n      ap: Access Point\n",
+      "widget_ids": {
+        "ctrl_row": "0x10",
+        "dir_pad": "0x11",
+        "divider": "0x12",
+        "down_btn": "0x13",
+        "inner_grid": "0x14",
+        "led1": "0x15",
+        "led2": "0x16",
+        "left_btn": "0x17",
+        "mode_sel": "0x18",
+        "mode_sel.ac": "0x19",
+        "mode_sel.dc": "0x1A",
+        "net_dropdown": "0x1B",
+        "note": "0x1C",
+        "relay": "0x1D",
+        "sensors": "0x1E",
+        "temp": "0x1F",
+        "up_btn": "0x20"
+      }
+    },
+    "button_face_containers": {
+      "description": "v5 scheme (issue #43): a section, a button-face row, face/top-level labels and a separator all get IDs; the face row is transparent to its children (power_btn.icon, not power_btn.face_row.icon) and the section/grid to theirs.",
+      "yaml": "device:\n  name: button face containers fixture\nwidgets:\n  panel:\n    type: section\n    label: Panel\n    widgets:\n      power_btn:\n        type: button\n        label: Power\n        widgets:\n          face_row:\n            type: row\n            widgets:\n              icon:\n                type: led\n              caption:\n                type: label\n                text: PWR\n          status:\n            type: rgbled\n      title:\n        type: label\n        text: Controls\n  zone:\n    type: grid\n    columns: 2\n    widgets:\n      amps:\n        type: display\n      sep:\n        type: separator\n",
+      "widget_ids": {
+        "amps": "0x10",
+        "panel": "0x11",
+        "power_btn": "0x12",
+        "power_btn.caption": "0x13",
+        "power_btn.face_row": "0x14",
+        "power_btn.icon": "0x15",
+        "power_btn.status": "0x16",
+        "sep": "0x17",
+        "title": "0x18",
+        "zone": "0x19"
+      }
+    }
+  },
+  "widget_id_fixtures_legacy": {
+    "nesting_and_dpad": {
+      "description": "FROZEN pre-v5 (PROTO_VERSION < 0x05) leaf-only scheme: containers (section/row/grid/dpad) and decorations (label/separator) get no ID. udisplay-gen no longer emits this scheme; the client must still reproduce it for old firmware (YamlParser::IdScheme::LeafOnly). Never regenerate.",
       "yaml": "device:\n  name: dpad and nesting fixture\nwidgets:\n  sensors:\n    type: section\n    label: Sensors\n    widgets:\n      temp:\n        type: display\n        label: Temp\n      ctrl_row:\n        type: row\n        widgets:\n          relay:\n            type: toggle\n          note:\n            type: label\n            text: hi\n          inner_grid:\n            type: grid\n            columns: 2\n            widgets:\n              led1:\n                type: led\n              led2:\n                type: led\n      dir_pad:\n        type: dpad\n        widgets:\n          up_btn:\n            type: button\n            label: Up\n            position: top\n          down_btn:\n            type: button\n            label: Down\n            position: bottom\n          left_btn:\n            type: button\n            label: Left\n            position: left\n  mode_sel:\n    type: button-group\n    items:\n      dc:\n        label: DCV\n      ac:\n        label: ACV\n  divider:\n    type: separator\n  net_dropdown:\n    type: dropdown\n    items:\n      sta: Station\n      ap: Access Point\n",
       "widget_ids": {
         "down_btn": "0x10",
@@ -112,49 +153,49 @@
   },
   "messages": {
     "HANDSHAKE": {
-      "description": "Device\u2192client on connect. proto_version=4, flags=0x00 (no auth), uses V1 merkle root, chunk_count=1, chunk_size=256. flags byte inserted at offset 2; merkle_root shifted to offset 3.",
+      "description": "Device\u2192client on connect. proto_version=5, flags=0x00 (no auth), uses V1 merkle root, chunk_count=1, chunk_size=256. flags byte inserted at offset 2; merkle_root shifted to offset 3.",
       "input": {
         "msg_type": "0x00",
-        "proto_version": 4,
+        "proto_version": 5,
         "flags": "0x00",
         "merkle_root": "74ac9fa684287d0cab3e64e3f25ee369c74b46e7f2ec0025cd10bac7bdffdb6e",
         "chunk_count": 1,
         "chunk_size": 256
       },
-      "bytes": "00 04 00 74 ac 9f a6 84 28 7d 0c ab 3e 64 e3 f2 5e e3 69 c7 4b 46 e7 f2 ec 00 25 cd 10 ba c7 bd ff db 6e 01 00 00 01",
+      "bytes": "00 05 00 74 ac 9f a6 84 28 7d 0c ab 3e 64 e3 f2 5e e3 69 c7 4b 46 e7 f2 ec 00 25 cd 10 ba c7 bd ff db 6e 01 00 00 01",
       "total_bytes": 39
     },
     "HANDSHAKE_AUTH": {
-      "description": "Device\u2192client on connect when auth_algo=HMAC-SHA256. proto_version=4, flags=0x01 (auth required), algorithm=0x01 (HMAC-SHA256), salt=0x01..0x20. No merkle_root in this message; sent after auth succeeds.",
+      "description": "Device\u2192client on connect when auth_algo=HMAC-SHA256. proto_version=5, flags=0x01 (auth required), algorithm=0x01 (HMAC-SHA256), salt=0x01..0x20. No merkle_root in this message; sent after auth succeeds.",
       "input": {
         "msg_type": "0x00",
-        "proto_version": 4,
+        "proto_version": 5,
         "flags": "0x01",
         "algorithm": "0x01",
         "salt_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
       },
-      "bytes": "00 04 01 01 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20",
+      "bytes": "00 05 01 01 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20",
       "total_bytes": 36
     },
     "HANDSHAKE_ACK": {
-      "description": "Client\u2192device. client_proto_max=4, flags=0x00 (no auth). flags byte added at offset 2 (proto v0.04). Old firmware ignores extra byte (len \u2265 2 check).",
+      "description": "Client\u2192device. client_proto_max=5, flags=0x00 (no auth). flags byte added at offset 2 (proto v0.04). Old firmware ignores extra byte (len \u2265 2 check).",
       "input": {
         "msg_type": "0x01",
-        "client_proto_max": 4,
+        "client_proto_max": 5,
         "flags": "0x00"
       },
-      "bytes": "01 04 00",
+      "bytes": "01 05 00",
       "total_bytes": 3
     },
     "HANDSHAKE_ACK_AUTH": {
-      "description": "Client\u2192device when device sent HANDSHAKE(flags=1). client_proto_max=4, flags=0x01, credential=HMAC-SHA256(key=password, message=salt) as 32 bytes (test vector uses 0x21..0x40).",
+      "description": "Client\u2192device when device sent HANDSHAKE(flags=1). client_proto_max=5, flags=0x01, credential=HMAC-SHA256(key=password, message=salt) as 32 bytes (test vector uses 0x21..0x40).",
       "input": {
         "msg_type": "0x01",
-        "client_proto_max": 4,
+        "client_proto_max": 5,
         "flags": "0x01",
         "credential_hex": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40"
       },
-      "bytes": "01 04 01 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40",
+      "bytes": "01 05 01 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40",
       "total_bytes": 35
     },
     "CLIENT_READY": {

@@ -376,6 +376,13 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
     QString name, version;
     QStringList caps;
     QMap<QString, StyleToken> styles;
+    /* Widget-ID scheme (issue #43): a design-mode file is rendered as current
+     * udisplay-gen would build it; a live device's blob is numbered the way
+     * ITS firmware's generated header was — told by its HANDSHAKE
+     * proto_version (pre-v5 firmware: leaf-only IDs). */
+    m_yamlParser.setIdScheme(designMode || !m_bootstrap
+        ? YamlParser::IdScheme::EveryWidget
+        : YamlParser::idSchemeForProtoVersion(m_bootstrap->deviceProtoVersion()));
     if (!m_yamlParser.parse(raw, widgets, name, version, caps, styles)) {
         printDebugFailure(m_yamlParser.errorString());
         return ApplyResult::ParseFailed;
