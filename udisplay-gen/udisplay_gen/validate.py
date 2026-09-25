@@ -25,11 +25,8 @@ SUPPORTED_TYPES = [
     "section", "row", "grid", "dpad",
 ]
 
-# Container types — have a `widgets:` sub-map, excluded from widget ID assignment
-CONTAINER_TYPES = {"section", "row", "grid", "dpad"}
-
-# Decoration types — no widget ID, no protocol exchange
-DECORATION_TYPES = {"label", "separator"}
+# Container/decoration type sets are shared with ID assignment (TODO-007).
+from .widget_ids import CONTAINER_TYPES, DECORATION_TYPES  # noqa: E402
 
 
 def load_schema() -> dict:
@@ -163,7 +160,8 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
     Recursive semantic check for a widget map.
     - slider min < max
     - dpad's button children must all have position
-    - leaf widget names globally unique across all container scopes
+    - widget names (containers and decorations included — every widget gets
+      a widget ID, issue #43) globally unique across all container scopes
       (scoped to CONTAINER_TYPES's transparent-prefix subtree — see the
       `button` branch below for why a `button`'s own face children get a
       FRESH local scope instead of sharing this one)
@@ -183,6 +181,19 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
         widget_path = f"{path_prefix}.{key}" if path_prefix else f"widgets.{key}"
 
         errors.extend(_check_style_ref(widget.get("style"), style_names, widget_path))
+
+        # Every widget — container, decoration or leaf — takes a slot in the
+        # widget-ID namespace of this scope (issue #43), so its name must be
+        # unique here. Checked before recursing so a container's own name is
+        # seen before its children's.
+        if key in seen_names:
+            errors.append(
+                f"  {widget_path}: duplicate widget name `{key}` — "
+                f"widget names (containers and labels included) must be globally "
+                f"unique across all container scopes"
+            )
+        else:
+            seen_names.add(key)
 
         if wtype in CONTAINER_TYPES:
             sub_widgets = widget.get("widgets", {})
@@ -212,9 +223,8 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
             # same button's face* reusing a name.
             errors.extend(_semantic_errors_in_map(
                 widget.get("widgets", {}), widget_path, set(), style_names))
-            # Falls through (no early `continue`) to the seen_names check
-            # below for the button's OWN key, in the global/outer scope —
-            # exactly like every other non-container widget.
+            # The button's OWN key was already checked against the
+            # global/outer scope above, like every other widget.
 
         if wtype == "button-group":
             # Items are hand-built (no `type:` key, per buttonGroupItem's
@@ -229,11 +239,6 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
                     continue
                 item_path = f"{widget_path}.{item_key}"
                 errors.extend(_check_style_ref(item.get("style"), style_names, item_path))
-            # Falls through to the seen_names check below for the group's
-            # OWN key, same as the button branch above.
-
-        if wtype in DECORATION_TYPES:
-            continue
 
         if wtype == "slider":
             mn, mx = widget.get("min"), widget.get("max")
@@ -241,14 +246,6 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
                 errors.append(
                     f"  {widget_path}: slider `min` ({mn}) must be less than `max` ({mx})"
                 )
-
-        if key in seen_names:
-            errors.append(
-                f"  {widget_path}: duplicate leaf name `{key}` — "
-                f"widget names must be globally unique across all container scopes"
-            )
-        else:
-            seen_names.add(key)
 
     return errors
 

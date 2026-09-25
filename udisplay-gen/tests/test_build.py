@@ -254,9 +254,9 @@ def test_collect_types_button_child_typed_as_rgbled():
     assert result["pwr.status"] == "rgbled"
 
 
-def test_collect_types_button_label_child_excluded_from_ids():
-    """A label button child gets no ID and no type entry — matches
-    top-level label semantics (no ID, no protocol exchange)."""
+def test_collect_types_button_label_child_gets_id():
+    """Issue #43: a label button child gets its own ID and a 'label' type
+    entry — every widget is addressable by SET_PROPERTY."""
     widgets = {
         "pwr": {
             "type": "button",
@@ -264,16 +264,14 @@ def test_collect_types_button_label_child_excluded_from_ids():
         }
     }
     result = collect_types(widgets)
-    assert "pwr.caption" not in result
+    assert result["pwr.caption"] == "label"
     ids = assign(widgets)
-    assert "pwr.caption" not in ids
-    assert "pwr" in ids
+    assert ids == {"pwr": 0x10, "pwr.caption": 0x11}
 
 
-def test_collect_types_button_separator_child_excluded_from_ids():
-    """A separator button child (not currently schema-reachable, but the
-    NO_ID_TYPES exclusion branch itself is shared code with label and must
-    behave the same way) gets no ID and no type entry."""
+def test_collect_types_button_separator_child_gets_id():
+    """A separator button child (not currently schema-reachable) is treated
+    like every other widget: own ID, own type entry (issue #43)."""
     widgets = {
         "pwr": {
             "type": "button",
@@ -281,10 +279,9 @@ def test_collect_types_button_separator_child_excluded_from_ids():
         }
     }
     result = collect_types(widgets)
-    assert "pwr.div" not in result
+    assert result["pwr.div"] == "separator"
     ids = assign(widgets)
-    assert "pwr.div" not in ids
-    assert "pwr" in ids
+    assert ids == {"pwr": 0x10, "pwr.div": 0x11}
 
 
 def test_collect_types_button_grid_grandchild_recurses():
@@ -307,8 +304,8 @@ def test_collect_types_button_grid_grandchild_recurses():
     }
     result = collect_types(widgets)
     assert result["pwr"] == "button"
-    assert "pwr.face" not in result   # container: no ID, no type entry
-    assert result["pwr.status"] == "led"
+    assert result["pwr.face"] == "grid"   # container: own entry (issue #43)
+    assert result["pwr.status"] == "led"  # ...but transparent to its child's path
 
 
 def test_assign_duplicate_id_path_across_sibling_containers_raises():
@@ -364,10 +361,9 @@ def test_collect_ids_button_grid_grandchild_recurses():
     }
     ids = assign(widgets)
     assert ids["pwr"] == 0x10
-    assert "pwr.face" not in ids
-    assert ids["pwr.status"] == 0x11
-    # proves "face" never consumed a slot that would otherwise shift this ID
-    assert ids["zzz_toggle"] == 0x12
+    assert ids["pwr.face"] == 0x11      # the face grid itself (issue #43)
+    assert ids["pwr.status"] == 0x12    # container name excluded from path
+    assert ids["zzz_toggle"] == 0x13
 
 
 def test_collect_types_button_row_grandchild_recurses():
@@ -862,11 +858,19 @@ def test_build_cli_dropdown(dropdown_yaml, tmp_path):
 
 # ── TODO-018: label and separator codegen ────────────────────────────────────
 
-def test_label_separator_no_widget_ids(decorations_yaml):
-    """label and separator must not get widget IDs."""
+def test_label_separator_get_widget_ids(decorations_yaml):
+    """Issue #43: label and separator get widget IDs (for SET_PROPERTY)
+    and report their own type."""
     wtypes, wids = _load_types_and_ids(decorations_yaml)
-    assert not any("net_heading" in k or "div1" in k for k in wids)
-    assert not any("net_heading" in k or "div1" in k for k in wtypes)
+    assert "net_heading" in wids and "div1" in wids
+    assert wtypes["net_heading"] == "label"
+    assert wtypes["div1"] == "separator"
+
+
+def test_label_separator_get_widget_id_macros(decorations_yaml):
+    header = _make_header(decorations_yaml)
+    assert "WIDGET_ID_NET_HEADING" in header
+    assert "WIDGET_ID_DIV1" in header
 
 
 def test_label_separator_excluded_from_setters(decorations_yaml):
@@ -892,7 +896,8 @@ def test_text_rw_in_decorations_yaml_gets_id(decorations_yaml):
 # ── TODO-009: container layout codegen ───────────────────────────────────────
 
 def test_container_names_excluded_from_ids(layout_yaml):
-    """section/row names must not appear as ID path prefixes."""
+    """section/row names must not appear as ID path prefixes (containers are
+    transparent to their children's paths)."""
     _, wids = _load_types_and_ids(layout_yaml)
     # Container names 'sensors' and 'controls' must not be in any path
     assert not any(k.startswith("sensors.") or k.startswith("controls.") for k in wids)
@@ -903,19 +908,18 @@ def test_container_names_excluded_from_ids(layout_yaml):
     assert "reset_btn" in wids
 
 
-def test_container_names_excluded_from_types(layout_yaml):
-    wtypes, _ = _load_types_and_ids(layout_yaml)
-    assert "volt" in wtypes
+def test_containers_get_own_ids_and_types(layout_yaml):
+    """Issue #43: every container gets its own ID under its own key, and
+    reports its own type."""
+    wtypes, wids = _load_types_and_ids(layout_yaml)
     assert wtypes["volt"] == "display"
-    assert "relay" in wtypes
     assert wtypes["relay"] == "toggle"
-    # Container itself must not appear
-    assert "sensors" not in wtypes
-    assert "controls" not in wtypes
+    assert wtypes["sensors"] == "section"
+    assert "sensors" in wids and "controls" in wids
 
 
 def test_container_children_ids_are_alphabetical(layout_yaml):
-    """IDs assigned alphabetically across all leaf paths (containers transparent)."""
+    """IDs assigned alphabetically across all paths (containers included)."""
     _, wids = _load_types_and_ids(layout_yaml)
     sorted_paths = sorted(wids.keys())
     for i, path in enumerate(sorted_paths):
@@ -927,10 +931,13 @@ def test_build_cli_layout(layout_yaml, tmp_path):
     result = runner.invoke(cli, ["build", str(layout_yaml), "-o", str(tmp_path)])
     assert result.exit_code == 0, result.output
     header = (tmp_path / "udisplay_ui.h").read_text()
-    # Children IDs present, container names absent as macros
+    # Children and containers both get ID macros (issue #43)
     assert "WIDGET_ID_VOLT" in header
     assert "WIDGET_ID_RELAY" in header
-    assert "WIDGET_ID_SENSORS" not in header
+    assert "WIDGET_ID_SENSORS" in header
+    # ...but no typed setter/handler for a container
+    assert "set_sensors" not in header
+    assert "on_sensors" not in header
 
 
 # ── TODO-021: rgbled widget codegen ──────────────────────────────────────────

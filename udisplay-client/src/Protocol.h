@@ -58,7 +58,7 @@ constexpr uint8_t PROP_MODE    = 0x03;
 constexpr uint8_t PROP_STYLE   = 0x04;
 
 /* ── Protocol version ───────────────────────────────────────────────────── */
-constexpr uint8_t PROTO_VERSION = 0x04;
+constexpr uint8_t PROTO_VERSION = 0x05;
 
 /* ── Auth algorithm IDs ─────────────────────────────────────────────────── */
 constexpr uint8_t AUTH_NONE   = 0x00;

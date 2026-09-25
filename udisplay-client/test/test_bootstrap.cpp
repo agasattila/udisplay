@@ -30,7 +30,8 @@ static QByteArray makeHandshake(uint8_t version, const QByteArray& root,
     return msg;
 }
 
-/* HANDSHAKE (proto 0x04, flags=0x00): type(1)+version(1)+flags(1)+root(32)+count(2LE)+size(2LE) = 39 bytes */
+/* HANDSHAKE (39-byte layout since proto 0x04, flags=0x00; version byte fixed at
+ * 0x04 = a pre-v5 device): type(1)+version(1)+flags(1)+root(32)+count(2LE)+size(2LE) */
 static QByteArray makeHandshakeV4(const QByteArray& root,
                                   uint16_t chunkCount, uint16_t chunkSize)
 {
@@ -289,6 +290,62 @@ private slots:
 
         QCOMPARE(failedSpy.count(), 1);
         QVERIFY(!failedSpy.at(0).at(0).toString().isEmpty());
+    }
+
+    /* Issue #43: the handshake's proto_version is recorded — it selects the
+     * YAML widget-ID scheme (YamlParser::idSchemeForProtoVersion). */
+    void bootstrap_recordsDeviceProtoVersion()
+    {
+        MockTransport t;
+        BootstrapManager bm(&t);
+        QCOMPARE(bm.deviceProtoVersion(), uint8_t(0));
+        t.simulateConnect();
+        t.injectMessage(makeHandshakeV4(fromHex(V1_ROOT), 1, 256));
+        QCOMPARE(bm.deviceProtoVersion(), uint8_t(0x04));
+    }
+
+    /* A device newer than this client (v6 > PROTO_VERSION 5) fails cleanly
+     * with "Update the app" instead of mis-numbering widgets. */
+    void bootstrap_newerDevice_failsWithUpdateMessage()
+    {
+        MockTransport t;
+        BootstrapManager bm(&t);
+        QSignalSpy failedSpy(&bm, &BootstrapManager::failed);
+        t.simulateConnect();
+        QByteArray hs = makeHandshakeV4(fromHex(V1_ROOT), 1, 256);
+        hs[1] = static_cast<char>(Proto::PROTO_VERSION + 1);
+        t.injectMessage(hs);
+        QCOMPARE(failedSpy.count(), 1);
+        QVERIFY(failedSpy.at(0).at(0).toString().contains(QStringLiteral("Update the app")));
+    }
+
+    /* The recorded proto_version is per-connection: a reconnect clears it
+     * (so a stale version never picks the ID scheme for a different
+     * device), a v5 handshake records 5, and a rejected too-new handshake
+     * records nothing. */
+    void bootstrap_deviceProtoVersion_resetOnReconnect()
+    {
+        MockTransport t;
+        BootstrapManager bm(&t);
+        t.simulateConnect();
+        t.injectMessage(makeHandshakeV4(fromHex(V1_ROOT), 1, 256));
+        QCOMPARE(bm.deviceProtoVersion(), uint8_t(0x04));
+
+        t.disconnectFromDevice();
+        t.simulateConnect();
+        QCOMPARE(bm.deviceProtoVersion(), uint8_t(0));
+
+        QByteArray v5 = makeHandshakeV4(fromHex(V1_ROOT), 1, 256);
+        v5[1] = static_cast<char>(0x05);
+        t.injectMessage(v5);
+        QCOMPARE(bm.deviceProtoVersion(), uint8_t(0x05));
+
+        t.disconnectFromDevice();
+        t.simulateConnect();
+        QByteArray tooNew = makeHandshakeV4(fromHex(V1_ROOT), 1, 256);
+        tooNew[1] = static_cast<char>(Proto::PROTO_VERSION + 1);
+        t.injectMessage(tooNew);
+        QCOMPARE(bm.deviceProtoVersion(), uint8_t(0));
     }
 
     void bootstrap_BadMerkleRoot()

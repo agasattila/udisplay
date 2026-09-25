@@ -36,7 +36,7 @@ import struct
 
 # ── Protocol constants (mirrors udisplay.h) ─────────────────────────────────
 
-UDISPLAY_PROTO_VERSION = 0x04
+UDISPLAY_PROTO_VERSION = 0x05
 UDISPLAY_MAX_MSG_SIZE = 1024
 UDISPLAY_HB_MISS_MAX = 3
 UDISPLAY_AUTH_NONE = 0x00

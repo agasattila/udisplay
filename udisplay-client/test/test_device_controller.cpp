@@ -6,8 +6,14 @@
  * transport layer (which is integration-tested in test_bootstrap.cpp).
  */
 #include <QtTest>
+#include <QCryptographicHash>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <zlib.h>
 #include "DeviceController.h"
+#include "Protocol.h"
 #include "DeviceInfo.h"
 #ifdef HAVE_BLE
 #include <QBluetoothDeviceInfo>
@@ -107,6 +113,76 @@ static QString captureDebugOutput(Fn&& fn)
     return captured.join(QLatin1Char('\n'));
 }
 
+/* Merkle root exactly as BootstrapManager re-derives it for a cached blob:
+ * SHA-256 over the concatenated SHA-256 of each zero-padded 256-byte chunk. */
+static QByteArray merkleRootOf(const QByteArray& blob)
+{
+    QCryptographicHash rootHasher(QCryptographicHash::Sha256);
+    for (int off = 0; off < blob.size(); off += 256) {
+        QByteArray piece = blob.mid(off, 256);
+        piece.append(256 - piece.size(), '\0');
+        rootHasher.addData(QCryptographicHash::hash(piece, QCryptographicHash::Sha256));
+    }
+    return rootHasher.result();
+}
+
+/* Device->client HANDSHAKE (39-byte layout, proto >= 0x04, flags=0). */
+static QByteArray handshakeMsg(uint8_t protoVersion, const QByteArray& root, uint16_t chunkCount)
+{
+    QByteArray msg(39, '\0');
+    msg[0] = static_cast<char>(Proto::MSG_HANDSHAKE);
+    msg[1] = static_cast<char>(protoVersion);
+    msg[2] = 0x00;
+    memcpy(msg.data() + 3, root.constData(), 32);
+    msg[35] = static_cast<char>(chunkCount & 0xFF);
+    msg[36] = static_cast<char>((chunkCount >> 8) & 0xFF);
+    msg[37] = 0x00;  /* chunk_size = 256 LE */
+    msg[38] = 0x01;
+    return msg;
+}
+
+/* End-to-end over a real TCP socket: a local QTcpServer plays the device and
+ * sends HANDSHAKE(protoVersion); the blob is pre-seeded in the client's blob
+ * cache so bootstrap completes on the cache-hit path without a chunk
+ * download. Returns the section row's widgetId (row 0), or -1. */
+static int sectionIdAfterBootstrap(uint8_t protoVersion)
+{
+    static const char* yaml =
+        "device:\n"
+        "  name: scheme\n"
+        "widgets:\n"
+        "  panel:\n"
+        "    type: section\n"
+        "    widgets:\n"
+        "      relay:\n"
+        "        type: toggle\n";
+    const QByteArray blob = zlibCompress(QByteArray(yaml));
+    const QByteArray root = merkleRootOf(blob);
+
+    QStandardPaths::setTestModeEnabled(true);
+    DeviceController dc;
+    {
+        QSqlQuery q(QSqlDatabase::database(QStringLiteral("udisplay_cache")));
+        q.prepare(QStringLiteral("INSERT OR REPLACE INTO blobs (root, compressed) VALUES (?, ?)"));
+        q.addBindValue(root);
+        q.addBindValue(blob);
+        if (!q.exec()) return -1;
+    }
+
+    QTcpServer server;
+    if (!server.listen(QHostAddress::LocalHost)) return -1;
+    dc.connectTcp(QStringLiteral("127.0.0.1"), server.serverPort());
+    if (!server.waitForNewConnection(5000)) return -1;
+    QTcpSocket* device = server.nextPendingConnection();
+    device->write(Proto::tcpFrame(handshakeMsg(
+        protoVersion, root, static_cast<uint16_t>((blob.size() + 255) / 256))));
+    device->flush();
+
+    WidgetModel* m = dc.widgetModel();
+    if (!QTest::qWaitFor([m]() { return m->rowCount() == 2; }, 5000)) return -1;
+    return m->data(m->index(0), WidgetModel::WidgetIdRole).toInt();
+}
+
 /* ─────────────────────────────────────────────────────────────────────────── */
 
 class TestDeviceController : public QObject
@@ -114,6 +190,21 @@ class TestDeviceController : public QObject
     Q_OBJECT
 
 private slots:
+
+    /* ── Widget-ID scheme follows the device's proto_version (issue #43) ── */
+
+    /* A pre-v5 device's firmware header was generated with leaf-only IDs:
+     * the section must get NO ID, and relay keeps 0x10. */
+    void bootstrap_protoV4Device_usesLeafOnlyIds()
+    {
+        QCOMPARE(sectionIdAfterBootstrap(0x04), 0);
+    }
+
+    /* A v5 device: every widget has an ID — panel (0x10) < relay (0x11). */
+    void bootstrap_protoV5Device_usesEveryWidgetIds()
+    {
+        QCOMPARE(sectionIdAfterBootstrap(0x05), 0x10);
+    }
 
     /* ── Capability gating ────────────────────────────────────────── */
 

@@ -74,7 +74,7 @@ const char *udisplay_version(void);
 
 /* ── Constants ───────────────────────────────────────────────────────────── */
 
-#define UDISPLAY_PROTO_VERSION    0x04u
+#define UDISPLAY_PROTO_VERSION    0x05u
 #define UDISPLAY_CHUNK_SIZE_BYTES 256u
 #define UDISPLAY_HB_MISS_MAX      3u  /**< Consecutive comms misses (missed HEARTBEAT echo once
                                             active, or missed bootstrap progress before active)
