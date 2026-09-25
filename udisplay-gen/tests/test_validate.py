@@ -1148,3 +1148,35 @@ def test_debug_state_validates_against_root_schema():
         "    debug_state: 65280\n"
     )
     assert schema_errors(doc, SCHEMA) == []
+
+
+@pytest.mark.parametrize("reserved", ["set", "clear"])
+def test_button_group_reserved_item_key_rejected(reserved):
+    """`set`/`clear` are the generated group's own methods (C++ and Python) —
+    an item with that key would collide with them in every backend, so the
+    validator rejects it once for all of them."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "g": {
+                "type": "button-group",
+                "items": {reserved: {"label": "A"}, "b": {"label": "B"}},
+            }
+        },
+    }
+    assert schema_errors(doc, SCHEMA) == []
+    errors = semantic_errors(doc)
+    assert any(f"g.{reserved}" in e and "reserved" in e for e in errors)
+
+
+def test_button_group_non_reserved_item_keys_accepted():
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "g": {
+                "type": "button-group",
+                "items": {"setup": {"label": "A"}, "clearance": {"label": "B"}},
+            }
+        },
+    }
+    assert validate(doc, SCHEMA) == []
