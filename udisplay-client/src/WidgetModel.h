@@ -15,11 +15,15 @@
  * inside props.
  *
  * Roles exposed to QML:
- *   widgetId    uint     unique 0x10–0xFF ID (0 for decorations/containers)
+ *   widgetId    uint     unique 0x10–0xFF ID — every widget, containers and
+ *                        decorations included (0 only for containers/
+ *                        decorations of a pre-v5 device, see YamlParser::IdScheme)
  *   type        string   widget type name
  *   label       string
- *   enabled     bool
- *   widgetVisible  bool
+ *   enabled     bool     effective: false if this widget OR any ancestor is
+ *                        disabled via SET_PROPERTY(ENABLED)
+ *   widgetVisible  bool  effective: false if this widget or any ancestor is
+ *                        hidden (SET_PROPERTY(VISIBLE)) or a collapsed section
  *   value       variant  current device-pushed value (null until first STATE_UPDATE)
  *   props       map      type-specific properties, built once by YamlParser
  *                        at parse time (see WidgetDef.h) — this model does
@@ -139,6 +143,8 @@ private:
 
     int indexForWidgetId(uint8_t id) const;
     void clearChildModels();
+    void notifyInheritedRoles(int row, const QVector<int>& roles);
+    void emitDescendantsChanged(int row, const QVector<int>& roles);
 
     QList<WidgetDef>            m_widgets;
     QHash<uint8_t, int>         m_idToRow;      /* widget_id → row index, every depth */

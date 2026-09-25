@@ -36,7 +36,18 @@ Rectangle {
      * dpadComp), matching props above. */
     property var childModel: null
 
+    /* ChildModel.get() returns a plain snapshot map, so a binding calling it
+     * never re-evaluates on its own. Bumped on every childModel dataChanged
+     * (e.g. SET_PROPERTY(ENABLED) on a dpad button) and read inside
+     * findByPosition() purely as a reactive dependency. */
+    property int _rev: 0
+    Connections {
+        target: root.childModel
+        function onDataChanged() { root._rev++ }
+    }
+
     function findByPosition(position) {
+        root._rev
         var n = root.childModel ? root.childModel.rowCount() : 0
         for (var i = 0; i < n; i++) {
             var item = root.childModel.get(i)

@@ -181,6 +181,25 @@ Item {
                 { fail("SectionWidget.label did not update live after the model row changed (got '" +
                        sectionWidget.label + "') -- sectionComp's binding may have regressed to a one-time assignment"); return }
 
+            /* Issue #43: SET_PROPERTY(ENABLED=0) on the section itself. The
+             * delegate binds `enabled: _enabled`, and Qt Quick propagates it
+             * to every descendant item — the section's own collapse header
+             * and its rendered children, not just leaves bound to _enabled. */
+            if (delegateItem.enabled !== true)
+                { fail("section delegate should start enabled"); return }
+            topLevelItems.setProperty(0, "enabled", false)
+            if (delegateItem.enabled !== false)
+                { fail("section delegate should follow model.enabled=false (WidgetDelegate `enabled: _enabled`)"); return }
+            if (sectionWidget.enabled !== false)
+                { fail("SectionWidget should be disabled by its disabled delegate (Qt Quick enabled propagation)"); return }
+            var childRepeater = findFirstOfType(sectionWidget, "QQuickRepeater")
+            var childDelegate = childRepeater ? childRepeater.itemAt(0) : null
+            if (!childDelegate || childDelegate.enabled !== false)
+                { fail("section's rendered child should be disabled with its section"); return }
+            topLevelItems.setProperty(0, "enabled", true)
+            if (sectionWidget.enabled !== true || childDelegate.enabled !== true)
+                { fail("section subtree should re-enable when model.enabled returns to true"); return }
+
             console.log("PASS: top-level section childModel=" + sectionWidget.childModel.rowCount() +
                         " rows (rendered height=" + sectionWidget.implicitHeight + "), toggleClicked -> toggleSection(" +
                         controller.widgetModel.lastToggledRow + "), label live-updates to '" + sectionWidget.label + "'")
