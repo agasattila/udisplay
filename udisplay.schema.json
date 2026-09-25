@@ -285,7 +285,7 @@
     },
 
     "buttonGroupWidget": {
-      "description": "Exclusive-select button group. Exactly one item is active at a time. Sends a `button_press` EVENT with the selected item's widget_id when the selection changes. Renders as a segmented control (grid layout). For a directional pad, use the `dpad` container type instead. `style:` (see the `styleProp` $def) colors this group's own selection chrome AND cascades to items that don't set their own `style:`.",
+      "description": "Exclusive-select button group. At most one item is selected at a time, and the selection is device-authoritative: pressing an item sends that item's `button_press`/`button_release`/`button_click` EVENTs (with the item's own widget_id) but does not select it. The firmware decides and confirms via the group's generated setter, which sends STATE_UPDATE(group widget_id, uint8 = selected item's widget_id; 0 = none). No item is selected until the first such STATE_UPDATE. Renders as a segmented control (grid layout). For a directional pad, use the `dpad` container type instead. `style:` (see the `styleProp` $def) colors this group's own selection chrome AND cascades to items that don't set their own `style:`.",
       "type": "object",
       "required": ["type", "items"],
       "additionalProperties": false,

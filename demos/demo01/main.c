@@ -35,6 +35,7 @@ static udisplay_t g_ctx; /* single instance — this demo has one TCP connection
 
 static float  g_base_rate_hz = 1.0f;
 static float  g_multiplier   = 1.0f;
+static uint8_t g_mode        = WIDGET_ID_MODE_SEL_SLOW;   /* confirmed mode_sel item */
 static int    g_enabled      = 1;
 static int    g_power_on     = 0;
 static double g_sim_time     = 0.0;
@@ -68,6 +69,7 @@ static void handle_client_ready(void)
     set_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
     set_rate_slider(&g_ctx, g_base_rate_hz);
     set_text_input(&g_ctx, "", 0);
+    set_mode_sel(&g_ctx, g_mode);
 }
 
 static void handle_power_btn(void)
@@ -77,9 +79,19 @@ static void handle_power_btn(void)
     printf("[EVENT] power_btn  → power_led %s\n", g_power_on ? "ON" : "OFF");
 }
 
-static void handle_mode_sel_fast(void)  { g_multiplier = 2.0f; printf("[EVENT] mode_sel   → fast (2×)\n"); }
-static void handle_mode_sel_slow(void)  { g_multiplier = 1.0f; printf("[EVENT] mode_sel   → slow (1×)\n"); }
-static void handle_mode_sel_turbo(void) { g_multiplier = 5.0f; printf("[EVENT] mode_sel   → turbo (5.0×)\n"); }
+/* button-group selection is device-authoritative: a press only reports the
+ * tap; the firmware confirms it with set_mode_sel(), whose STATE_UPDATE is
+ * what moves the selection ring on the client. */
+static void select_mode(uint8_t item_id, float multiplier)
+{
+    g_mode       = item_id;
+    g_multiplier = multiplier;
+    set_mode_sel(&g_ctx, g_mode);
+}
+
+static void handle_mode_sel_fast(void)  { select_mode(WIDGET_ID_MODE_SEL_FAST,  2.0f); printf("[EVENT] mode_sel   → fast (2×)\n"); }
+static void handle_mode_sel_slow(void)  { select_mode(WIDGET_ID_MODE_SEL_SLOW,  1.0f); printf("[EVENT] mode_sel   → slow (1×)\n"); }
+static void handle_mode_sel_turbo(void) { select_mode(WIDGET_ID_MODE_SEL_TURBO, 5.0f); printf("[EVENT] mode_sel   → turbo (5.0×)\n"); }
 
 static void handle_rate_slider(float v)
 {
@@ -150,6 +162,7 @@ static void on_tick(double dt_sec)
         set_rate_slider(&g_ctx, g_base_rate_hz);
         set_enable_toggle(&g_ctx, (uint8_t)g_enabled);
         set_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
+        set_mode_sel(&g_ctx, g_mode);
     }
 
     /* temp_display */
