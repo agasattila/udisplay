@@ -16,16 +16,19 @@ import "./"
  * from the shared ButtonFace.qml component (see its header comment) so
  * items look and behave exactly like a standalone button. Selection is
  * layered on top as a border + bold-label overlay — independent of
- * ButtonFace's own fill/press styling — since `value` is currently
- * unimplemented on the firmware side (see the design doc); the overlay
- * stays inert until a real setter exists but the visuals are already
- * correct for when it does. */
+ * ButtonFace's own fill/press styling.
+ *
+ * Selection is device-authoritative (docs/designs/
+ * button-group-exclusive-select.md): a press only forwards the item's
+ * press/release/click events; `value` changes solely when firmware calls
+ * the generated set_<group>()/clear_<group>(), which sends
+ * STATE_UPDATE(group, uint8 item widgetId). 0 = no selection. */
 Rectangle {
     id: root
     required property int    widgetId
     required property string label
     required property bool   enabled
-    required property var    value    /* active item widgetId or null */
+    required property var    value    /* selected item widgetId; 0 or null = none */
     required property var    props
     /* Every item in this group, as a real model (see
      * WidgetModel::childModel()) — supplied by WidgetDelegate.qml. */
