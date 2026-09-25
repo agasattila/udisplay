@@ -20,7 +20,9 @@ void WidgetModel::setWidgets(const QList<WidgetDef>& widgets)
     m_collapsedSections.clear();
     m_childrenByParent.clear();
     for (int i = 0; i < m_widgets.size(); ++i) {
-        /* widgetId=0 means decoration/container — skip flat id lookup */
+        /* Every widget has an ID under the current scheme (issue #43);
+         * widgetId=0 only occurs for containers/decorations parsed under
+         * YamlParser::IdScheme::LeafOnly (pre-v5 devices) — not addressable. */
         if (m_widgets[i].widgetId != 0)
             m_idToRow[m_widgets[i].widgetId] = i;
         m_childrenByParent[m_widgets[i].parentId].append(i);
@@ -93,8 +95,10 @@ void WidgetModel::setProperty(uint8_t targetId, uint8_t propertyId, uint8_t valu
     default:
         break;
     }
-    if (changed)
+    if (changed) {
         emit dataChanged(index(row), index(row), roles);
+        notifyInheritedRoles(row, roles);
+    }
 }
 
 void WidgetModel::resetProperty(uint8_t targetId, uint8_t propertyId)
@@ -132,8 +136,33 @@ void WidgetModel::resetProperty(uint8_t targetId, uint8_t propertyId)
     default:
         break;
     }
-    if (changed)
+    if (changed) {
         emit dataChanged(index(row), index(row), roles);
+        notifyInheritedRoles(row, roles);
+    }
+}
+
+/* EnabledRole/VisibleRole are inherited (see data()): a change on a
+ * container's own flag changes every descendant's effective value, so each
+ * descendant row gets its own dataChanged for those roles. */
+void WidgetModel::notifyInheritedRoles(int row, const QVector<int>& roles)
+{
+    QVector<int> inherited;
+    for (int r : roles)
+        if (r == EnabledRole || r == VisibleRole)
+            inherited << r;
+    if (!inherited.isEmpty())
+        emitDescendantsChanged(row, inherited);
+}
+
+void WidgetModel::emitDescendantsChanged(int row, const QVector<int>& roles)
+{
+    const QVector<int> children = m_childrenByParent.value(row);
+    for (int child : children) {
+        QModelIndex childIdx = index(child);
+        emit dataChanged(childIdx, childIdx, roles);
+        emitDescendantsChanged(child, roles);
+    }
 }
 
 int WidgetModel::rowCount(const QModelIndex& parent) const
@@ -152,15 +181,23 @@ QVariant WidgetModel::data(const QModelIndex& idx, int role) const
     case WidgetIdRole: return static_cast<int>(w.widgetId);
     case TypeRole:     return widgetTypeName(w.type);
     case LabelRole:    return w.label;
-    case EnabledRole:  return w.enabled;
+    case EnabledRole: {
+        /* Effective enabled state: a widget is enabled only if it and every
+         * ancestor are (SET_PROPERTY(ENABLED=0) on a container disables its
+         * whole subtree — issue #43). */
+        for (int r = idx.row(); r >= 0; r = m_widgets[r].parentId)
+            if (!m_widgets[r].enabled) return false;
+        return true;
+    }
     case VisibleRole: {
+        /* Walk the parentId chain: any ancestor (direct or indirect) that is
+         * hidden via SET_PROPERTY(VISIBLE=0), or is a collapsed collapsible
+         * section, hides this widget. */
         if (!w.visible) return false;
-        /* Walk the parentId chain to support nested collapsible sections —
-         * any ancestor (direct or indirect) that is a collapsed collapsible
-         * section hides this widget. */
         int ownerRow = w.parentId;
         while (ownerRow >= 0) {
             const WidgetDef& anc = m_widgets[ownerRow];
+            if (!anc.visible) return false;
             if (anc.type == WidgetType::Section
                 && anc.props.value(QStringLiteral("collapsible")).toBool()
                 && m_collapsedSections.contains(ownerRow))
@@ -221,17 +258,7 @@ void WidgetModel::toggleSection(int row)
     emit dataChanged(sectionIdx, sectionIdx, { PropsRole });
 
     /* Update visibility of all descendants (direct and nested) of this section */
-    for (int i = row + 1; i < m_widgets.size(); ++i) {
-        int ownerRow = m_widgets[i].parentId;
-        while (ownerRow >= 0) {
-            if (ownerRow == row) {
-                QModelIndex childIdx = index(i);
-                emit dataChanged(childIdx, childIdx, { VisibleRole });
-                break;
-            }
-            ownerRow = m_widgets[ownerRow].parentId;
-        }
-    }
+    emitDescendantsChanged(row, { VisibleRole });
 }
 
 int WidgetModel::indexForWidgetId(uint8_t id) const

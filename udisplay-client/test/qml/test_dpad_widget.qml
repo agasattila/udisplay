@@ -97,6 +97,27 @@ Item {
         childModel: dpadItems.ready ? dpadItems : null
     }
 
+    /* Snapshot model: mimics the C++ ChildModel, whose get() returns a
+     * plain QVariantMap COPY (unlike ListModel.get(), whose returned object
+     * is live and binding-tracked). Mutating a row in place and emitting
+     * dataChanged() is exactly what SET_PROPERTY(ENABLED) on a dpad button
+     * looks like to DpadWidget — the _rev dependency must pick it up. */
+    QtObject {
+        id: snapModel
+        signal dataChanged()
+        property var _rows: [
+            { widgetId: 0x30, row: 10, type: "button", label: "Snap", enabled: true, widgetVisible: true,
+              value: 0, flex: 0, align: "", props: { position: "top" } }
+        ]
+        function rowCount() { return _rows.length }
+        function get(i) { return Object.assign({}, _rows[i]) }
+    }
+    W.DpadWidget {
+        id: snapDpad
+        x: 250
+        childModel: snapModel
+    }
+
     /* Empty dpad: exercises the Math.max(..., 44) floor in isolation — with
      * no real buttons, grid.cellSize never gets bumped past its initial
      * value, so it must resolve to exactly 44 (not some other constant). */
@@ -237,6 +258,16 @@ Item {
             controller.widgetModel.generation = controller.widgetModel.generation + 1
             if (topFace.color.toString() !== "#7788aa")
                 { fail("'top' cell should re-render after widgetModel.generation bumps, got " + topFace.color); return }
+
+            /* Snapshot refresh (issue #43): a dataChanged on a get()-snapshot
+             * child model must re-read the snapshot. */
+            var snapBtn = buttonAt(snapDpad, 1)
+            if (!snapBtn || snapBtn.enabled !== true)
+                { fail("snapshot dpad 'top' cell should start enabled"); return }
+            snapModel._rows[0].enabled = false   // in place: no change signal
+            snapModel.dataChanged()
+            if (snapBtn.enabled !== false)
+                { fail("dpad cell did not re-read its ChildModel snapshot on dataChanged (DpadWidget._rev)"); return }
 
             console.log("PASS: dpad cells forward their own widgetId (no group selection); unpopulated/corner cells are invisible+disabled; cellSize never drops below the 44px touch-target floor; per-cell effective style colors each cell's fill and re-evaluates on setActiveStyle()/generation bump")
             Qt.exit(0)

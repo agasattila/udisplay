@@ -15,6 +15,7 @@
  *   - toggleSection via parentId-chain visibility
  */
 #include <QtTest>
+#include <QSet>
 #include <QAbstractListModel>
 #include "WidgetModel.h"
 #include "WidgetDef.h"
@@ -120,6 +121,22 @@ static QList<WidgetDef> makeButtonGroup(uint8_t groupId, uint8_t dcId, uint8_t a
     ac.parentId = 0;
 
     return { w, dc, ac };
+}
+
+/* [section 0x10] > [row 0x11] > [toggle 0x12]; plus sibling toggle 0x13
+ * outside the section. Every widget, containers included, has an ID. */
+static QList<WidgetDef> makeSectionRowToggle()
+{
+    WidgetDef sec;
+    sec.keyPath  = QStringLiteral("sec");
+    sec.widgetId = 0x10;
+    sec.type     = WidgetType::Section;
+    WidgetDef row;
+    row.keyPath  = QStringLiteral("row");
+    row.widgetId = 0x11;
+    row.type     = WidgetType::Row;
+    row.parentId = 0;
+    return { sec, row, makeToggle(0x12, "inner", 1), makeToggle(0x13, "outer") };
 }
 
 /* Retrieve a role value from the model at the given row. */
@@ -501,6 +518,83 @@ private slots:
         m.setWidgets(makeButtonWithLed(0x10, 0x11));
         QCOMPARE(roleAt(m, 0, WidgetModel::RowRole).toInt(), 0);
         QCOMPARE(roleAt(m, 1, WidgetModel::RowRole).toInt(), 1);
+    }
+
+    /* ── Container-targeted properties (issue #43) ──────────────────── */
+
+    void setProperty_enabled_onContainer_disablesSubtree()
+    {
+        WidgetModel m;
+        m.setWidgets(makeSectionRowToggle());
+        m.setProperty(0x10, Proto::PROP_ENABLED, 0);
+        QCOMPARE(roleAt(m, 0, WidgetModel::EnabledRole).toBool(), false);
+        QCOMPARE(roleAt(m, 1, WidgetModel::EnabledRole).toBool(), false);
+        QCOMPARE(roleAt(m, 2, WidgetModel::EnabledRole).toBool(), false);
+        QCOMPARE(roleAt(m, 3, WidgetModel::EnabledRole).toBool(), true);
+    }
+
+    void setProperty_enabled_onContainer_emitsForEveryDescendant()
+    {
+        WidgetModel m;
+        m.setWidgets(makeSectionRowToggle());
+        QSignalSpy spy(&m, &WidgetModel::dataChanged);
+        m.setProperty(0x11, Proto::PROP_ENABLED, 0);  /* the row */
+        QSet<int> rows;
+        for (const auto& args : spy) {
+            QCOMPARE(args.at(2).value<QVector<int>>(), QVector<int>{ WidgetModel::EnabledRole });
+            rows.insert(args.at(0).toModelIndex().row());
+        }
+        QCOMPARE(rows, (QSet<int>{ 1, 2 }));  /* row itself + its toggle, not section/outer */
+    }
+
+    void resetProperty_enabled_onContainer_restoresSubtree()
+    {
+        WidgetModel m;
+        m.setWidgets(makeSectionRowToggle());
+        m.setProperty(0x10, Proto::PROP_ENABLED, 0);
+        QSignalSpy spy(&m, &WidgetModel::dataChanged);
+        m.resetProperty(0x10, Proto::PROP_ENABLED);
+        QCOMPARE(roleAt(m, 2, WidgetModel::EnabledRole).toBool(), true);
+        QCOMPARE(spy.count(), 3);  /* section, row, inner toggle */
+    }
+
+    void enabled_ownFlagStillWinsUnderEnabledContainer()
+    {
+        WidgetModel m;
+        m.setWidgets(makeSectionRowToggle());
+        m.setProperty(0x12, Proto::PROP_ENABLED, 0);
+        m.setProperty(0x10, Proto::PROP_ENABLED, 0);
+        m.resetProperty(0x10, Proto::PROP_ENABLED);
+        QCOMPARE(roleAt(m, 2, WidgetModel::EnabledRole).toBool(), false);
+    }
+
+    void setProperty_visible_onContainer_hidesSubtree()
+    {
+        WidgetModel m;
+        m.setWidgets(makeSectionRowToggle());
+        QSignalSpy spy(&m, &WidgetModel::dataChanged);
+        m.setProperty(0x10, Proto::PROP_VISIBLE, 0);
+        QCOMPARE(roleAt(m, 0, WidgetModel::VisibleRole).toBool(), false);
+        QCOMPARE(roleAt(m, 1, WidgetModel::VisibleRole).toBool(), false);
+        QCOMPARE(roleAt(m, 2, WidgetModel::VisibleRole).toBool(), false);
+        QCOMPARE(roleAt(m, 3, WidgetModel::VisibleRole).toBool(), true);
+        QCOMPARE(spy.count(), 3);
+        m.resetProperty(0x10, Proto::PROP_VISIBLE);
+        QCOMPARE(roleAt(m, 2, WidgetModel::VisibleRole).toBool(), true);
+    }
+
+    void setProperty_enabled_onContainer_reachesChildModel()
+    {
+        /* QML Repeaters bind ChildModels, not WidgetModel — the descendant
+         * notification must be forwarded to the row's ChildModel too. */
+        WidgetModel m;
+        m.setWidgets(makeSectionRowToggle());
+        auto* cm = qobject_cast<QAbstractItemModel*>(m.childModel(1));
+        QVERIFY(cm);
+        QSignalSpy spy(cm, &QAbstractItemModel::dataChanged);
+        m.setProperty(0x10, Proto::PROP_ENABLED, 0);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(cm->data(cm->index(0, 0), WidgetModel::EnabledRole).toBool(), false);
     }
 
     /* setProperty PROP_MODE on a non-Text widget must be a silent no-op. */
@@ -991,6 +1085,45 @@ private slots:
         /* Expand Section A again — Widget C must reappear */
         m.toggleSection(0);
         QVERIFY(roleAt(m, 2, WidgetModel::VisibleRole).toBool());
+    }
+
+    /* Regression guard for the toggleSection() -> emitDescendantsChanged()
+     * refactor (issue #43): collapsing emits VisibleRole for EVERY
+     * descendant (grandchildren included) and for nothing outside the
+     * section. */
+    void toggleSection_emitsVisibleRoleForExactlyItsDescendants()
+    {
+        QList<WidgetDef> ws = makeSectionRowToggle();
+        ws[0].props[QStringLiteral("collapsible")] = true;
+        WidgetModel m;
+        m.setWidgets(ws);
+        QSignalSpy spy(&m, &WidgetModel::dataChanged);
+        m.toggleSection(0);
+        QSet<int> visibleRows;
+        for (const auto& args : spy) {
+            if (args.at(2).value<QVector<int>>().contains(WidgetModel::VisibleRole))
+                visibleRows.insert(args.at(0).toModelIndex().row());
+        }
+        QCOMPARE(visibleRows, (QSet<int>{ 1, 2 }));  /* row + grandchild toggle, not outer */
+        QCOMPARE(roleAt(m, 2, WidgetModel::VisibleRole).toBool(), false);
+        QCOMPARE(roleAt(m, 3, WidgetModel::VisibleRole).toBool(), true);
+    }
+
+    /* A hidden container keeps its subtree hidden even when a collapsible
+     * section between them is expanded — both ancestor checks apply. */
+    void visible_hiddenAncestorWinsOverExpandedSection()
+    {
+        QList<WidgetDef> ws = makeSectionRowToggle();
+        ws[0].props[QStringLiteral("collapsible")] = true;
+        WidgetModel m;
+        m.setWidgets(ws);
+        m.setProperty(0x11, Proto::PROP_VISIBLE, 0);  /* hide the row */
+        QCOMPARE(roleAt(m, 2, WidgetModel::VisibleRole).toBool(), false);
+        m.toggleSection(0);  /* collapse */
+        m.toggleSection(0);  /* expand */
+        QCOMPARE(roleAt(m, 2, WidgetModel::VisibleRole).toBool(), false);
+        m.resetProperty(0x11, Proto::PROP_VISIBLE);
+        QCOMPARE(roleAt(m, 2, WidgetModel::VisibleRole).toBool(), true);
     }
 
     void toggleSection_ignoresNonCollapsibleSection()
