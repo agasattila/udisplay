@@ -158,15 +158,18 @@ Loader {
 
     /* Leaf widget components — no cycle: none of these files reference WidgetDelegate.
      * effectiveStyle is threaded only to components whose .qml file actually
-     * reads controller.activeStyle today (verified via grep) — buttonComp/
-     * dpadComp render color:"transparent" with no chrome of their own (see
-     * docs/designs/unify-widget-style-handling.md's Open Questions on why
-     * row/grid/dpad/button reject style: entirely), so threading it there
-     * would be dead, unread plumbing. */
+     * consumes style tokens — including buttonComp, whose ButtonFace chrome
+     * (fill/label) uses the button's own effective style
+     * (docs/designs/container-style-cascading.md, Revision 2). dpadComp
+     * renders color:"transparent" with no chrome of its own, so threading it
+     * there would be dead, unread plumbing; row/grid/dpad accept `style:`
+     * only as a cascade root consumed by descendants' own effectiveStyleFor()
+     * ancestor walk (DpadWidget.qml resolves each cell button's style
+     * itself). */
     Component { id: displayComp;     DisplayWidget     { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; compact: root.compact; effectiveStyle: root._effectiveStyle } }
     Component { id: ledComp;         LedWidget         { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; compact: root.compact; effectiveStyle: root._effectiveStyle } }
     Component { id: rgbledComp;      RgbLedWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; compact: root.compact; effectiveStyle: root._effectiveStyle } }
-    Component { id: buttonComp;      ButtonWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; props: _props; childModel: root._childModel } }
+    Component { id: buttonComp;      ButtonWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; props: _props; childModel: root._childModel; effectiveStyle: root._effectiveStyle } }
     Component { id: buttonGroupComp; ButtonGroupWidget { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; childModel: root._childModel; effectiveStyle: root._effectiveStyle } }
     Component { id: sliderComp;      SliderWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; props: _props; effectiveStyle: root._effectiveStyle } }
     Component { id: toggleComp;      ToggleWidget      { widgetId: _widgetId; label: _label; enabled: _enabled; value: _value; effectiveStyle: root._effectiveStyle } }

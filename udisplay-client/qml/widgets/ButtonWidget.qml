@@ -43,6 +43,14 @@ Rectangle {
      * comment). Every other call site (WidgetDelegate.qml's buttonComp)
      * always supplies one. */
     property var    childModel: null
+    /* This button's resolved style tokens (WidgetDelegate.qml's
+     * _effectiveStyle, or DpadWidget.qml's per-cell lookup) — colors the
+     * button's own chrome via ButtonFace. Face children resolve their own
+     * effective style independently (their ancestor walk reaches this
+     * button's style: through the generic effectiveStyleFor() cascade), so
+     * it is not threaded into the face row. Defaults to the app-wide
+     * activeStyle for callers with no resolver in scope. */
+    property var    effectiveStyle: controller.activeStyle
 
     property string btnShape:    props["shape"] !== undefined ? props["shape"] : "rect"
     property bool   hasChildren: childModel ? childModel.rowCount() > 0 : false
@@ -65,6 +73,7 @@ Rectangle {
         label:     root.label
         enabled:   root.enabled
         showLabel: !root.hasChildren
+        effectiveStyle: root.effectiveStyle
 
         onButtonPressed:  controller.sendButtonPress(root.widgetId)
         onButtonReleased: controller.sendButtonRelease(root.widgetId)

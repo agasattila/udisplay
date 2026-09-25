@@ -266,6 +266,41 @@ settled during this `/ship`.
 
 ---
 
+### TODO-061: Close the client/schema asymmetry for style: on face-nested row/grid containers
+**What:** `YamlParser.cpp`'s `parseStyleProp()` decides whether to accept `style:` purely
+from `WidgetType` (Row/Grid/Dpad/etc.), with no awareness of whether a given row/grid is
+top-level or nested inside a `button`'s face. Since PR22 lifted the row/grid/dpad
+rejection, a row/grid *nested inside a button's face* can now also parse `style:` at the
+live client, even though `udisplay.schema.json`'s `buttonFaceRowContainer`/
+`buttonFaceGridContainer` `$defs` (deliberately, per the original cascading design)
+don't include a `style` property — `udisplay-gen validate` rejects that YAML as an
+unknown property while the client silently accepts and uses it.
+**Why:** Found during `/plan-eng-review` of PR22's button-cascading revision (2026-09-23),
+independently corroborated by Codex's outside-voice pass raising the same "parser/schema
+parity" class of concern. Pre-dates that revision — it's a latent asymmetry from PR22's
+original row/grid/dpad work, not something the button change introduces or worsens.
+**Pros:** Closes a real divergence between what `udisplay-gen validate` accepts and what
+the live client actually does — today a device could ship YAML that passes validation but
+behaves differently than validated, or (this direction) YAML that validation rejects but
+the client would have rendered correctly.
+**Cons:** Not a one-liner — `parseStyleProp()` doesn't currently know its container
+context, so fixing it means threading "is this row/grid inside a button face" down to
+the check (or, alternatively, deciding face-nested row/grid SHOULD accept `style:` too and
+updating the schema instead of the parser — a real design choice, not just a bug fix).
+**Context:** The client parses device-supplied YAML directly, with no schema validation
+at runtime (`YamlParser.cpp`'s own comments note this elsewhere) — so this asymmetry is
+low-severity in practice (only matters for hand-authored/malformed device YAML that
+bypasses `udisplay-gen`), but real. Start by reading `YamlParser.cpp`'s `buildWidget()`
+`Row`/`Grid` cases and `parseStyleProp()`'s call site, and `udisplay.schema.json`'s
+`buttonFaceRowContainer`/`buttonFaceGridContainer` `$defs`. Decide direction first
+(restrict the client to match the schema, or loosen the schema to match the client) before
+touching code — either is a legitimate fix, they're not equivalent.
+**Effort:** S (human: ~2-4 hrs / CC: ~30-45 min)
+**Priority:** P3 — no reported need yet, narrow authoring-time gap, not a runtime bug.
+**Depends on:** Nothing blocking.
+
+---
+
 ## P2 — Post-Launch Distribution & Quality
 
 ### TODO-004: Package manager distribution (v1.1)
@@ -945,35 +980,15 @@ Android CI job could be considered fully done.
 ---
 
 ### TODO-055: Container-level style cascading (row/grid/section theming their subtree)
-**What:** Implement the inherited-style resolution path deliberately left unbuilt by the
-"Unify widget style handling" work (issue #11, `docs/designs/unify-widget-style-handling.md`):
-a styled container (`section`/`button-group` today; `row`/`grid`/`dpad` once their
-transparent-container restriction lifts) should propagate its `style:` to descendant
-widgets that don't set their own, using the resolution order Codex's cross-model review
-proposed: `explicit widget style → nearest styled ancestor → app-wide active style`.
-**Why:** Themed dashboard regions (an alarm panel, a muted diagnostics area) are the
-actual "coolest version" of per-widget styling identified during `/office-hours` and
-`/plan-eng-review` on issue #11 — the v1 resolver only handles individual widgets.
-**Pros:** The resolver built for v1 is explicitly designed to accept an inherited-style
-parameter (`DeviceController::effectiveStyleFor(row)`), so this is additive, not a
-rearchitect. `WidgetModel`'s `parentId` ancestor-walk machinery (already used for
-collapsed-section visibility) is directly reusable for the ancestor lookup.
-**Cons:** Needs its own design pass for a few real edge cases: unbounded ancestor-walk
-depth (relates to the existing `TODO-036` recursion-depth cap), and whether `row`/`grid`/
-`dpad`'s current "reject `style:`" restriction should lift at the same time cascading
-ships (it becomes meaningful once cascading exists) or in a separate step. Also — flagged
-by outside-voice cross-model review on the v1 PR — cascading is a visible BEHAVIOR CHANGE
-for any existing device YAML that already sets `style:` on a `section`/`button-group` for
-its own chrome: today that widget's unstyled children stay on the app-wide active style;
-once cascading ships, those same unchanged children start inheriting the container's style
-instead, with no YAML edit needed to trigger the new appearance. Not a blocker for v1, but
-the cascading design pass should decide (and document in a release note) whether that's
-acceptable silent behavior drift or needs its own opt-in.
-**Context:** v1 (issue #11) ships leaf-widget-only style resolution plus `section`/
-`button-group`'s own (non-cascading) chrome coloring. This TODO is the deliberately
-deferred second half. Start by reading `docs/designs/unify-widget-style-handling.md`'s
-Open Questions and Cross-Model Perspective sections — the resolution order and the
-"why deferred" reasoning are already captured there.
-**Effort:** M (human: ~1-2 days / CC: ~2-3 hrs)
-**Priority:** P3 — no reported need yet, deliberately deferred scope, not a bug.
+**Status:** ✅ DONE — issue #20, `docs/designs/container-style-cascading.md`.
+`DeviceController::effectiveStyleFor()` now walks the `parentId` ancestor chain
+(capped at 10 levels); `row`/`grid`/`dpad`/`button` all accept `style:` as a
+cascade root (client parser, schema, and `udisplay-gen` validator all
+updated — `button` was extended in response to PR22's review, see
+`docs/designs/container-style-cascading.md`'s Revision section; Revision 2
+makes each button's effective style also color its own face). Resolution
+order: explicit widget style → nearest styled ancestor → app-wide active
+style. Documented as an intentional behavior change in `docs/widgets.md`'s
+Container-level style cascading section — no opt-in flag, matching this
+project's clean-break precedent.
 **Depends on:** Issue #11 / `docs/designs/unify-widget-style-handling.md`'s v1 landing first.

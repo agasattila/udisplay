@@ -146,6 +146,26 @@ Item {
         props: ({})
     }
 
+    /* Own-chrome rule (docs/designs/container-style-cascading.md, Revision
+     * 2 — reverses the earlier D1 invariant): a button's effective style
+     * colors its OWN chrome. WidgetDelegate.qml's buttonComp threads the
+     * resolved style in as effectiveStyle; this stands in for that with a
+     * "warning" style deliberately distinct from activeStyle. */
+    QtObject {
+        id: warningStyle
+        property string button:      "#ff8800"
+        property string button_text: "#101010"
+    }
+    W.ButtonWidget {
+        id: styledButton
+        x: 350; y: 60
+        widgetId: 98
+        label: "Styled"
+        enabled: true
+        props: ({ style: "warning" })
+        effectiveStyle: warningStyle
+    }
+
     Timer {
         interval: 300
         running: true
@@ -239,7 +259,22 @@ Item {
             if (controller.lastClickId !== 99)
                 { fail("ButtonWidget's onButtonClicked should call sendButtonClick(99), got " + controller.lastClickId); return }
 
-            console.log("PASS: shape radius formula, disabled/enabled opacity+MouseArea, unpressed fill, showLabel (hidden/visible/empty), label size aliases, label color, plain-label ButtonWidget, signal wiring all correct")
+            /* Own-chrome rule: styledButton's resolved "warning" style
+             * drives its ButtonFace fill and label color; the unstyled
+             * plainLabelButton keeps the app-wide activeStyle. */
+            var styledFace = filterByType(toArray(styledButton.children), "ButtonFace_QML")[0]
+            if (!styledFace) { fail("could not find styledButton's ButtonFace"); return }
+            if (styledFace.color.toString() !== warningStyle.button)
+                { fail("a button's effective style should color its own fill — expected " +
+                       warningStyle.button + ", got " + styledFace.color); return }
+            var styledLabelText = labelTextOf(styledFace)
+            if (!styledLabelText || styledLabelText.color.toString() !== warningStyle.button_text)
+                { fail("a button's effective style should color its own label — expected " +
+                       warningStyle.button_text + ", got " + (styledLabelText ? styledLabelText.color : "none")); return }
+            if (plainFace.color.toString() !== controller.activeStyle.button)
+                { fail("unstyled button should fill with activeStyle.button, got " + plainFace.color); return }
+
+            console.log("PASS: shape radius formula, disabled/enabled opacity+MouseArea, unpressed fill, showLabel (hidden/visible/empty), label size aliases, label color, plain-label ButtonWidget, signal wiring, effective style on own chrome all correct")
             Qt.exit(0)
         }
     }

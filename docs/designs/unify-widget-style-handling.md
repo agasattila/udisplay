@@ -191,6 +191,8 @@ reactivity (e.g. a device pushing a redefined stylesheet at runtime without a fu
 - Container-level style cascading (a row/grid/section styling its subtree) is explicitly
   out of scope for this pass — the resolver interface accepts an inherited-style parameter
   so it can be added later without a rearchitect, but nothing sets or consumes it yet.
+  **Shipped in a follow-up pass:** issue #20 / TODO-055 /
+  `docs/designs/container-style-cascading.md`.
 
 ## Distribution Plan
 

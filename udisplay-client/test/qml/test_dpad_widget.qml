@@ -29,7 +29,7 @@ Item {
 
     QtObject {
         id: controller
-        property var activeStyle: QtObject {
+        property var baseStyle: QtObject {
             property string background:   "#0d0d1a"
             property string surface:      "#1a1a2e"
             property string text:         "#c0c0c0"
@@ -41,7 +41,28 @@ Item {
             property string button:       "#00d4aa"
             property string button_text:  "#0d0d1a"
         }
+        property var activeStyle: baseStyle
         property var widgetModel: FakeWidgetModel {}
+        /* effectiveStyleFor(row) stand-in: row 1 (the "top" cell) carries
+         * its own style; every other row falls back to activeStyle. */
+        property var upStyle: QtObject {
+            property string button:      "#ff8800"
+            property string button_text: "#101010"
+        }
+        /* Opaque store for the fake resolver below. A real
+         * DeviceController::effectiveStyleFor() is a C++ Q_INVOKABLE, so
+         * QML's binding engine tracks nothing it reads. A JS function
+         * reading notifying QML properties WOULD be tracked, which would
+         * let the dummy-dependency tests pass even with the production
+         * dummy reads deleted. Mutating a plain JS object's fields in
+         * place emits no change signal, so reads from _opaque behave like
+         * the real C++ boundary. */
+        property var _opaque: ({})
+        function effectiveStyleFor(row) {
+            if (row === 1) return _opaque.up || upStyle
+            return _opaque.active || baseStyle
+        }
+        function setActiveStyle(s) { _opaque.active = s; activeStyle = s }  // store first, then notify — matches C++ order
         property int lastPressId: -1
         property int lastReleaseId: -1
         property int lastClickId: -1
@@ -63,9 +84,9 @@ Item {
         id: dpadItems
         property bool ready: false
         Component.onCompleted: {
-            append({ widgetId: 0x20, type: "button", label: "Up",   enabled: true,  widgetVisible: true, value: 0,
+            append({ widgetId: 0x20, row: 1, type: "button", label: "Up",   enabled: true,  widgetVisible: true, value: 0,
                      flex: 0, align: "", props: { position: "top" } })
-            append({ widgetId: 0x21, type: "button", label: "Down", enabled: false, widgetVisible: true, value: 0,
+            append({ widgetId: 0x21, row: 2, type: "button", label: "Down", enabled: false, widgetVisible: true, value: 0,
                      flex: 0, align: "", props: { position: "bottom" } })
             ready = true
         }
@@ -186,7 +207,38 @@ Item {
                 { fail("dpad cell dimensions must never be below 44px, got " +
                        cellAt(dpad, 1).width + "x" + cellAt(dpad, 1).height); return }
 
-            console.log("PASS: dpad cells forward their own widgetId (no group selection); unpopulated/corner cells are invisible+disabled; cellSize never drops below the 44px touch-target floor")
+            /* Each cell's own effective style colors its own ButtonFace
+             * (docs/designs/container-style-cascading.md, Revision 2): the
+             * styled "top" cell fills with upStyle, "bottom" with activeStyle. */
+            var topFace = topBtn.children[0], bottomFace = bottomBtn.children[0]
+            if (topFace.color.toString() !== controller.upStyle.button)
+                { fail("'top' cell should fill with its own effective style (" + controller.upStyle.button + "), got " + topFace.color); return }
+            if (bottomFace.color.toString() !== controller.activeStyle.button)
+                { fail("'bottom' cell should fill with activeStyle.button, got " + bottomFace.color); return }
+
+            /* Live restyle: _cellStyle's controller.activeStyle dummy
+             * dependency read must re-evaluate the unstyled "bottom" cell
+             * (Q_INVOKABLE calls aren't tracked by the binding engine). */
+            var nightStyle = Qt.createQmlObject(
+                'import QtQuick; QtObject { property string button: "#123456"; property string button_text: "#ffffff" }',
+                dpad, "dpadNight")
+            controller.setActiveStyle(nightStyle)
+            if (bottomFace.color.toString() !== "#123456")
+                { fail("'bottom' cell should re-render with the new activeStyle.button after setActiveStyle(), got " + bottomFace.color); return }
+            if (topFace.color.toString() !== controller.upStyle.button)
+                { fail("'top' cell should keep its own style after setActiveStyle(), got " + topFace.color); return }
+
+            /* Generation bump: row 1 changes what it resolves to without
+             * touching activeStyle; only the widgetModel.generation dummy
+             * read can make "top" pick that up. */
+            controller._opaque.up = Qt.createQmlObject(
+                'import QtQuick; QtObject { property string button: "#7788aa"; property string button_text: "#000000" }',
+                dpad, "dpadUp2")
+            controller.widgetModel.generation = controller.widgetModel.generation + 1
+            if (topFace.color.toString() !== "#7788aa")
+                { fail("'top' cell should re-render after widgetModel.generation bumps, got " + topFace.color); return }
+
+            console.log("PASS: dpad cells forward their own widgetId (no group selection); unpopulated/corner cells are invisible+disabled; cellSize never drops below the 44px touch-target floor; per-cell effective style colors each cell's fill and re-evaluates on setActiveStyle()/generation bump")
             Qt.exit(0)
         }
     }

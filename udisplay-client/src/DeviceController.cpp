@@ -341,16 +341,29 @@ void DeviceController::setActiveStyle(const QString& name)
 
 QVariantMap DeviceController::effectiveStyleFor(int row)
 {
-    QModelIndex idx = m_model.index(row);
-    if (!idx.isValid())
-        return m_activeStyleMap;
+    /* Container-level cascading (docs/designs/container-style-cascading.md):
+     * check the widget's own row first (explicit style wins), then walk
+     * parentId upward through any styled ancestor (row/grid/dpad/section/
+     * button-group), falling back to the app-wide active style. The walk
+     * cannot cycle — parentId always points to a lower flat-list row, by
+     * construction of YamlParser's top-down recursive build — but it is
+     * still capped defensively, consistent with TODO-036's proposed nesting
+     * limit for the (separate, still-open) parse-time recursion guard. */
+    static constexpr int kMaxStyleAncestorDepth = 10;
 
-    const QString name = m_model.data(idx, WidgetModel::PropsRole).toMap()
-                              .value(QStringLiteral("style")).toString();
-    if (name.isEmpty() || !m_styles.contains(name))
-        return m_activeStyleMap;
+    int currentRow = row;
+    for (int depth = 0; currentRow >= 0 && depth < kMaxStyleAncestorDepth; ++depth) {
+        QModelIndex idx = m_model.index(currentRow);
+        if (!idx.isValid()) break;
 
-    return buildStyleVariantMap(m_styles.value(name));
+        const QString name = m_model.data(idx, WidgetModel::PropsRole).toMap()
+                                  .value(QStringLiteral("style")).toString();
+        if (!name.isEmpty() && m_styles.contains(name))
+            return buildStyleVariantMap(m_styles.value(name));
+
+        currentRow = m_model.data(idx, WidgetModel::ParentRole).toInt();
+    }
+    return m_activeStyleMap;
 }
 
 /* ── Shared YAML → model helper ─────────────────────────────────────────── */

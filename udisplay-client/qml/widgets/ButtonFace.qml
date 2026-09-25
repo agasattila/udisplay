@@ -15,7 +15,15 @@ import QtQuick
  * rather than calling controller.sendButtonPress/Release/Click directly, so
  * each caller wires the signals to whichever widget_id is appropriate
  * (root.widgetId for a standalone button, model.widgetId for a
- * button-group item). */
+ * button-group item).
+ *
+ * Fill and label colors come from `effectiveStyle` — the caller's own
+ * resolved style (DeviceController::effectiveStyleFor(): explicit style: ->
+ * nearest styled ancestor -> app-wide activeStyle, see
+ * docs/designs/container-style-cascading.md, Revision 2). A widget's
+ * effective style colors its own chrome AND is the style context its
+ * descendants inherit. Defaults to controller.activeStyle so a caller with
+ * no resolved style in hand still renders with the app-wide one. */
 Rectangle {
     id: face
 
@@ -23,6 +31,7 @@ Rectangle {
     property bool   enabled:   true
     property string shape:     "rect"  // rect | circle | square
     property bool   showLabel: true    // callers with their own label overlay (e.g. selection styling) set this false
+    property var    effectiveStyle: controller.activeStyle
 
     readonly property alias labelImplicitWidth:  labelText.implicitWidth
     readonly property alias labelImplicitHeight: labelText.implicitHeight
@@ -31,7 +40,7 @@ Rectangle {
     signal buttonReleased()
     signal buttonClicked()
 
-    readonly property color accentColor: controller.activeStyle.button
+    readonly property color accentColor: effectiveStyle.button
 
     radius:  shape === "circle" ? Math.min(width, height) / 2 : shape === "square" ? 4 : 8
     color:   mouseArea.pressed ? Qt.darker(accentColor, 1.3) : accentColor
@@ -41,7 +50,7 @@ Rectangle {
         id: labelText
         anchors.centerIn: parent
         text:  face.label
-        color: controller.activeStyle.button_text
+        color: face.effectiveStyle.button_text
         font.pixelSize: 14
         font.bold: true
         visible: face.showLabel && face.label.length > 0

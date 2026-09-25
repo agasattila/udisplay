@@ -51,9 +51,12 @@ Rectangle {
     /* Resolved style tokens for this row (see WidgetDelegate.qml's
      * _effectiveStyle). Non-required, defaulting to {} — matches props/
      * childModel above (set via live onLoaded binding, same dynamic-Loader
-     * reasoning). Colors this section's OWN header/border chrome — does
-     * NOT cascade to children (out of scope for this pass, see
-     * docs/designs/unify-widget-style-handling.md). */
+     * reasoning). Colors this section's OWN header/border chrome. Also
+     * cascades to children now (docs/designs/container-style-cascading.md)
+     * — but that happens entirely through the generic
+     * WidgetDelegate.qml -> DeviceController::effectiveStyleFor(model.row)
+     * path each child resolves for itself; this property here is only
+     * this section's own chrome color, unrelated to that cascade. */
     property var effectiveStyle: ({})
 
     signal toggleClicked()
