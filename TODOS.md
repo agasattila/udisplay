@@ -355,48 +355,6 @@ error states.
 **Depends on:** v1 shipped, /plan-design-review completed, Qt UI design settled.
 
 ---
-### TODO-006: Real device-authoritative setter for `button-group`
-
-**What:** Give `button-group` a real setter for its exclusive-select state, mirroring
-`dropdown`'s existing `OutputWidget<uint8_t>` + `.set()` pattern
-(`udisplay-gen/udisplay_gen/backends/cpp_backend.py:214-235`), and a round-trip contract
-test (firmware `.set()` → STATE_UPDATE → QML `value` → visibly-selected item).
-
-**Why:** Investigated during the `/office-hours` + `/plan-eng-review` session that split
-`dpad` out of `button-group` (see
-`~/.gstack/projects/agasattila-udisplay/prog-main-design-20260726-204340.md`).
-`button-group`'s only reason to exist as a distinct widget type — versus just placing
-several `button`s in a grid — is exclusive-select semantics. That's currently
-unimplemented: `cpp_backend.py:196-212` generates a bare `Widget` with no `.set()` (unlike
-`dropdown`), `docs/widgets.md:484-573` documents "no setter for the group," and none of
-demo01/02/03 (the only real usages) ever report a selected value back from firmware. In
-every real deployment today, every `button-group` item is permanently stuck
-"unselected" — the selection highlight the QML styling is built around never fires. This
-is exactly how it shipped unnoticed across three demos: no round-trip test exists for
-any stateful widget today, so nothing would have caught it.
-
-**Context:** The dpad-split design deliberately deferred this — same reasoning as the
-Play Store signing precedent (#2 above): don't build speculative protocol surface
-without a concrete firmware consumer asking for it. **Note the tension explicitly**
-(flagged by `/plan-eng-review`'s outside voice, Codex): the design argues
-exclusive-select is `button-group`'s only reason to exist, then ships the taxonomy split
-while leaving exactly that nonfunctional. Deliberately accepted, not silently dropped —
-this TODO is how it stays tracked. Smallest correct implementation (per Codex's
-cold-read in the design session): start with a failing round-trip test, then copy the
-`dropdown` pattern almost literally — `OutputWidget<uint8_t>` instead of bare `Widget`,
-generate `.set(itemId)` pushing STATE_UPDATE, generate symbolic item-value constants
-(e.g. `mode.fast`) so firmware code doesn't hardcode numeric IDs, stay
-device-authoritative (no optimistic flip — selection only changes after the
-STATE_UPDATE round-trips back).
-
-**Effort:** M
-**Priority:** P3
-**Depends on:** The `dpad` split (PR2, see the design doc above) landing first, so
-`button-group` is grid-only before its setter semantics are locked in. No concrete
-firmware consumer requesting this yet — revisit when one exists.
-
----
-
 ### TODO-007: Dedupe `CONTAINER_TYPES`/`DECORATION_TYPES` between `widget_ids.py` and `validate.py`
 
 **What:** `udisplay-gen/udisplay_gen/widget_ids.py` and
@@ -944,6 +902,57 @@ turning a config-portability task into also completing a half-finished feature.
 **Depends on:** Nothing. Can be done any time.
 
 ## Completed
+
+### TODO-006: Real device-authoritative setter for `button-group`
+
+**What:** Give `button-group` a real setter for its exclusive-select state, mirroring
+`dropdown`'s existing `OutputWidget<uint8_t>` + `.set()` pattern
+(`udisplay-gen/udisplay_gen/backends/cpp_backend.py:214-235`), and a round-trip contract
+test (firmware `.set()` → STATE_UPDATE → QML `value` → visibly-selected item).
+
+**Why:** Investigated during the `/office-hours` + `/plan-eng-review` session that split
+`dpad` out of `button-group` (see
+`~/.gstack/projects/agasattila-udisplay/prog-main-design-20260726-204340.md`).
+`button-group`'s only reason to exist as a distinct widget type — versus just placing
+several `button`s in a grid — is exclusive-select semantics. That's currently
+unimplemented: `cpp_backend.py:196-212` generates a bare `Widget` with no `.set()` (unlike
+`dropdown`), `docs/widgets.md:484-573` documents "no setter for the group," and none of
+demo01/02/03 (the only real usages) ever report a selected value back from firmware. In
+every real deployment today, every `button-group` item is permanently stuck
+"unselected" — the selection highlight the QML styling is built around never fires. This
+is exactly how it shipped unnoticed across three demos: no round-trip test exists for
+any stateful widget today, so nothing would have caught it.
+
+**Context:** The dpad-split design deliberately deferred this — same reasoning as the
+Play Store signing precedent (#2 above): don't build speculative protocol surface
+without a concrete firmware consumer asking for it. **Note the tension explicitly**
+(flagged by `/plan-eng-review`'s outside voice, Codex): the design argues
+exclusive-select is `button-group`'s only reason to exist, then ships the taxonomy split
+while leaving exactly that nonfunctional. Deliberately accepted, not silently dropped —
+this TODO is how it stays tracked. Smallest correct implementation (per Codex's
+cold-read in the design session): start with a failing round-trip test, then copy the
+`dropdown` pattern almost literally — `OutputWidget<uint8_t>` instead of bare `Widget`,
+generate `.set(itemId)` pushing STATE_UPDATE, generate symbolic item-value constants
+(e.g. `mode.fast`) so firmware code doesn't hardcode numeric IDs, stay
+device-authoritative (no optimistic flip — selection only changes after the
+STATE_UPDATE round-trips back).
+
+**Effort:** M
+**Priority:** P3
+**Status:** ✅ DONE — issue #41 (design: `docs/designs/button-group-exclusive-select.md`).
+The value is the selected item's widget ID, not an index (the QML already compared
+`value === model.widgetId`); `0` = none. Generated: C `set_<group>(ctx, item_id)` /
+`clear_<group>(ctx)` with the `WIDGET_ID_<GROUP>_<ITEM>` macros as symbolic values;
+C++ `Item` enum + `set(Item)` / `clear()`; MicroPython `set(item)` / `clear()`.
+`set`/`clear` are reserved item keys (validate.py). Round-trip covered by
+`test_device_controller.cpp` (STATE_UPDATE → value, press ≠ commit) and
+`test_button_group_face.qml` (ring follows value, 0 clears). demo01-04 confirm
+selections from firmware.
+**Depends on:** The `dpad` split (PR2, see the design doc above) landing first, so
+`button-group` is grid-only before its setter semantics are locked in. No concrete
+firmware consumer requesting this yet — revisit when one exists.
+
+---
 
 ### TODO-045: "capability check is a no-op" false claim — in TODOS.md AND in the schema
 **What:** Correct every copy of the false "capability check is a no-op" claim. Two
