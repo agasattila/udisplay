@@ -89,7 +89,8 @@ def _generate_header(ctx: BuildContext) -> str:
             if type_str in ("text-rw", "text-ro"):
                 body = f"{send_fn}(ctx, {macro}, s, n);"
             else:
-                body = f"{send_fn}(ctx, {macro}, v);"
+                # Pass the setter's own declared parameter (`v`, `rgb`, `index`).
+                body = f"{send_fn}(ctx, {macro}, {arg_decl.rsplit(' ', 1)[1]});"
             setters.append(
                 f"static inline void {fn}(udisplay_t* ctx, {arg_decl}) {{ {body} }}"
             )
