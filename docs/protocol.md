@@ -1,4 +1,4 @@
-# uDisplay Binary Protocol Specification — v2.2 (proto 0x04)
+# uDisplay Binary Protocol Specification — v2.4 (proto 0x05)
 
 This document is the authoritative wire format reference. Both `udisplay-gen` (Python)
 and `libudisplay` (C++) implement from this spec independently. `tests/protocol_vectors.json`
@@ -151,6 +151,8 @@ A fragment with `offset = 0` always starts a fresh reassembly, discarding any pr
 
 The `widget_id` field in STATE_UPDATE, SET_PROPERTY, and RESET_PROPERTY always identifies a user-defined widget (0x10–0xFF). A `widget_id` outside this range is a protocol error — client logs and ignores.
 
+Since proto 0x05 **every** widget has a `widget_id` — containers (`section`, `row`, `grid`, `dpad`) and decorations (`label`, `separator`) included — so SET_PROPERTY / RESET_PROPERTY can target any node of the widget tree. See [Widget ID Assignment](#widget-id-assignment).
+
 ---
 
 ## Message Formats
@@ -164,7 +166,7 @@ between the no-auth bootstrap path and the auth-challenge path.
 
 ```
 [u8  0x00          ]  msg_type
-[u8  proto_version ]  uDisplay protocol version (current = 0x04)
+[u8  proto_version ]  uDisplay protocol version (current = 0x05)
 [u8  flags         ]  0x00 = no auth; bits 1-7 reserved (MUST be 0)
 [32× u8 merkle_root]  Merkle root of the compressed YAML blob (see docs/merkle.md)
 [u16 chunk_count   ]  number of chunks in the blob
@@ -179,7 +181,7 @@ merkle_root at offset 2. Clients MUST check `proto_version` before parsing: ≤ 
 
 ```
 [u8  0x00          ]  msg_type
-[u8  proto_version ]  uDisplay protocol version (0x04)
+[u8  proto_version ]  uDisplay protocol version (0x04+; current = 0x05)
 [u8  flags         ]  0x01 = auth required
 [u8  algorithm     ]  hash algorithm: 0x01 = HMAC-SHA256 (others reserved)
 [32× u8 salt       ]  device-generated random salt; new salt issued on each attempt
@@ -196,7 +198,7 @@ Client confirms protocol version and echoes the flags byte.
 
 ```
 [u8  0x01              ]  msg_type
-[u8  client_proto_max  ]  highest protocol version the client supports (current = 0x04)
+[u8  client_proto_max  ]  highest protocol version the client supports (current = 0x05)
 [u8  flags             ]  0x00 = no auth (echoes HANDSHAKE flags)
 ```
 
@@ -423,8 +425,8 @@ Total: 3 bytes.
 
 | Code | Name | Value type | Applicable to | Description |
 |---|---|---|---|---|
-| `0x01` | `ENABLED` | `uint8` (0=disabled, 1=enabled) | all widgets | Disabled widget is non-interactive and visually grayed out |
-| `0x02` | `VISIBLE` | `uint8` (0=hidden, 1=shown) | all widgets | Hidden widget takes no space in the layout |
+| `0x01` | `ENABLED` | `uint8` (0=disabled, 1=enabled) | all widgets | Disabled widget is non-interactive and visually grayed out. On a container: its whole subtree |
+| `0x02` | `VISIBLE` | `uint8` (0=hidden, 1=shown) | all widgets | Hidden widget takes no space in the layout. On a container: its whole subtree |
 | `0x03` | `MODE` | `uint8` (0=ro, 1=rw) | `text` only | Switch text field between display and input mode at runtime |
 | `0x04` | `STYLE` | `uint8` (widget-specific) | TBD | Change visual variant at runtime |
 | `0x05–0x0F` | Reserved | TBD | TBD | Event filters, label changes, etc. |
@@ -589,22 +591,53 @@ CLIENT                                  DEVICE
 
 ## Widget ID Assignment
 
-Widget IDs are assigned by `udisplay-gen build` at code generation time:
+Widget IDs are assigned by `udisplay-gen build` at code generation time (ID scheme v5, proto 0x05+):
 
-1. Sort all widgets in the YAML definition alphabetically by their `id` key. For nested `widgets:` blocks (`button` face children, `row`/`grid`/`section` contents), sort by fully-qualified `parent_id.child_id` path.
-2. Assign `widget_id` starting at **0x10**, incrementing by 1 in sorted order.
+1. Collect the **ID path** of every widget in the YAML definition — every
+   widget gets one: leaves, containers (`section`/`row`/`grid`/`dpad`),
+   decorations (`label`/`separator`), `button` face children and
+   `button-group` items. `dropdown` items are options, not widgets, and get none.
+   - A top-level widget's path is its key (`rate`).
+   - Containers are **transparent to their children's paths**: a container's
+     own key is never a segment of a child's path. The container itself gets
+     a path like any widget at its position (`advanced`), and its children
+     keep the prefix the container was reached with (`rate`, not `advanced.rate`).
+   - `button` face children and `button-group` items are prefixed by their
+     parent's path (`relay1.relay1_status`, `mode_sel.ac`). A `row`/`grid`
+     on a button face gets `btn.face_row`, and its own children stay
+     `btn.icon` (container transparency again).
+2. Sort all paths alphabetically and assign `widget_id` starting at **0x10**,
+   incrementing by 1 in sorted order. Two widgets resolving to the same path
+   (e.g. a section `advanced` and a slider `advanced` in another section) are
+   an error in both codegen and the client.
 3. The mapping is embedded in the generated `udisplay_ui.h`:
    ```c
-   #define WIDGET_ID_READING   0x10
+   #define WIDGET_ID_ADVANCED  0x10   // a section — addressable too
    #define WIDGET_ID_MODE      0x11
    #define WIDGET_ID_RATE      0x12
    // relay1.relay1_status is a child widget — also gets its own ID
    #define WIDGET_ID_RELAY1    0x13
    #define WIDGET_ID_RELAY1_STATUS 0x14
    ```
-4. Maximum 240 user-defined widgets per device (0x10–0xFF).
+   The C++ and MicroPython backends expose every widget, containers included,
+   as a member with `set_property()` / `reset_property()`.
+4. Maximum 240 widgets per device (0x10–0xFF) — containers and decorations count.
 
-The Qt client derives the same mapping by parsing the YAML blob (same sort order). Both sides use `widget_id` as the sole identifier in all STATE_UPDATE and EVENT messages.
+The Qt client derives the same mapping by parsing the YAML blob (same sort order). Both sides use `widget_id` as the sole identifier in all STATE_UPDATE, EVENT, SET_PROPERTY and RESET_PROPERTY messages.
+
+**Legacy scheme (proto < 0x05).** Firmware built before proto 0x05 used the
+leaf-only scheme: containers and decorations got no ID and took no slot. The
+YAML blob does not record which scheme its header was generated with, so the
+client selects it from the HANDSHAKE `proto_version`: `< 0x05` → leaf-only,
+`≥ 0x05` → every widget. Always build firmware with a `udisplay-gen` and a
+`libudisplay` from the same release — a v5 header linked against a v4 library
+would advertise the wrong scheme.
+
+**Property inheritance.** `ENABLED` and `VISIBLE` apply to a widget's whole
+subtree: setting `ENABLED=0` on a `section` disables every widget inside it;
+`VISIBLE=0` hides it with its children. A child's own override still applies
+underneath (re-enabling the section does not re-enable a child that was
+disabled on its own).
 
 The system property constants are also defined in `udisplay_ui.h`:
 ```c
@@ -652,8 +685,9 @@ the order they are declared in the YAML definition.
   **collapses its space** — it does not leave a gap.
 
 **v1 layout containers** — `section`, `row`, `grid`, and `dpad` — are available as of
-v1 widget expansion. They carry no widget IDs and send no protocol messages.
-Their children are regular widgets with IDs:
+v1 widget expansion. They send no protocol messages of their own, but (since proto
+0x05) each has a widget ID so firmware can SET_PROPERTY it (e.g. hide a whole
+section). Their children are regular widgets with IDs:
 
 - `section` — groups widgets under a collapsible header. Children render vertically inside.
 - `row` — renders children side-by-side with optional `flex` weights (proportional width).
@@ -792,3 +826,4 @@ are the real-hardware showpieces.
 | v2.1 | 2026-05-09 | Optional HMAC-SHA256 challenge-response authentication. PROTO_VERSION bumped to 0x04 (breaking). HANDSHAKE(flags=0x00) now 39 bytes — flags byte inserted at offset 2, merkle_root shifts to offset 3. New HANDSHAKE(flags=0x01) auth-challenge (36 bytes: msg_type + proto_version + flags + algo + salt[32]). HANDSHAKE_ACK(flags=0x00) now 3 bytes; HANDSHAKE_ACK(flags=0x01) 35 bytes (adds 32-byte credential). Connection States updated with AWAITING_AUTH_ACK sub-state. Clients with proto_version < 0x04 continue to receive the legacy 38-byte no-auth HANDSHAKE. |
 | v2.2 | 2026-05-17 | BLE GATT framing redesign. Replaced 1-byte `frag_flags` scheme with offset+packet_id framing: first fragment carries `[u16 offset=0][u8 packet_id][u16 length][u8 flags]`; continuations carry `[u16 offset][u8 packet_id]`. Completion detected by `offset + frag_payload_size == length`. `control` characteristic upgraded from WRITE_NO_RESPONSE to WRITE_WITH_RESPONSE (ATT-level delivery confirmation). Both characteristics use BLE framing (not data-only as previously stated — `HANDSHAKE_ACK(auth)` is 35 bytes and requires fragmentation at min MTU). `packet_id` counters are independent per transmitter and reset to 0 on reconnect. Explicit error rules added for flags, length cap (1024 bytes), offset gaps, wrong offsets, unexpected packet_id, and over-completion. No PROTO_VERSION bump — BLE framing is implemented in the client's BleTransport, not yet deployed as of this changelog entry. |
 | v2.3 | 2026-07-27 | `dpad` split out of `button-group` into its own v1 layout container (`section`/`row`/`grid`/`dpad`) — `button-group`'s `layout: dpad` removed (grid-only now); a dpad's children are ordinary `button` widgets carrying a `position` (`"top"`\|`"right"`\|`"bottom"`\|`"left"`\|`"center"`). No wire-format change — dpad carries no widget ID and sends no protocol messages of its own; each child button sends its own independent `button_press`/`button_release`/`button_click` events, same as any standalone button. No PROTO_VERSION bump. |
+| v2.4 | 2026-09-25 | Every widget gets a `widget_id` (issue #43): containers (`section`/`row`/`grid`/`dpad`) and decorations (`label`/`separator`) now take an ID slot under their own key, while staying transparent to their children's ID paths. SET_PROPERTY/RESET_PROPERTY can target any widget; `ENABLED`/`VISIBLE` on a container apply to its subtree. IDs shift relative to the old leaf-only scheme, so PROTO_VERSION bumped to 0x05: clients use the leaf-only scheme for devices reporting `proto_version < 0x05`; older clients reject v5 devices with the existing "Update the app" error. No message-format change. |
