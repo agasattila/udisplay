@@ -322,6 +322,34 @@ Item {
             if (controller.lastClickId !== 0x11)
                 { fail("grid item click should forward widgetId 0x11, got " + controller.lastClickId); return }
 
+            /* Device-authoritative selection (issue #41): the presses above
+             * only forwarded events — the group's value (set by the
+             * device's STATE_UPDATE) must be untouched, so 0x10 is still
+             * the ringed item. */
+            if (group.value !== 0x10)
+                { fail("item press must not commit the selection client-side; value is " + group.value); return }
+            if (selected.border.color.toString() !== controller.activeStyle.button_text)
+                { fail("selection ring must stay on 0x10 after pressing 0x11"); return }
+
+            /* Firmware accepts: STATE_UPDATE moves value to 0x11 → ring and
+             * bold label move with it. */
+            group.value = 0x11
+            if (unselected.border.color.toString() !== controller.activeStyle.button_text)
+                { fail("after value=0x11, item 0x11 should show the selection ring, got " + unselected.border.color); return }
+            if (selected.border.color.toString() !== controller.activeStyle.border)
+                { fail("after value=0x11, item 0x10 should lose the selection ring, got " + selected.border.color); return }
+            if (labelOf(unselected).font.bold !== true || labelOf(selected).font.bold !== false)
+                { fail("after value=0x11, only item 0x11's label should be bold"); return }
+
+            /* clear_<group>() sends 0: a reserved ID, so no item is ringed. */
+            group.value = 0
+            if (selected.border.color.toString() !== controller.activeStyle.border ||
+                unselected.border.color.toString() !== controller.activeStyle.border)
+                { fail("after value=0 (cleared), no item should show the selection ring"); return }
+            if (labelOf(selected).font.bold || labelOf(unselected).font.bold)
+                { fail("after value=0 (cleared), no item label should be bold"); return }
+            group.value = 0x10   /* restore for any later scenario */
+
             /* Cascading: item with its own style (row 2, ownStyle) renders
              * differently from a sibling with no style (row 3, inherits
              * groupStyle) — each resolves its OWN row, not the group's

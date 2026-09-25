@@ -55,6 +55,7 @@ _TIMEOUT_ERRNOS = (
 #    MicroPython doesn't need a mutex here since this is single-threaded) ──
 _base_rate_hz = 1.0
 _multiplier = 1.0
+_mode = "slow"   # confirmed mode_sel item key
 _enabled = True
 _power_on = False
 _sim_time = 0.0
@@ -89,6 +90,7 @@ def _make_ui(conn, comms_dead):
         u.power_btn.power_led.set(1 if _power_on else 0)
         u.rate_slider.set(_base_rate_hz)
         u.text_input.set("")
+        u.mode_sel.set(getattr(u.mode_sel, _mode))
 
     def on_power_press():
         global _power_on
@@ -96,19 +98,24 @@ def _make_ui(conn, comms_dead):
         u.power_btn.power_led.set(1 if _power_on else 0)
         print("[EVENT] power_btn  -> power_led", "ON" if _power_on else "OFF")
 
+    # button-group selection is device-authoritative: a press only reports
+    # the tap; mode_sel.set() confirms it (its STATE_UPDATE moves the ring).
+    def select_mode(key, multiplier):
+        global _mode, _multiplier
+        _mode = key
+        _multiplier = multiplier
+        u.mode_sel.set(getattr(u.mode_sel, key))
+
     def on_mode_fast():
-        global _multiplier
-        _multiplier = 2.0
+        select_mode("fast", 2.0)
         print("[EVENT] mode_sel   -> fast (2x)")
 
     def on_mode_slow():
-        global _multiplier
-        _multiplier = 1.0
+        select_mode("slow", 1.0)
         print("[EVENT] mode_sel   -> slow (1x)")
 
     def on_mode_turbo():
-        global _multiplier
-        _multiplier = 5.0
+        select_mode("turbo", 5.0)
         print("[EVENT] mode_sel   -> turbo (5.0x)")
 
     def on_rate_change(v):

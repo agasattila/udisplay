@@ -1,4 +1,4 @@
-# uDisplay Binary Protocol Specification — v2.2 (proto 0x04)
+# uDisplay Binary Protocol Specification — v2.4 (proto 0x04)
 
 This document is the authoritative wire format reference. Both `udisplay-gen` (Python)
 and `libudisplay` (C++) implement from this spec independently. `tests/protocol_vectors.json`
@@ -483,7 +483,7 @@ Used in EVENT messages (client → device).
 
 `button_click` (0x01) fires only on a complete tap (press + release within bounds). `button_press` (0x06) fires on press-down; `button_release` (0x07) fires on any release (including canceled touches). All three are always emitted by the client; firmware wires up only the handlers it needs.
 
-For `button-group`: `widget_id` identifies the selected item within the group (each item has its own widget_id assigned by codegen).
+For `button-group`: `widget_id` identifies the pressed item within the group (each item has its own widget_id assigned by codegen). A press does not select the item: selection is device-authoritative. Firmware confirms a selection with STATE_UPDATE on the **group's** `widget_id`, value type `uint8`, value = the selected item's `widget_id` (`0` = no item selected; `0x00`–`0x0F` are reserved, so `0` never names a real item). The client shows the selection only after that STATE_UPDATE arrives.
 
 For `dropdown`: `widget_id` identifies the dropdown itself. The value byte is the 0-based index of the selected item in YAML declaration order.
 
@@ -792,3 +792,4 @@ are the real-hardware showpieces.
 | v2.1 | 2026-05-09 | Optional HMAC-SHA256 challenge-response authentication. PROTO_VERSION bumped to 0x04 (breaking). HANDSHAKE(flags=0x00) now 39 bytes — flags byte inserted at offset 2, merkle_root shifts to offset 3. New HANDSHAKE(flags=0x01) auth-challenge (36 bytes: msg_type + proto_version + flags + algo + salt[32]). HANDSHAKE_ACK(flags=0x00) now 3 bytes; HANDSHAKE_ACK(flags=0x01) 35 bytes (adds 32-byte credential). Connection States updated with AWAITING_AUTH_ACK sub-state. Clients with proto_version < 0x04 continue to receive the legacy 38-byte no-auth HANDSHAKE. |
 | v2.2 | 2026-05-17 | BLE GATT framing redesign. Replaced 1-byte `frag_flags` scheme with offset+packet_id framing: first fragment carries `[u16 offset=0][u8 packet_id][u16 length][u8 flags]`; continuations carry `[u16 offset][u8 packet_id]`. Completion detected by `offset + frag_payload_size == length`. `control` characteristic upgraded from WRITE_NO_RESPONSE to WRITE_WITH_RESPONSE (ATT-level delivery confirmation). Both characteristics use BLE framing (not data-only as previously stated — `HANDSHAKE_ACK(auth)` is 35 bytes and requires fragmentation at min MTU). `packet_id` counters are independent per transmitter and reset to 0 on reconnect. Explicit error rules added for flags, length cap (1024 bytes), offset gaps, wrong offsets, unexpected packet_id, and over-completion. No PROTO_VERSION bump — BLE framing is implemented in the client's BleTransport, not yet deployed as of this changelog entry. |
 | v2.3 | 2026-07-27 | `dpad` split out of `button-group` into its own v1 layout container (`section`/`row`/`grid`/`dpad`) — `button-group`'s `layout: dpad` removed (grid-only now); a dpad's children are ordinary `button` widgets carrying a `position` (`"top"`\|`"right"`\|`"bottom"`\|`"left"`\|`"center"`). No wire-format change — dpad carries no widget ID and sends no protocol messages of its own; each child button sends its own independent `button_press`/`button_release`/`button_click` events, same as any standalone button. No PROTO_VERSION bump. |
+| v2.4 | 2026-09-25 | `button-group` exclusive selection implemented (issue #41): firmware selects an item with STATE_UPDATE(group widget_id, `uint8`, item widget_id), `0` = none. No wire-format change: reuses the existing STATE_UPDATE and `uint8` value type. No PROTO_VERSION bump. |

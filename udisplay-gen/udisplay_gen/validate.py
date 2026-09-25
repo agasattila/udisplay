@@ -31,6 +31,10 @@ CONTAINER_TYPES = {"section", "row", "grid", "dpad"}
 # Decoration types — no widget ID, no protocol exchange
 DECORATION_TYPES = {"label", "separator"}
 
+# button-group item keys that would collide with the generated group's own
+# set()/clear() methods (C++ class members, Python attributes)
+BUTTON_GROUP_RESERVED_ITEM_KEYS = {"set", "clear"}
+
 
 def load_schema() -> dict:
     with _BUNDLED_SCHEMA.open() as f:
@@ -229,6 +233,13 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
                     continue
                 item_path = f"{widget_path}.{item_key}"
                 errors.extend(_check_style_ref(item.get("style"), style_names, item_path))
+            for item_key in widget.get("items", {}):
+                if item_key in BUTTON_GROUP_RESERVED_ITEM_KEYS:
+                    errors.append(
+                        f"  {widget_path}.{item_key}: `{item_key}` is reserved as a "
+                        f"button-group item name (generated C++/Python groups have "
+                        f"`{item_key}()` methods); rename this item"
+                    )
             # Falls through to the seen_names check below for the group's
             # OWN key, same as the button branch above.
 

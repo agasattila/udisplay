@@ -13,6 +13,7 @@ from .backends._shared import (  # noqa: F401
     _macro_name,
     _fn_suffix,
     _setter_for_type,
+    _setter_arg_names,
     _handler_for_type,
     _hex_rows,
 )
