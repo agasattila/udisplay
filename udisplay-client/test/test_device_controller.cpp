@@ -40,6 +40,19 @@ static void injectBootstrap(DeviceController& dc, const char* yaml)
                               Q_ARG(QByteArray, blob));
 }
 
+/* Deliver a device STATE_UPDATE carrying a uint8 value, the same way
+ * BootstrapManager::stateUpdateData reaches the controller at runtime. */
+static void injectStateUpdateU8(DeviceController& dc, uint8_t widgetId, uint8_t value)
+{
+    Proto::StateUpdateData u{};
+    u.widgetId  = widgetId;
+    u.valueType = Proto::VAL_UINT8;
+    u.u8Value   = value;
+    QMetaObject::invokeMethod(&dc, "onStateUpdateData",
+                              Qt::DirectConnection,
+                              Q_ARG(Proto::StateUpdateData, u));
+}
+
 /* Same as injectBootstrap, but passes the blob through uncompressed/raw —
  * used to trigger the decompression-failure branch. */
 static void injectBootstrapRawBlob(DeviceController& dc, const QByteArray& rawBlob)
@@ -947,6 +960,75 @@ private slots:
         /* Rows are pre-order: l0=0, l1=1, ..., l10=10 (the innermost toggle). */
         QCOMPARE(dc.effectiveStyleFor(10).value(QStringLiteral("accent")).toString(),
                   dc.activeStyle().value(QStringLiteral("accent")).toString());
+    }
+    /* ── button-group exclusive select (issue #41, TODO-006) ── */
+
+    /* Round-trip contract for the generated set_<group>()/clear_<group>():
+     * firmware sends STATE_UPDATE(group_id, VAL_UINT8, item_widget_id) and
+     * the group row's `value` becomes that item's widget ID — exactly what
+     * ButtonGroupWidget.qml compares against each item's model.widgetId to
+     * draw the selection ring. 0 (reserved ID, never a real item) clears. */
+    void buttonGroup_stateUpdate_selectsItemByWidgetId_zeroClears()
+    {
+        DeviceController dc;
+        injectBootstrap(dc,
+            "widgets:\n"
+            "  mode:\n"
+            "    type: button-group\n"
+            "    items:\n"
+            "      fast:\n"
+            "        label: \"Fast\"\n"
+            "      slow:\n"
+            "        label: \"Slow\"\n");
+        WidgetModel* m = dc.widgetModel();
+        auto at = [m](int row, int role) { return m->data(m->index(row, 0), role); };
+        /* rows: mode=0, fast=1, slow=2; IDs are alphabetical by path:
+         * mode=0x10, mode.fast=0x11, mode.slow=0x12 (same as codegen). */
+        const int groupId = at(0, WidgetModel::WidgetIdRole).toInt();
+        const int fastId  = at(1, WidgetModel::WidgetIdRole).toInt();
+        const int slowId  = at(2, WidgetModel::WidgetIdRole).toInt();
+        QCOMPARE(groupId, 0x10);
+        QCOMPARE(fastId,  0x11);
+        QCOMPARE(slowId,  0x12);
+
+        /* Nothing selected until the device says so. */
+        QVERIFY(at(0, WidgetModel::ValueRole).isNull());
+
+        injectStateUpdateU8(dc, groupId, slowId);
+        QCOMPARE(at(0, WidgetModel::ValueRole).toInt(), slowId);
+        /* The update targets the group row only — items carry no value. */
+        QVERIFY(at(1, WidgetModel::ValueRole).isNull());
+        QVERIFY(at(2, WidgetModel::ValueRole).isNull());
+
+        injectStateUpdateU8(dc, groupId, fastId);
+        QCOMPARE(at(0, WidgetModel::ValueRole).toInt(), fastId);
+
+        injectStateUpdateU8(dc, groupId, 0);
+        QCOMPARE(at(0, WidgetModel::ValueRole).toInt(), 0);
+        QVERIFY(at(0, WidgetModel::ValueRole).toInt() != fastId);
+        QVERIFY(at(0, WidgetModel::ValueRole).toInt() != slowId);
+    }
+
+    /* Device-authoritative: an item press sends only the item's EVENT; it
+     * must never commit the selection on the client side. */
+    void buttonGroup_itemPress_doesNotChangeGroupValue()
+    {
+        DeviceController dc;
+        injectBootstrap(dc,
+            "widgets:\n"
+            "  mode:\n"
+            "    type: button-group\n"
+            "    items:\n"
+            "      fast:\n"
+            "        label: \"Fast\"\n"
+            "      slow:\n"
+            "        label: \"Slow\"\n");
+        WidgetModel* m = dc.widgetModel();
+        injectStateUpdateU8(dc, 0x10, 0x11);
+        dc.sendButtonPress(0x12);
+        dc.sendButtonRelease(0x12);
+        dc.sendButtonClick(0x12);
+        QCOMPARE(m->data(m->index(0, 0), WidgetModel::ValueRole).toInt(), 0x11);
     }
 };
 
