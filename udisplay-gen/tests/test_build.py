@@ -11,7 +11,7 @@ from udisplay_gen.cli import cli
 from udisplay_gen.build import (
     generate_header, generate_source, generate_header_cpp,
     _macro_name, _fn_suffix,
-    _setter_for_type, _handler_for_type, validate_blob_size, MAX_CHUNK_COUNT,
+    _setter_for_type, _setter_arg_names, _handler_for_type, validate_blob_size, MAX_CHUNK_COUNT,
     _cpp_class_name,
 )
 from udisplay_gen.backends import BuildContext, OutputFile
@@ -461,8 +461,48 @@ def test_setter_for_type_button_is_none():
     assert _setter_for_type("button") is None
 
 
-def test_setter_for_type_button_group_is_none():
-    assert _setter_for_type("button-group") is None
+def test_setter_for_type_button_group():
+    """button-group's value is the selected item's widget ID (uint8)."""
+    arg, fn = _setter_for_type("button-group")
+    assert arg == "uint8_t item_id"
+    assert fn == "udisplay_send_uint8"
+
+
+def test_header_button_group_setter_and_clear(full_vocab_yaml):
+    header = _make_header(full_vocab_yaml)
+    assert ("static inline void set_mode_sel(udisplay_t* ctx, uint8_t item_id) "
+            "{ udisplay_send_uint8(ctx, WIDGET_ID_MODE_SEL, item_id); }") in header
+    assert ("static inline void clear_mode_sel(udisplay_t* ctx) "
+            "{ udisplay_send_uint8(ctx, WIDGET_ID_MODE_SEL, 0u); }") in header
+    # Symbolic item values are the items' own widget-ID macros.
+    assert "WIDGET_ID_MODE_SEL_AC" in header
+    assert "WIDGET_ID_MODE_SEL_DC" in header
+
+
+def test_header_button_group_setter_namespaced(full_vocab_yaml):
+    header = _make_header(full_vocab_yaml, namespace="ble")
+    assert "static inline void ble_set_mode_sel(udisplay_t* ctx, uint8_t item_id)" in header
+    assert "static inline void ble_clear_mode_sel(udisplay_t* ctx)" in header
+    assert "BLE_WIDGET_ID_MODE_SEL, 0u" in header
+
+
+@pytest.mark.parametrize("decl,names", [
+    ("float v", "v"),
+    ("int32_t rgb", "rgb"),
+    ("uint8_t index", "index"),
+    ("const char* s, uint8_t n", "s, n"),
+])
+def test_setter_arg_names(decl, names):
+    assert _setter_arg_names(decl) == names
+
+
+def test_header_setter_bodies_use_declared_param_names(full_vocab_yaml, dropdown_yaml):
+    """Regression: setter bodies used to hardcode `v`, so rgbled (`rgb`) and
+    dropdown (`index`) setters referenced an undeclared identifier."""
+    header = _make_header(full_vocab_yaml)
+    assert "int32_t rgb) { udisplay_send_int(ctx, WIDGET_ID_STATUS_RGB, rgb); }" in header
+    header = _make_header(dropdown_yaml)
+    assert "uint8_t index) { udisplay_send_uint8(ctx, WIDGET_ID_WIFI_MODE, index); }" in header
 
 
 # ── Category 3: _handler_for_type + event struct content (8 tests) ───────────
@@ -1019,6 +1059,18 @@ def test_cpp_buttongroup_items_nested(full_vocab_yaml):
     assert "ModeSelWidget mode_sel" in hpp
     assert "ButtonItem ac;" in hpp
     assert "ButtonItem dc;" in hpp
+
+
+def test_cpp_buttongroup_item_enum_and_setter(full_vocab_yaml):
+    """Item enum values are the items' widget IDs (the STATE_UPDATE payload
+    the client compares against each item's widgetId)."""
+    _, wids = _load_types_and_ids(full_vocab_yaml)
+    hpp = _make_cpp(full_vocab_yaml)
+    assert "    enum class Item : uint8_t {" in hpp
+    assert f"        ac = 0x{wids['mode_sel.ac']:02X}u," in hpp
+    assert f"        dc = 0x{wids['mode_sel.dc']:02X}u" in hpp
+    assert "void set(Item v) { udisplay_send_uint8(_ctx, _id, static_cast<uint8_t>(v)); }" in hpp
+    assert "void clear()     { udisplay_send_uint8(_ctx, _id, 0u); }" in hpp
 
 
 # ── Typed setters ─────────────────────────────────────────────────────────────

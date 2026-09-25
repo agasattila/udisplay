@@ -116,6 +116,43 @@ class TestGeneratedContent:
         assert "self.slider_rate.on_change" in ui_py
         assert "self.fire_btn.on_press" in ui_py
 
+    def test_button_group_set_and_clear_send_state_update(self, full_vocab_yaml, tmp_path):
+        """Device-authoritative selection: set() pushes the item's widget ID
+        (from the item object or its WIDGET_ID_* constant) as a uint8
+        STATE_UPDATE on the GROUP's ID; clear() pushes 0 (no item)."""
+        ctx = _make_ctx(full_vocab_yaml)
+        for f in python_backend.generate(ctx):
+            (tmp_path / f.name).write_text(f.content)
+        sys.path.insert(0, str(tmp_path))
+        try:
+            sys.modules.pop("ui", None)
+            sys.modules.pop("udisplay_runtime", None)
+            import ui as generated_ui
+
+            sent = []
+
+            class _FakeDevice:
+                def send_uint8(self, wid, value):
+                    sent.append((wid, value))
+
+            group = generated_ui.ButtonGroupWidget(_FakeDevice(), generated_ui.WIDGET_ID_MODE_SEL)
+            group.ac = generated_ui.ButtonItem(group._device, generated_ui.WIDGET_ID_MODE_SEL_AC)
+            group.set(group.ac)
+            group.set(generated_ui.WIDGET_ID_MODE_SEL_DC)
+            group.clear()
+            assert sent == [
+                (generated_ui.WIDGET_ID_MODE_SEL, generated_ui.WIDGET_ID_MODE_SEL_AC),
+                (generated_ui.WIDGET_ID_MODE_SEL, generated_ui.WIDGET_ID_MODE_SEL_DC),
+                (generated_ui.WIDGET_ID_MODE_SEL, 0),
+            ]
+        finally:
+            sys.path.remove(str(tmp_path))
+            sys.modules.pop("ui", None)
+            sys.modules.pop("udisplay_runtime", None)
+
+    def test_button_group_set_clear_item_names_reserved(self):
+        assert {"set", "clear"} <= python_backend._BUTTON_GROUP_RESERVED_NAMES
+
     def test_dispatch_button_group_items(self, full_vocab_yaml):
         ctx = _make_ctx(full_vocab_yaml)
         ui_py = next(f for f in python_backend.generate(ctx) if f.name == "ui.py").content

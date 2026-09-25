@@ -72,7 +72,7 @@ _BUTTON_RESERVED_NAMES = {"_device", "_widget_id", "on_press", "on_release", "on
 
 # button-group items become `self.<path>.<item_key>` on a ButtonGroupWidget
 # instance — cross-reference against ButtonGroupWidget's own __init__ body.
-_BUTTON_GROUP_RESERVED_NAMES = {"_device", "_widget_id"}
+_BUTTON_GROUP_RESERVED_NAMES = {"_device", "_widget_id", "set", "clear"}
 
 
 def _validate_python_identifiers(ctx: BuildContext) -> None:
@@ -309,12 +309,22 @@ ButtonItem = ButtonWidget
 
 
 class ButtonGroupWidget:
-    # No .set() -- button-group has no real device-side setter in ANY
-    # backend yet (see TODOS.md TODO-006). Items are ButtonItem
+    # Exclusive selection is device-authoritative: an item press only fires
+    # that item's callbacks; firmware confirms with set(), which pushes
+    # STATE_UPDATE(group, uint8 item widget ID). Items are ButtonItem
     # sub-attributes, assigned in UI.__init__ below.
     def __init__(self, device, widget_id):
         self._device = device
         self._widget_id = widget_id
+    def set(self, item):
+        # item: one of this group's ButtonItem attributes (ui.mode.fast) or
+        # its WIDGET_ID_* constant.
+        if isinstance(item, ButtonItem):
+            item = item._widget_id
+        self._device.send_uint8(self._widget_id, item)
+    def clear(self):
+        # 0 is a reserved widget ID, never a real item: no item selected.
+        self._device.send_uint8(self._widget_id, 0)
 '''.lstrip("\n")
 
 
