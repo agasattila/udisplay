@@ -236,7 +236,7 @@ Loader {
                 item.effectiveStyle = Qt.binding(function() { return root._effectiveStyle })
                 /* toggleSection() takes the flat-model row this section
                  * itself occupies (model.row), not widgetId — sections
-                 * always have widgetId 0 (see this file's own _childModel
+                 * have widgetId 0 on pre-v5 devices (see this file's own _childModel
                  * comment on why row, not widgetId, keys container lookups). */
                 item.toggleClicked.connect(function() { controller.widgetModel.toggleSection(model.row) })
             }

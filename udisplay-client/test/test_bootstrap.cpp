@@ -319,6 +319,17 @@ private slots:
         QVERIFY(failedSpy.at(0).at(0).toString().contains(QStringLiteral("Update the app")));
     }
 
+    /* The auth-challenge HANDSHAKE carries proto_version too and is
+     * recorded before the auth branch returns. */
+    void bootstrap_authChallenge_recordsDeviceProtoVersion()
+    {
+        MockTransport t;
+        BootstrapManager bm(&t);
+        t.simulateConnect();
+        t.injectMessage(makeHandshakeAuthChallenge(Proto::AUTH_HMAC_SHA256, QByteArray(32, 'x')));
+        QCOMPARE(bm.deviceProtoVersion(), uint8_t(0x04));
+    }
+
     /* The recorded proto_version is per-connection: a reconnect clears it
      * (so a stale version never picks the ID scheme for a different
      * device), a v5 handshake records 5, and a rejected too-new handshake

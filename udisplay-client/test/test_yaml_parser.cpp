@@ -660,6 +660,110 @@ private slots:
         QVERIFY(p.errorString().contains(QStringLiteral("'advanced'")));
     }
 
+    /* Legacy (pre-v5) blobs never had to keep container names distinct
+     * from leaf names — under IdScheme::LeafOnly the same YAML that fails
+     * above must still parse, with the leaf keeping its old ID. */
+    void legacyScheme_containerNameCollidingWithLeaf_stillParses()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  advanced:\n"
+            "    type: section\n"
+            "    widgets:\n"
+            "      x:\n"
+            "        type: toggle\n"
+            "  basic:\n"
+            "    type: section\n"
+            "    widgets:\n"
+            "      advanced:\n"
+            "        type: toggle\n";
+        YamlParser p;
+        p.setIdScheme(YamlParser::IdScheme::LeafOnly);
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY2(p.parse(yaml, widgets, name, version), qPrintable(p.errorString()));
+        /* leaves only: advanced (toggle) 0x10 < x 0x11 */
+        const WidgetDef* leaf = nullptr;
+        for (const auto& w : widgets)
+            if (w.keyPath == QLatin1String("advanced") && w.type != WidgetType::Section)
+                leaf = &w;
+        QVERIFY(leaf);
+        QCOMPARE(leaf->widgetId, uint8_t(0x10));
+        QCOMPARE(findByKey(widgets, "x")->widgetId, uint8_t(0x11));
+        /* The section must not borrow the toggle's ID through the shared
+         * bare key, or the toggle's STATE_UPDATEs would hit the section. */
+        for (const auto& w : widgets)
+            if (w.type == WidgetType::Section)
+                QCOMPARE(w.widgetId, uint8_t(0));
+    }
+
+    /* Same for a decoration and a top-level row reusing a leaf's name. */
+    void legacyScheme_labelAndRowNamedLikeLeaf_getNoId()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  status:\n"
+            "    type: label\n"
+            "    text: Status\n"
+            "  panel:\n"
+            "    type: row\n"
+            "    widgets:\n"
+            "      a:\n"
+            "        type: toggle\n"
+            "  s:\n"
+            "    type: section\n"
+            "    widgets:\n"
+            "      status:\n"
+            "        type: led\n"
+            "      panel:\n"
+            "        type: toggle\n";
+        YamlParser p;
+        p.setIdScheme(YamlParser::IdScheme::LeafOnly);
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY2(p.parse(yaml, widgets, name, version), qPrintable(p.errorString()));
+        for (const auto& w : widgets) {
+            if (w.type == WidgetType::Label || w.type == WidgetType::Row
+                || w.type == WidgetType::Section)
+                QCOMPARE(w.widgetId, uint8_t(0));
+        }
+        /* leaves only, sorted: a 0x10, panel 0x11, status 0x12 */
+        int leaves = 0;
+        for (const auto& w : widgets) {
+            if (w.type == WidgetType::Toggle && w.keyPath == QLatin1String("panel")) {
+                QCOMPARE(w.widgetId, uint8_t(0x11)); ++leaves;
+            }
+            if (w.type == WidgetType::Led && w.keyPath == QLatin1String("status")) {
+                QCOMPARE(w.widgetId, uint8_t(0x12)); ++leaves;
+            }
+        }
+        QCOMPARE(leaves, 2);
+    }
+
+    /* The 240-slot cap counts containers under EveryWidget (a section +
+     * 240 leaves overflows) but not under LeafOnly, where a pre-v5 device
+     * with exactly 240 leaves inside a section must still parse. */
+    void tooManyWidgets_capCountsContainers_onlyUnderEveryWidget()
+    {
+        QByteArray yaml = "widgets:\n  grp:\n    type: section\n    widgets:\n";
+        for (int i = 0; i < 240; ++i) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "      w%03d:\n        type: led\n", i);
+            yaml += buf;
+        }
+        QList<WidgetDef> widgets;
+        QString name, version;
+
+        YamlParser v5;
+        QVERIFY(!v5.parse(yaml, widgets, name, version));
+        QVERIFY(v5.errorString().contains(QStringLiteral("241")));
+
+        YamlParser legacy;
+        legacy.setIdScheme(YamlParser::IdScheme::LeafOnly);
+        QVERIFY2(legacy.parse(yaml, widgets, name, version), qPrintable(legacy.errorString()));
+        QCOMPARE(findByKey(widgets, "w239")->widgetId, uint8_t(0xFF));
+    }
+
     /* ── New widget types: dropdown ───────────────────────────────── */
 
     void dropdown_items_populated()

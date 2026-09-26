@@ -59,6 +59,9 @@ constexpr uint8_t PROP_STYLE   = 0x04;
 
 /* ── Protocol version ───────────────────────────────────────────────────── */
 constexpr uint8_t PROTO_VERSION = 0x05;
+/* First proto version whose firmware numbers every widget (issue #43).
+ * Fixed forever: later PROTO_VERSION bumps must not move it. */
+constexpr uint8_t PROTO_VERSION_EVERY_WIDGET_ID = 0x05;
 
 /* ── Auth algorithm IDs ─────────────────────────────────────────────────── */
 constexpr uint8_t AUTH_NONE   = 0x00;
