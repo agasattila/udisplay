@@ -142,13 +142,16 @@ The root hash appears in the **HANDSHAKE** message sent by the device on connect
 
 ```
 [u8   0x00]         msg_type = HANDSHAKE
-[u8   0x01]         proto_version
+[u8   proto_version] current = 0x05
+[u8   flags]        0x00 = no auth (proto 0x04+)
 [32×  u8  root]     Merkle root (SHA-256 of concatenated chunk hashes)
 [u16  chunk_count]  little-endian, total number of chunks
 [u16  chunk_size ]  little-endian, always 256 in v1
 ```
 
-Total: 38 bytes.
+Total: 39 bytes (proto 0x04+; 38 bytes without the `flags` byte before that). With
+authentication enabled, the first HANDSHAKE carries an auth challenge instead and the
+root arrives in a second HANDSHAKE after auth succeeds — see `docs/protocol.md`.
 
 The client compares `root` against its local cache (`sqlite: yaml_blob_hash`). On a
 cache hit, it skips HASH_REQUEST / CHUNK_REQUEST entirely and proceeds to widget
@@ -186,7 +189,7 @@ includes:
 | `n_chunks`      | expected chunk count                             |
 | `chunk_hashes`  | array of hex-encoded SHA-256 chunk hashes        |
 | `root_hex`      | hex-encoded Merkle root (32 bytes)               |
-| `widget_ids`    | map of YAML key path → assigned widget ID (hex)  |
+| `widget_ids`    | map of YAML key path → assigned widget ID (hex); every widget, containers and decorations included |
 
 Minimum required vectors:
 
@@ -209,6 +212,6 @@ Minimum required vectors:
 | Max chunks           | 256           | = 65 536 / 256                             |
 | Hash algorithm       | SHA-256       | Output: 32 bytes                           |
 | Compression          | zlib level 6  | Fixed level for determinism                |
-| Widget ID space      | 0x10–0xFF     | 240 user slots                             |
+| Widget ID space      | 0x10–0xFF     | 240 slots; containers and decorations count (proto 0x05+) |
 | System ID space      | 0x00–0x0F     | Reserved (see `docs/protocol.md`)          |
 
