@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include "Protocol.h"
 #include "WidgetDef.h"
 #include <QByteArray>
 #include <QList>
@@ -39,7 +40,8 @@ public:
 
     static IdScheme idSchemeForProtoVersion(uint8_t protoVersion)
     {
-        return protoVersion >= 0x05 ? IdScheme::EveryWidget : IdScheme::LeafOnly;
+        return protoVersion >= Proto::PROTO_VERSION_EVERY_WIDGET_ID
+            ? IdScheme::EveryWidget : IdScheme::LeafOnly;
     }
 
     /** Scheme used by subsequent parse() calls. Default: EveryWidget. */
