@@ -445,8 +445,9 @@ private slots:
 
     /* ── New widget types: section ────────────────────────────────── */
 
-    /* A section header appears in the widget list with type Section and
-     * widgetId=0 (no protocol exchange). Its children follow immediately. */
+    /* A section header appears in the widget list with type Section and its
+     * own widget ID (issue #43: every widget is addressable). Its children
+     * follow immediately. */
     void section_headerAndChildrenFlattened()
     {
         const char* yaml =
@@ -468,7 +469,7 @@ private slots:
         /* Output: section header, then two children — 3 entries */
         QCOMPARE(widgets.size(), 3);
         QCOMPARE(widgets[0].type,     WidgetType::Section);
-        QCOMPARE(widgets[0].widgetId, uint8_t(0));
+        QCOMPARE(widgets[0].widgetId, uint8_t(0x10));  /* controls < fan < relay */
         QCOMPARE(widgets[0].label,    QStringLiteral("Controls"));
         QCOMPARE(widgets[1].keyPath,  QStringLiteral("relay"));
         QCOMPARE(widgets[1].type,     WidgetType::Toggle);
@@ -476,11 +477,12 @@ private slots:
         QCOMPARE(widgets[2].type,     WidgetType::Toggle);
     }
 
-    /* Section children are transparent in ID assignment: children get IDs
-     * as if they were top-level (sorted by plain key, not "section.key"). */
+    /* Sections are transparent to their children's ID paths: children get
+     * IDs as if they were top-level (sorted by plain key, not
+     * "section.key"). The section itself takes a slot under its own key. */
     void section_childrenGetTopLevelIds()
     {
-        /* fan (0x10), relay (0x11) — alphabetical, no section prefix */
+        /* fan (0x10), group (0x11), relay (0x12) — alphabetical, no prefix */
         const char* yaml =
             "widgets:\n"
             "  group:\n"
@@ -494,19 +496,22 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        /* fan < relay alphabetically → 0x10, relay → 0x11 */
         const WidgetDef* fan   = findByKey(widgets, "fan");
+        const WidgetDef* group = findByKey(widgets, "group");
         const WidgetDef* relay = findByKey(widgets, "relay");
         QVERIFY(fan);
+        QVERIFY(group);
         QVERIFY(relay);
         QCOMPARE(fan->widgetId,   uint8_t(0x10));
-        QCOMPARE(relay->widgetId, uint8_t(0x11));
+        QCOMPARE(group->widgetId, uint8_t(0x11));
+        QCOMPARE(relay->widgetId, uint8_t(0x12));
     }
 
     /* ── New widget types: separator and label ────────────────────── */
 
-    /* Separator and label are decorations: widgetId=0, skipped in ID assignment */
-    void separator_widgetId_zero()
+    /* Separator and label are decorations: no value, but still their own
+     * widget ID (issue #43 — e.g. SET_PROPERTY(VISIBLE) on a separator). */
+    void separator_getsWidgetId()
     {
         const char* yaml =
             "widgets:\n"
@@ -518,10 +523,10 @@ private slots:
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets.size(), 1);
         QCOMPARE(widgets[0].type,     WidgetType::Separator);
-        QCOMPARE(widgets[0].widgetId, uint8_t(0));
+        QCOMPARE(widgets[0].widgetId, uint8_t(0x10));
     }
 
-    void label_widgetId_zero_and_props()
+    void label_getsWidgetId_and_props()
     {
         const char* yaml =
             "widgets:\n"
@@ -535,14 +540,13 @@ private slots:
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(widgets.size(), 1);
         QCOMPARE(widgets[0].type,     WidgetType::Label);
-        QCOMPARE(widgets[0].widgetId, uint8_t(0));
+        QCOMPARE(widgets[0].widgetId, uint8_t(0x10));
         QCOMPARE(widgets[0].props[QStringLiteral("text")].toString(), QStringLiteral("Hello world"));
         QCOMPARE(widgets[0].props[QStringLiteral("labelStyle")].toString(), QStringLiteral("heading"));
     }
 
-    /* Decorations are transparent to ID assignment: a toggle after a
-     * separator still gets 0x10 (separator does not consume an ID). */
-    void decorations_transparent_to_id_assignment()
+    /* Decorations take ID slots in sort order like any widget. */
+    void decorations_take_id_slots()
     {
         const char* yaml =
             "widgets:\n"
@@ -557,11 +561,207 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
-        /* 3 entries; relay gets 0x10 (first and only ID consumer) */
+        /* div (0x10) < lbl (0x11) < relay (0x12) */
         QCOMPARE(widgets.size(), 3);
+        QCOMPARE(findByKey(widgets, "div")->widgetId, uint8_t(0x10));
+        QCOMPARE(findByKey(widgets, "lbl")->widgetId, uint8_t(0x11));
         const WidgetDef* relay = findByKey(widgets, "relay");
         QVERIFY(relay);
-        QCOMPARE(relay->widgetId, uint8_t(0x10));
+        QCOMPARE(relay->widgetId, uint8_t(0x12));
+    }
+
+    /* Pre-v5 devices (IdScheme::LeafOnly): decorations and containers take
+     * NO slot — reproduces the numbering their firmware was built with. */
+    void legacyScheme_decorationsAndContainersTakeNoSlot()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  div:\n"
+            "    type: separator\n"
+            "  grp:\n"
+            "    type: section\n"
+            "    widgets:\n"
+            "      lbl:\n"
+            "        type: label\n"
+            "        text: x\n"
+            "      r:\n"
+            "        type: row\n"
+            "        widgets:\n"
+            "          relay:\n"
+            "            type: toggle\n"
+            "  btn:\n"
+            "    type: button\n"
+            "    widgets:\n"
+            "      face:\n"
+            "        type: row\n"
+            "        widgets:\n"
+            "          status:\n"
+            "            type: led\n";
+        YamlParser p;
+        p.setIdScheme(YamlParser::IdScheme::LeafOnly);
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(p.parse(yaml, widgets, name, version));
+        /* btn (0x10) < btn.status (0x11) < relay (0x12); everything else 0 */
+        QCOMPARE(findByKey(widgets, "btn")->widgetId,        uint8_t(0x10));
+        QCOMPARE(findByKey(widgets, "btn.status")->widgetId, uint8_t(0x11));
+        QCOMPARE(findByKey(widgets, "relay")->widgetId,      uint8_t(0x12));
+        for (const char* k : { "div", "grp", "lbl", "r", "btn.face" })
+            QCOMPARE(findByKey(widgets, k)->widgetId, uint8_t(0));
+    }
+
+    /* Same YAML under the default v5 scheme: every widget has an ID. */
+    void everyWidgetScheme_isDefault_andNumbersEveryWidget()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  div:\n"
+            "    type: separator\n"
+            "  grp:\n"
+            "    type: section\n"
+            "    widgets:\n"
+            "      r:\n"
+            "        type: row\n"
+            "        widgets:\n"
+            "          relay:\n"
+            "            type: toggle\n";
+        YamlParser p;
+        QCOMPARE(p.idScheme(), YamlParser::IdScheme::EveryWidget);
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(p.parse(yaml, widgets, name, version));
+        /* div 0x10, grp 0x11, r 0x12, relay 0x13 */
+        QCOMPARE(findByKey(widgets, "div")->widgetId,   uint8_t(0x10));
+        QCOMPARE(findByKey(widgets, "grp")->widgetId,   uint8_t(0x11));
+        QCOMPARE(findByKey(widgets, "r")->widgetId,     uint8_t(0x12));
+        QCOMPARE(findByKey(widgets, "relay")->widgetId, uint8_t(0x13));
+    }
+
+    /* A container named like a widget in another (transparent) scope
+     * resolves to the same ID path — must fail, never share one ID. */
+    void containerNameCollidingWithLeaf_failsParse()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  advanced:\n"
+            "    type: section\n"
+            "    widgets:\n"
+            "      x:\n"
+            "        type: toggle\n"
+            "  basic:\n"
+            "    type: section\n"
+            "    widgets:\n"
+            "      advanced:\n"
+            "        type: toggle\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(yaml, widgets, name, version));
+        QVERIFY(p.errorString().contains(QStringLiteral("'advanced'")));
+    }
+
+    /* Legacy (pre-v5) blobs never had to keep container names distinct
+     * from leaf names — under IdScheme::LeafOnly the same YAML that fails
+     * above must still parse, with the leaf keeping its old ID. */
+    void legacyScheme_containerNameCollidingWithLeaf_stillParses()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  advanced:\n"
+            "    type: section\n"
+            "    widgets:\n"
+            "      x:\n"
+            "        type: toggle\n"
+            "  basic:\n"
+            "    type: section\n"
+            "    widgets:\n"
+            "      advanced:\n"
+            "        type: toggle\n";
+        YamlParser p;
+        p.setIdScheme(YamlParser::IdScheme::LeafOnly);
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY2(p.parse(yaml, widgets, name, version), qPrintable(p.errorString()));
+        /* leaves only: advanced (toggle) 0x10 < x 0x11 */
+        const WidgetDef* leaf = nullptr;
+        for (const auto& w : widgets)
+            if (w.keyPath == QLatin1String("advanced") && w.type != WidgetType::Section)
+                leaf = &w;
+        QVERIFY(leaf);
+        QCOMPARE(leaf->widgetId, uint8_t(0x10));
+        QCOMPARE(findByKey(widgets, "x")->widgetId, uint8_t(0x11));
+        /* The section must not borrow the toggle's ID through the shared
+         * bare key, or the toggle's STATE_UPDATEs would hit the section. */
+        for (const auto& w : widgets)
+            if (w.type == WidgetType::Section)
+                QCOMPARE(w.widgetId, uint8_t(0));
+    }
+
+    /* Same for a decoration and a top-level row reusing a leaf's name. */
+    void legacyScheme_labelAndRowNamedLikeLeaf_getNoId()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  status:\n"
+            "    type: label\n"
+            "    text: Status\n"
+            "  panel:\n"
+            "    type: row\n"
+            "    widgets:\n"
+            "      a:\n"
+            "        type: toggle\n"
+            "  s:\n"
+            "    type: section\n"
+            "    widgets:\n"
+            "      status:\n"
+            "        type: led\n"
+            "      panel:\n"
+            "        type: toggle\n";
+        YamlParser p;
+        p.setIdScheme(YamlParser::IdScheme::LeafOnly);
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY2(p.parse(yaml, widgets, name, version), qPrintable(p.errorString()));
+        for (const auto& w : widgets) {
+            if (w.type == WidgetType::Label || w.type == WidgetType::Row
+                || w.type == WidgetType::Section)
+                QCOMPARE(w.widgetId, uint8_t(0));
+        }
+        /* leaves only, sorted: a 0x10, panel 0x11, status 0x12 */
+        int leaves = 0;
+        for (const auto& w : widgets) {
+            if (w.type == WidgetType::Toggle && w.keyPath == QLatin1String("panel")) {
+                QCOMPARE(w.widgetId, uint8_t(0x11)); ++leaves;
+            }
+            if (w.type == WidgetType::Led && w.keyPath == QLatin1String("status")) {
+                QCOMPARE(w.widgetId, uint8_t(0x12)); ++leaves;
+            }
+        }
+        QCOMPARE(leaves, 2);
+    }
+
+    /* The 240-slot cap counts containers under EveryWidget (a section +
+     * 240 leaves overflows) but not under LeafOnly, where a pre-v5 device
+     * with exactly 240 leaves inside a section must still parse. */
+    void tooManyWidgets_capCountsContainers_onlyUnderEveryWidget()
+    {
+        QByteArray yaml = "widgets:\n  grp:\n    type: section\n    widgets:\n";
+        for (int i = 0; i < 240; ++i) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "      w%03d:\n        type: led\n", i);
+            yaml += buf;
+        }
+        QList<WidgetDef> widgets;
+        QString name, version;
+
+        YamlParser v5;
+        QVERIFY(!v5.parse(yaml, widgets, name, version));
+        QVERIFY(v5.errorString().contains(QStringLiteral("241")));
+
+        YamlParser legacy;
+        legacy.setIdScheme(YamlParser::IdScheme::LeafOnly);
+        QVERIFY2(legacy.parse(yaml, widgets, name, version), qPrintable(legacy.errorString()));
+        QCOMPARE(findByKey(widgets, "w239")->widgetId, uint8_t(0xFF));
     }
 
     /* ── New widget types: dropdown ───────────────────────────────── */
@@ -638,7 +838,7 @@ private slots:
          * children immediately following their container. */
         QCOMPARE(widgets.size(), 3);
         QCOMPARE(widgets[0].type,     WidgetType::Row);
-        QCOMPARE(widgets[0].widgetId, uint8_t(0));
+        QCOMPARE(widgets[0].widgetId, uint8_t(0x10));  /* ctrl_row < fan < relay */
 
         const WidgetDef& relay = widgets[1];
         QCOMPARE(relay.keyPath,  QStringLiteral("relay"));
@@ -789,7 +989,8 @@ private slots:
 
     void row_childrenGetIds_transparentToContainer()
     {
-        /* fan (0x10), relay (0x11) — sorted alphabetically as top-level */
+        /* fan (0x10), r (0x11), relay (0x12) — sorted alphabetically as
+         * top-level; the row takes its own slot but no path segment */
         const char* yaml =
             "widgets:\n"
             "  r:\n"
@@ -804,11 +1005,11 @@ private slots:
         QString name, version;
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(topLevel(widgets).size(), 1);
-        /* fan < relay → IDs 0x10, 0x11 */
+        QCOMPARE(widgets[0].widgetId, uint8_t(0x11));
         bool hasFan = false, hasRelay = false;
         for (const auto* child : childrenOf(widgets, 0)) {
             if (child->keyPath == "fan")   { QCOMPARE(child->widgetId, uint8_t(0x10)); hasFan = true; }
-            if (child->keyPath == "relay") { QCOMPARE(child->widgetId, uint8_t(0x11)); hasRelay = true; }
+            if (child->keyPath == "relay") { QCOMPARE(child->widgetId, uint8_t(0x12)); hasRelay = true; }
         }
         QVERIFY(hasFan);
         QVERIFY(hasRelay);
@@ -842,7 +1043,7 @@ private slots:
         QVERIFY(p.parse(yaml, widgets, name, version));
         QCOMPARE(topLevel(widgets).size(), 1);
         QCOMPARE(widgets[0].type,     WidgetType::Dpad);
-        QCOMPARE(widgets[0].widgetId, uint8_t(0));
+        QCOMPARE(widgets[0].widgetId, uint8_t(0x10));  /* dir_pad < down_btn < up_btn */
 
         QList<const WidgetDef*> items = childrenOf(widgets, 0);
         QCOMPARE(items.size(), 2);
@@ -861,9 +1062,10 @@ private slots:
 
     void dpad_itemsGetIds_transparentToContainer()
     {
-        /* down_btn (0x10), up_btn (0x11) — sorted alphabetically. dpad is
-         * in isContainer()/widget_ids.py's CONTAINER_TYPES, so its own key
-         * is never a path segment: item IDs are looked up bare, same
+        /* d (0x10), down_btn (0x11), up_btn (0x12) — sorted alphabetically.
+         * dpad is in isContainer()/widget_ids.py's CONTAINER_TYPES, so its
+         * own key is never a path segment (it does take its own slot):
+         * item IDs are looked up bare, same
          * transparent-container behavior as row/grid/section (NOT prefixed
          * like button-group items). See tests/protocol_vectors.json's
          * "nesting_and_dpad" golden fixture for the cross-checked version
@@ -886,8 +1088,8 @@ private slots:
         QCOMPARE(topLevel(widgets).size(), 1);
         bool hasUp = false, hasDown = false;
         for (const auto* item : childrenOf(widgets, 0)) {
-            if (item->keyPath == "up_btn")   { QCOMPARE(item->widgetId, uint8_t(0x11)); hasUp = true; }
-            if (item->keyPath == "down_btn") { QCOMPARE(item->widgetId, uint8_t(0x10)); hasDown = true; }
+            if (item->keyPath == "up_btn")   { QCOMPARE(item->widgetId, uint8_t(0x12)); hasUp = true; }
+            if (item->keyPath == "down_btn") { QCOMPARE(item->widgetId, uint8_t(0x11)); hasDown = true; }
         }
         QVERIFY(hasUp);
         QVERIFY(hasDown);
@@ -2372,13 +2574,10 @@ private slots:
         QVERIFY(hasWarning);
     }
 
-    /* A label button child must consume ZERO widget-ID slots — matching
-     * widget_ids.py's NO_ID_TYPES exclusion (collect_types()/_collect()).
-     * Regression guard: collectPathsRecursive() previously assigned an ID to
-     * every button child unconditionally, so a label child would shift every
-     * alphabetically-later widget's ID by one relative to what the Python
-     * codegen tool (which firmware is actually built against) computes. */
-    void buttonChild_labelType_consumesNoIdSlot()
+    /* A label button child gets its own ID slot (issue #43), exactly where
+     * widget_ids.py's _collect() puts it — any disagreement would shift
+     * every alphabetically-later widget's ID relative to the firmware. */
+    void buttonChild_labelType_getsOwnIdSlot()
     {
         const char* yaml =
             "widgets:\n"
@@ -2401,16 +2600,15 @@ private slots:
         QVERIFY(btnRow >= 0);
         QCOMPARE(widgets[btnRow].widgetId, uint8_t(0x10));
         QCOMPARE(childrenOf(widgets, btnRow).size(), 2);
+        /* btn=0x10, btn.caption=0x11, btn.status=0x12, zzz_toggle=0x13 */
+        QCOMPARE(findByKey(widgets, "btn.caption")->widgetId, uint8_t(0x11));
         const WidgetDef* status = findByKey(widgets, "btn.status");
         QVERIFY(status);
-        /* btn=0x10, btn.status=0x11 (caption consumed no slot) */
-        QCOMPARE(status->widgetId, uint8_t(0x11));
+        QCOMPARE(status->widgetId, uint8_t(0x12));
 
         const WidgetDef* zzz = findByKey(widgets, "zzz_toggle");
         QVERIFY(zzz);
-        /* zzz_toggle must be 0x12, not 0x13 — proves caption never
-         * occupied a slot that would otherwise shift this ID. */
-        QCOMPARE(zzz->widgetId, uint8_t(0x12));
+        QCOMPARE(zzz->widgetId, uint8_t(0x13));
     }
 
     /* A button child with type: led is accepted — regression guard for demos. */
@@ -2562,11 +2760,10 @@ private slots:
 
     /* ── button face row/grid nesting ───────────────── */
 
-    /* A grid nested inside a button face is transparent to ID assignment,
-     * matching top-level container semantics — the grid itself gets
-     * widgetId 0 (no container name in the path), and its led grandchild
-     * gets a real, non-zero ID prefixed by the BUTTON's own path (not the
-     * grid's throwaway key). Regression guard for collectPathsRecursive's
+    /* A grid nested inside a button face is transparent to its children's
+     * ID paths, matching top-level container semantics — the grid itself
+     * gets its own ID ("btn.face"), and its led grandchild gets an ID
+     * prefixed by the BUTTON's own path (not the grid's key). Regression guard for collectPathsRecursive's
      * button-child loop (previously flat, one level only) and buildWidget's
      * Row/Grid idPrefix threading. */
     void button_gridChild_ledGrandchild_getsRealId()
@@ -2597,21 +2794,21 @@ private slots:
 
         const WidgetDef* face = btnChildren[0];
         QCOMPARE(face->type, WidgetType::Grid);
-        QCOMPARE(face->widgetId, uint8_t(0));   /* container: transparent, no ID */
+        QCOMPARE(face->widgetId, uint8_t(0x11));   /* "btn.face" */
         int faceRow = findRowByKey(widgets, "btn.face");
         QList<const WidgetDef*> faceChildren = childrenOf(widgets, faceRow);
         QCOMPARE(faceChildren.size(), 1);
 
         const WidgetDef* status = faceChildren[0];
         QCOMPARE(status->type, WidgetType::Led);
-        /* btn=0x10, btn.status=0x11 — "face" contributes no path segment */
-        QCOMPARE(status->widgetId, uint8_t(0x11));
+        /* btn=0x10, btn.face=0x11, btn.status=0x12 — "face" contributes no
+         * path segment to its child */
+        QCOMPARE(status->keyPath, QStringLiteral("btn.status"));
+        QCOMPARE(status->widgetId, uint8_t(0x12));
 
         const WidgetDef* zzz = findByKey(widgets, "zzz_toggle");
         QVERIFY(zzz);
-        /* zzz_toggle must be 0x12 — proves "face" never consumed a real ID
-         * slot that would otherwise shift this ID. */
-        QCOMPARE(zzz->widgetId, uint8_t(0x12));
+        QCOMPARE(zzz->widgetId, uint8_t(0x13));
     }
 
     /* A row nested inside a button face is likewise transparent to ID
@@ -2639,12 +2836,12 @@ private slots:
         QCOMPARE(btnChildren.size(), 1);
         const WidgetDef* face = btnChildren[0];
         QCOMPARE(face->type, WidgetType::Row);
-        QCOMPARE(face->widgetId, uint8_t(0));
+        QCOMPARE(face->widgetId, uint8_t(0x11));
         int faceRow = findRowByKey(widgets, "btn.face");
         QList<const WidgetDef*> faceChildren = childrenOf(widgets, faceRow);
         QCOMPARE(faceChildren.size(), 1);
         QCOMPARE(faceChildren[0]->type, WidgetType::RgbLed);
-        QCOMPARE(faceChildren[0]->widgetId, uint8_t(0x11));
+        QCOMPARE(faceChildren[0]->widgetId, uint8_t(0x12));
     }
 
     /* A direct excluded interactive type (toggle) in a button face emits a
@@ -2849,16 +3046,19 @@ private slots:
         QList<const WidgetDef*> faceChildren = childrenOf(widgets, faceRow);
         QCOMPARE(faceChildren.size(), 3);
 
-        const WidgetDef* a = findByKey(widgets, "a");
-        const WidgetDef* b = findByKey(widgets, "b");
-        const WidgetDef* c = findByKey(widgets, "c");
+        /* keyPath = ID path: face-grid children are "btn.a", not "a" */
+        const WidgetDef* a = findByKey(widgets, "btn.a");
+        const WidgetDef* b = findByKey(widgets, "btn.b");
+        const WidgetDef* c = findByKey(widgets, "btn.c");
         QVERIFY(a); QVERIFY(b); QVERIFY(c);
+        /* btn 0x10, btn.a 0x11, btn.b 0x12, btn.c 0x13, btn.face 0x14 */
         QCOMPARE(a->type, WidgetType::Led);
         QCOMPARE(a->widgetId, uint8_t(0x11));
         QCOMPARE(b->type, WidgetType::Display);
         QCOMPARE(b->widgetId, uint8_t(0x12));
         QCOMPARE(c->type, WidgetType::Label);
-        QCOMPARE(c->widgetId, uint8_t(0));   /* decoration: no ID slot consumed */
+        QCOMPARE(c->widgetId, uint8_t(0x13));
+        QCOMPARE(findByKey(widgets, "btn.face")->widgetId, uint8_t(0x14));
     }
 
     /* ── Non-map widget entry emits a warning ─────────────── */

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema",
   "$id": "udisplay.schema.json",
   "title": "uDisplay UI Definition",
-  "description": "Schema for uDisplay YAML UI definitions. Validated by `udisplay-gen validate`. Widget IDs are assigned by codegen (not declared in YAML). Maximum 240 user widgets per device (IDs 0x10–0xFF); codegen fails if this limit is exceeded.",
+  "description": "Schema for uDisplay YAML UI definitions. Validated by `udisplay-gen validate`. Widget IDs are assigned by codegen (not declared in YAML) to every widget, containers and decorations included. Maximum 240 widgets per device (IDs 0x10–0xFF); codegen fails if this limit is exceeded.",
   "type": "object",
   "required": ["device", "widgets"],
   "additionalProperties": false,
@@ -475,7 +475,7 @@
     },
 
     "labelWidget": {
-      "description": "Static text decoration. Renders a heading, body, or caption text block set in YAML. No widget ID assigned — no protocol exchange. Requires capabilities: [label].",
+      "description": "Static text decoration. Renders a heading, body, or caption text block set in YAML. Gets a widget ID (for SET_PROPERTY) but has no value and sends no events. Requires capabilities: [label].",
       "type": "object",
       "required": ["type", "text"],
       "additionalProperties": false,
@@ -501,7 +501,7 @@
     },
 
     "separatorWidget": {
-      "description": "Horizontal visual divider. No widget ID assigned — no protocol exchange. Requires capabilities: [label].",
+      "description": "Horizontal visual divider. Gets a widget ID (for SET_PROPERTY) but has no value and sends no events. Requires capabilities: [label].",
       "type": "object",
       "required": ["type"],
       "additionalProperties": false,
@@ -514,7 +514,7 @@
     },
 
     "sectionContainer": {
-      "description": "Named collapsible group container. Children get widget IDs as if they were top-level (section name excluded from ID path). Requires capabilities: [layout-v2]. `style:` (see the `styleProp` $def) colors this section's own header/border chrome AND cascades to children that don't set their own `style:`.",
+      "description": "Named collapsible group container. Gets its own widget ID (for SET_PROPERTY); children get widget IDs as if they were top-level (section name excluded from their ID paths). Requires capabilities: [layout-v2]. `style:` (see the `styleProp` $def) colors this section's own header/border chrome AND cascades to children that don't set their own `style:`.",
       "type": "object",
       "required": ["type", "widgets"],
       "additionalProperties": false,

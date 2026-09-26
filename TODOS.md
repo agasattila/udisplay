@@ -415,6 +415,13 @@ Problem Statement).
 cleanup: move both sets into one shared module both `widget_ids.py` and `validate.py`
 import from.
 
+**Status:** ✅ DONE — issue #43 (every widget gets a widget ID, 2026-09-25).
+`widget_ids.py` now owns `CONTAINER_TYPES` and `ordered_member_paths()`; `validate.py`,
+`cpp_backend.py` and `python_backend.py` all import them. Decorations no longer need a
+type set of their own, since they get an ID like every other widget. That also fixed the
+drifted copy in `cpp_backend.py`, which was missing `dpad`: a top-level dpad's buttons
+never became C++ members.
+
 ---
 
 ### TODO-008: BLE Android OEM compatibility matrix (`docs/ble-compat.md`)
@@ -640,6 +647,11 @@ capping at parse time is sufficient — no separate QML-side guard needed.
 **Why:** Found during adversarial review of the row/grid alignment PR — `row`/`grid`/`section` are ID-transparent (`isContainer()`
 in YamlParser.cpp, consume no widget ID), so the existing `240`-widget
 safety cap only bounds *leaf* widget count, not container nesting depth.
+(Update, issue #43: containers now take an ID slot, so an *accepted* document
+is capped at 240 nested containers. That still doesn't fix this TODO. Both
+`collectPathsRecursive()` and `widget_ids._collect()` check the cap only
+after the full recursive walk, so a deeply nested malicious blob can still
+exhaust the stack before it is rejected. An early depth guard is still needed.)
 A YAML file with thousands of nested empty `row: {widgets: {inner: {type:
 row, ...}}}` levels sails past that cap entirely and can stack-overflow
 the client during parsing/model-building/rendering. Predates this PR —

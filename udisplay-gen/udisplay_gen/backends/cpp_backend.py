@@ -9,10 +9,10 @@ import re
 from typing import List
 
 from ..merkle import CHUNK_SIZE
-from ..widget_ids import collect_dropdown_items
+from ..widget_ids import collect_dropdown_items, ordered_member_paths
 from . import BuildContext, OutputFile
 from ._shared import (
-    _hex_rows, _HEADER_COMMENT,
+    _hex_rows, _HEADER_COMMENT, PROTO_VERSION_GUARD,
     _config_fields, _config_sequential_assignment,
     _ns_validate, _ns_fn,
 )
@@ -20,6 +20,7 @@ from ._shared import (
 
 def generate(ctx: BuildContext) -> List[OutputFile]:
     _ns_validate(ctx.namespace)
+    _validate_cpp_identifiers(ctx)
     return [
         OutputFile("udisplay_ui.hpp", _generate_header_cpp(ctx)),
         OutputFile("udisplay_ui.bin", ctx.blob),
@@ -34,25 +35,63 @@ def _cpp_class_name(key: str) -> str:
     return "".join(p.capitalize() for p in parts if p) + "Widget"
 
 
-def _cpp_ordered_toplevel(widgets_yaml: dict, widget_types: dict) -> list:
-    """Return top-level widget paths in YAML declaration order (containers transparent)."""
-    result: list = []
-    container_types = {"section", "row", "grid"}
-    no_id_types = {"label", "separator"}
-    for key, widget in widgets_yaml.items():
-        if not isinstance(widget, dict):
-            continue
-        wtype = widget.get("type", "")
-        if wtype in no_id_types:
-            continue
-        if wtype in container_types:
-            for child_path in _cpp_ordered_toplevel(widget.get("widgets", {}), widget_types):
-                if child_path not in result:
-                    result.append(child_path)
-            continue
-        if key in widget_types:
-            result.append(key)
-    return result
+
+# UDisplay's own fixed members — a widget member with one of these names
+# would not compile (or would silently shadow the method).
+_UDISPLAY_RESERVED_NAMES = frozenset({
+    "UDisplay", "_ctx", "init", "feed", "ble_set_mtu", "tcp_frame", "ctx",
+    "on_client_ready", "on_comms_error", "_dispatch", "_on_ready", "_on_comms_error",
+})
+
+# Every generated widget class derives from Widget — a sub-member must not
+# shadow its public API or protected state.
+_WIDGET_RESERVED_NAMES = frozenset({"Widget", "_ctx", "_id", "id", "set_property", "reset_property"})
+_BUTTON_RESERVED_NAMES = _WIDGET_RESERVED_NAMES | {"on_press", "on_release", "on_click"}
+
+_CPP_KEYWORDS = frozenset("""
+alignas alignof and and_eq asm auto bitand bitor bool break case catch char
+char8_t char16_t char32_t class compl concept const consteval constexpr
+constinit const_cast continue co_await co_return co_yield decltype default
+delete do double dynamic_cast else enum explicit export extern false float
+for friend goto if inline int long mutable namespace new noexcept not not_eq
+nullptr operator or or_eq private protected public register reinterpret_cast
+requires return short signed sizeof static static_assert static_cast struct
+switch template this thread_local throw true try typedef typeid typename
+union unsigned using virtual void volatile wchar_t while xor xor_eq
+""".split())
+
+
+def _validate_cpp_identifiers(ctx: BuildContext) -> None:
+    """Reject widget names that would produce a non-compiling (or silently
+    shadowing) C++ header: C++ keywords, and names colliding with UDisplay's
+    or Widget's own members. Since every widget is now a member (issue #43),
+    this covers container and decoration names too. Raises ValueError
+    listing every violation."""
+    widget_types = ctx.widget_types or {}
+    widget_ids = ctx.widget_ids
+    errors: list = []
+
+    def check(name: str, reserved: frozenset, where: str) -> None:
+        if name in _CPP_KEYWORDS:
+            errors.append(f"{where}: '{name}' is a C++ keyword")
+        elif name in reserved:
+            errors.append(
+                f"{where}: '{name}' collides with a member of the generated C++ API"
+            )
+
+    for path in ordered_member_paths(ctx.widgets_yaml or {}, widget_types):
+        check(path, _UDISPLAY_RESERVED_NAMES, f"widget '{path}'")
+        if widget_types.get(path) in ("button", "button-group"):
+            reserved = (_BUTTON_RESERVED_NAMES if widget_types[path] == "button"
+                        else _WIDGET_RESERVED_NAMES)
+            for sub_key, _, _ in _cpp_sub_members(path, widget_types, widget_ids):
+                check(sub_key, reserved, f"widget '{path}.{sub_key}'")
+
+    if errors:
+        raise ValueError(
+            "Cannot generate valid C++ code from this YAML:\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
 
 
 def _cpp_sub_members(path: str, widget_types: dict, widget_ids: dict) -> list:
@@ -80,11 +119,18 @@ def _cpp_base_classes(variant: str) -> list:
     lines = [
         "/* -- Widget base classes ---------------------------------------------------- */",
         "",
+        "/* Every widget -- containers (section/row/grid/dpad) and decorations",
+        " * (label/separator) included -- has a widget ID, so every widget can take",
+        " * runtime properties (UDISPLAY_PROP_ENABLED, UDISPLAY_PROP_VISIBLE, ...). */",
         "class Widget {",
+        "public:",
+        "    Widget(udisplay_t* ctx, uint8_t id) : _ctx(ctx), _id(id) {}",
+        "    uint8_t id() const { return _id; }",
+        "    void set_property(uint8_t property_id, uint8_t value) { udisplay_set_property(_ctx, _id, property_id, value); }",
+        "    void reset_property(uint8_t property_id) { udisplay_reset_property(_ctx, _id, property_id); }",
         "protected:",
         "    udisplay_t* _ctx;",
         "    uint8_t _id;",
-        "    Widget(udisplay_t* ctx, uint8_t id) : _ctx(ctx), _id(id) {}",
         "    friend class UDisplay;",
         "};",
         "",
@@ -185,8 +231,8 @@ def _cpp_generated_classes(
             cn = _cpp_class_name(path)
             lines += [f"class {cn} : public Widget {{", "public:",
                       handler("on_press()"), handler("on_release()"), handler("on_click()")]
-            for sub_key, _, _ in sub:
-                lines.append(f"    LedWidget {sub_key};")
+            for sub_key, sub_type, _ in sub:
+                lines.append(f"    {_CPP_LEAF_CLASS.get(sub_type, 'Widget')} {sub_key};")
             params = ["udisplay_t* ctx", "uint8_t id"] + [f"uint8_t {sk}_id" for sk, _, _ in sub]
             inits = ["Widget(ctx, id)"] + [f"{sk}(ctx, {sk}_id)" for sk, _, _ in sub]
             lines += [
@@ -240,18 +286,22 @@ def _cpp_generated_classes(
     return lines
 
 
+# Widget types with a fixed (non-generated) C++ class. Anything else without a
+# generated class (containers, decorations) is a plain `Widget`.
+_CPP_LEAF_CLASS = {
+    "display": "DisplayWidget",
+    "led":     "LedWidget",
+    "rgbled":  "RgbLedWidget",
+    "toggle":  "ToggleWidget",
+    "slider":  "SliderWidget",
+    "text-rw": "TextRwWidget",
+    "text-ro": "TextRoWidget",
+}
+
+
 def _cpp_member_type(path: str, type_str: str, widget_types: dict, widget_ids: dict) -> str:
-    type_map = {
-        "display": "DisplayWidget",
-        "led":     "LedWidget",
-        "rgbled":  "RgbLedWidget",
-        "toggle":  "ToggleWidget",
-        "slider":  "SliderWidget",
-        "text-rw": "TextRwWidget",
-        "text-ro": "TextRoWidget",
-    }
-    if type_str in type_map:
-        return type_map[type_str]
+    if type_str in _CPP_LEAF_CLASS:
+        return _CPP_LEAF_CLASS[type_str]
     if type_str == "button":
         if _cpp_sub_members(path, widget_types, widget_ids):
             return _cpp_class_name(path)
@@ -352,7 +402,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
 
     n = math.ceil(len(blob) / CHUNK_SIZE)
     dropdown_items = collect_dropdown_items(widgets_yaml)
-    ordered = _cpp_ordered_toplevel(widgets_yaml, widget_types)
+    ordered = ordered_member_paths(widgets_yaml, widget_types)
 
     lines = [
         _HEADER_COMMENT.format(source=source, root_hex=root.hex(), version=version),
@@ -360,6 +410,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         "#include <stdint.h>",
         "#include <stddef.h>",
         '#include "udisplay.h"',
+        *PROTO_VERSION_GUARD,
     ]
     if variant == "modern":
         lines.append("#include <functional>")

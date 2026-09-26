@@ -147,22 +147,32 @@ struct PathEntry {
     std::string childKey;
 };
 
-/* Container types: transparent to ID assignment (children inherit prefix). */
+/* Container types: transparent to their children's ID paths (children
+ * inherit the container's prefix, the container's own key is never a path
+ * segment). Mirrors udisplay-gen widget_ids.py's CONTAINER_TYPES. */
 static bool isContainer(const std::string& type)
 {
     return type == "section" || type == "row" || type == "grid" || type == "dpad";
 }
 
-/* Decoration types: no widget ID, no protocol exchange. */
+/* Decoration types: no value, no events. Under IdScheme::LeafOnly they get
+ * no ID, like containers. */
 static bool isDecoration(const std::string& type)
 {
     return type == "label" || type == "separator";
 }
 
+/* Mirrors widget_ids.py's _collect(). Under IdScheme::EveryWidget every
+ * widget map entry gets a path (issue #43) — a container at `<prefix>.<key>`
+ * like any leaf, while its children keep `prefix` (container transparency).
+ * Under IdScheme::LeafOnly (pre-v5 devices) containers and decorations get
+ * no path at all, reproducing the pre-v5 numbering exactly. */
 static void collectPathsRecursive(const YAML::Node& widgets,
                                   const std::string& prefix,
+                                  YamlParser::IdScheme scheme,
                                   std::vector<PathEntry>& entries)
 {
+    const bool everyWidget = scheme == YamlParser::IdScheme::EveryWidget;
     for (auto it = widgets.begin(); it != widgets.end(); ++it) {
         std::string key = it->first.as<std::string>();
         YAML::Node  w   = it->second;
@@ -172,29 +182,28 @@ static void collectPathsRecursive(const YAML::Node& widgets,
         if (w["type"] && w["type"].IsScalar())
             type = w["type"].as<std::string>();
 
+        std::string path = prefix.empty() ? key : prefix + "." + key;
+
         if (isContainer(type)) {
+            if (everyWidget)
+                entries.push_back({ path, !prefix.empty(), prefix, key });
             if (w["widgets"] && w["widgets"].IsMap())
-                collectPathsRecursive(w["widgets"], prefix, entries);
+                collectPathsRecursive(w["widgets"], prefix, scheme, entries);
             continue;
         }
 
-        if (isDecoration(type)) continue;
+        if (isDecoration(type) && !everyWidget) continue;
 
-        std::string path = prefix.empty() ? key : prefix + "." + key;
         entries.push_back({ path, !prefix.empty(), prefix, key });
 
         /* Recurse (not a flat loop) so a container-typed child (row/grid,
-         * widget-model-redesign Increment 2) is transparent to ID assignment
-         * just like a top-level container — its own grandchildren get IDs
-         * prefixed by this widget's own path, not the container's throwaway
-         * key. This is the exact same walk the top-level `widgets` map gets;
-         * decoration children (label, separator) are skipped by the
-         * isDecoration() check above on the recursive call, mirroring
-         * widget_ids.py's NO_ID_TYPES exclusion so the client and the
-         * offline codegen tool agree on ID numbering for every widget after
-         * this one. */
+         * widget-model-redesign Increment 2) is transparent to its
+         * children's ID paths just like a top-level container — its own
+         * grandchildren get IDs prefixed by this widget's own path, not the
+         * container's throwaway key. This is the exact same walk the top-level `widgets` map gets,
+         * so the client and the offline codegen tool agree on ID numbering. */
         if (w["widgets"] && w["widgets"].IsMap())
-            collectPathsRecursive(w["widgets"], path, entries);
+            collectPathsRecursive(w["widgets"], path, scheme, entries);
 
         if (type == "button-group" && w["items"] && w["items"].IsMap()) {
             for (auto ii = w["items"].begin();
@@ -206,10 +215,11 @@ static void collectPathsRecursive(const YAML::Node& widgets,
     }
 }
 
-static std::vector<PathEntry> collectPaths(const YAML::Node& widgets)
+static std::vector<PathEntry> collectPaths(const YAML::Node& widgets,
+                                           YamlParser::IdScheme scheme)
 {
     std::vector<PathEntry> entries;
-    collectPathsRecursive(widgets, {}, entries);
+    collectPathsRecursive(widgets, {}, scheme, entries);
     std::sort(entries.begin(), entries.end(),
               [](const PathEntry& a, const PathEntry& b) {
                   return a.path < b.path;
@@ -283,7 +293,7 @@ static void warnExcludedButtonFaceTypes(const YAML::Node& widgets,
  * OWN children in idMap, if this node turns out to be a container (row/
  * grid/dpad) — irrelevant otherwise, since every other widget type resolves
  * its own children's ID paths from `key` directly. Container types are
- * transparent to ID assignment (their own name is never a path segment —
+ * transparent to their children's ID paths (their own name is never a path segment —
  * see isContainer()), so idPrefix must be threaded explicitly rather than
  * derived from `key`: a row/grid reached via a button's face (key =
  * "btn_key.container_key") needs idPrefix = "btn_key" (skipping the
@@ -614,7 +624,9 @@ static int buildWidget(const std::string& key,
                  * an explicit `type:` in YAML, e.g. `type: button`). */
                 std::string idPath = idPrefix.empty() ? ik : idPrefix + "." + ik;
                 uint8_t cid = idMap.count(idPath) ? idMap.at(idPath) : 0;
-                int idx = buildWidget(ik, ii->second, cid, idPrefix, idMap, myRow, out, diags);
+                /* keyPath = the ID path (== ik unless reached via a button
+                 * face), matching widget_ids.py's path for this widget. */
+                int idx = buildWidget(idPath, ii->second, cid, idPrefix, idMap, myRow, out, diags);
                 out[idx].props[QStringLiteral("position")] = nodeStr(ii->second, "position");
             }
             if (itemCount < 1) {
@@ -638,7 +650,9 @@ static int buildWidget(const std::string& key,
                  * from whatever scope this row/grid was reached in. */
                 std::string idPath = idPrefix.empty() ? ck : idPrefix + "." + ck;
                 uint8_t cid = idMap.count(idPath) ? idMap.at(idPath) : 0;
-                int idx = buildWidget(ck, ci->second, cid, idPrefix, idMap, myRow, out, diags);
+                /* keyPath = the ID path: a face row's child is "btn.icon",
+                 * like a direct face child, not a bare "icon". */
+                int idx = buildWidget(idPath, ci->second, cid, idPrefix, idMap, myRow, out, diags);
                 out[idx].flex  = parseFlex(ci->second, ck, diags);
                 out[idx].align = parseAlign(ci->second, ck, "align", kRowGridAligns, diags);
                 out[idx].props[QStringLiteral("position")] = nodeStr(ci->second, "position");
@@ -680,7 +694,7 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
         if (type == "section") {
             WidgetDef s;
             s.keyPath  = qs(key);
-            s.widgetId = 0;
+            s.widgetId = idMap.count(key) ? idMap.at(key) : 0;
             s.type     = WidgetType::Section;
             s.label    = nodeStr(node, "label");
             bool collapsible = false;
@@ -698,8 +712,10 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
             /* Top-level row/grid: idPrefix stays empty for its children.
              * Its own flex is never used (nothing above a top-level widget
              * reads its flex weight) — matches original behavior, which
-             * never parsed flex for a top-level row/grid either. */
-            buildWidget(key, node, 0, /*idPrefix=*/{}, idMap, parentId, out, diags);
+             * never parsed flex for a top-level row/grid either. Its own ID
+             * (0 under IdScheme::LeafOnly) is looked up by its bare key. */
+            uint8_t wid = idMap.count(key) ? idMap.at(key) : 0;
+            buildWidget(key, node, wid, /*idPrefix=*/{}, idMap, parentId, out, diags);
 
         } else {
             uint8_t wid = idMap.count(key) ? idMap.at(key) : 0;
@@ -846,18 +862,19 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
     }
     const YAML::Node& widgets = doc["widgets"];
 
-    auto entries = collectPaths(widgets);
+    auto entries = collectPaths(widgets, m_idScheme);
     if (entries.size() > 240) {
         m_error = QStringLiteral("Too many widget paths (%1); maximum is 240")
                       .arg(static_cast<int>(entries.size()));
         return false;
     }
     /* Duplicate id-paths: two widgets resolving to the same protocol ID.
-     * Containers (section/row/grid) don't contribute their own name to the
-     * path — two same-named leaves under different sibling containers that
-     * share a transparent-prefix ancestor (e.g. two same-named leaves in
-     * two different row/grid children of the same button face) collide
-     * silently here otherwise: idMap[e.path] = nextId++ below would just
+     * Containers (section/row/grid/dpad) don't contribute their own name to
+     * their children's paths — two same-named widgets under different
+     * sibling containers that share a transparent-prefix ancestor (e.g. two
+     * same-named leaves in two different row/grid children of the same
+     * button face, or a section named like a slider in another section)
+     * collide silently here otherwise: idMap[e.path] = nextId++ below would just
      * overwrite, both ending up with the LAST-written ID, one real ID slot
      * wasted, and STATE_UPDATE messages cross-applying between two
      * semantically unrelated widgets. entries is sorted by path (see
@@ -867,9 +884,10 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
         if (entries[i].path == entries[i - 1].path) {
             m_error = QStringLiteral(
                 "Duplicate widget ID path '%1' — two widgets resolve to the same "
-                "protocol ID. Check for same-named leaves under different sibling "
-                "containers (row/grid/section, or a button face's nested containers) "
-                "that share a transparent-prefix ancestor.")
+                "protocol ID. Widget names (containers and labels included) must be "
+                "unique across sibling containers (section/row/grid/dpad, or a "
+                "button face's nested containers) that share a transparent-prefix "
+                "ancestor.")
                           .arg(qs(entries[i].path));
             return false;
         }
@@ -881,6 +899,26 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
 
     widgetsOut.clear();
     buildAndAppendWidgets(widgets, idMap, /*parentId=*/-1, widgetsOut, m_diagnostics);
+
+    /* LeafOnly: containers and decorations have no ID of their own. The
+     * build sites above still look them up in idMap by path, and a pre-v5
+     * YAML may legally reuse a leaf's name for one of them (e.g. section
+     * `fan` + slider `fan` in another section) — the lookup would then hand
+     * the container the leaf's ID, and the leaf's STATE_UPDATE and
+     * SET_PROPERTY(ENABLED/VISIBLE) would land on the whole section. */
+    if (m_idScheme == IdScheme::LeafOnly) {
+        for (WidgetDef& w : widgetsOut) {
+            switch (w.type) {
+            case WidgetType::Section: case WidgetType::Row:
+            case WidgetType::Grid:    case WidgetType::Dpad:
+            case WidgetType::Label:   case WidgetType::Separator:
+                w.widgetId = 0;
+                break;
+            default:
+                break;
+            }
+        }
+    }
 
     /* style: name validation — a post-pass over the fully-built flat list,
      * now that stylesOut (the full named-stylesheet registry, parsed before

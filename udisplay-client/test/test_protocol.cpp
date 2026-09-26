@@ -19,18 +19,18 @@ private slots:
 
     void encode_HandshakeAck()
     {
-        /* Expected: "01 04 00" (PROTO_VERSION=0x04, flags=0x00 no-auth) */
-        QCOMPARE(Proto::encodeHandshakeAck(), fromHex("01 04 00"));
+        /* Expected: "01 05 00" (PROTO_VERSION=0x05, flags=0x00 no-auth) */
+        QCOMPARE(Proto::encodeHandshakeAck(), fromHex("01 05 00"));
     }
 
     void encode_HandshakeAckAuth()
     {
-        /* HANDSHAKE_ACK_AUTH: "01 04 01 credential[32]" = 35 bytes */
+        /* HANDSHAKE_ACK_AUTH: "01 05 01 credential[32]" = 35 bytes */
         QByteArray cred = fromHex(
             "21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30"
             "31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40");
         QByteArray expected = fromHex(
-            "01 04 01"
+            "01 05 01"
             "21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30"
             "31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40");
         QCOMPARE(Proto::encodeHandshakeAckAuth(cred), expected);
