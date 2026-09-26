@@ -631,7 +631,19 @@ YAML blob does not record which scheme its header was generated with, so the
 client selects it from the HANDSHAKE `proto_version`: `< 0x05` → leaf-only,
 `≥ 0x05` → every widget. Always build firmware with a `udisplay-gen` and a
 `libudisplay` from the same release — a v5 header linked against a v4 library
-would advertise the wrong scheme.
+would advertise the wrong scheme. Generated C/C++ headers enforce this: they
+`#error` when `UDISPLAY_PROTO_VERSION` is below 0x05.
+
+**Migrating a YAML from proto 0x04.** Regenerating with a v5 `udisplay-gen`
+can reject a YAML that used to build:
+- Widget names must now be unique across containers and decorations too. A
+  `label`/`separator` key repeated in two sections, or a section named like a
+  leaf elsewhere, is a `duplicate widget name` error. Rename one of them.
+- Containers and decorations count toward the 240-widget cap.
+
+The generated firmware API also changes: button face children are now typed
+by their own widget type (an `rgbled` face child is an `RgbLedWidget`, a
+`label` a plain `Widget`) instead of always an `LedWidget`.
 
 **Property inheritance.** `ENABLED` and `VISIBLE` apply to a widget's whole
 subtree: setting `ENABLED=0` on a `section` disables every widget inside it;
