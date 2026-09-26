@@ -246,7 +246,7 @@ class TestCppBackend:
             assert f"    Widget {name};" in header, name
 
     def test_top_level_dpad_children_are_members(self, tmp_path):
-        """Regression (A2): _cpp_ordered_toplevel's local container set
+        """Regression (A2): the C++ member walk's old local container set
         lacked "dpad", so a top-level dpad's buttons were never members."""
         header = self._header(tmp_path)
         assert "    ButtonWidget up_btn;" in header
@@ -424,3 +424,42 @@ class TestProtoVersionInSync:
         vectors = json.loads((root / "tests" / "protocol_vectors.json").read_text())
         assert rt.UDISPLAY_PROTO_VERSION == int(m.group(1), 16) == 0x05
         assert vectors["messages"]["HANDSHAKE"]["input"]["proto_version"] == 0x05
+
+
+# ── Ship coverage-audit additions ────────────────────────────────────────────
+
+class TestShipAuditGaps:
+    @pytest.mark.parametrize("old,new", [
+        ("  meters:\n", "  class:\n"),   # container named like a keyword
+        ("      sep:\n", "      pass:\n"),  # decoration named like a keyword
+    ])
+    def test_python_keyword_container_or_decoration_name_rejected(self, old, new):
+        """Containers and decorations are UI members now (issue #43), so a
+        keyword name would emit `self.class = ...` — a SyntaxError."""
+        text = EVERY_WIDGET_YAML.replace(old, new)
+        with pytest.raises(ValueError, match="Python keyword"):
+            python_backend.generate(_ctx(text))
+
+    def test_container_name_colliding_with_container_rejected(self):
+        """Two containers sharing a name in different transparent scopes
+        both take the same ID path — validate must catch it, not just
+        container-vs-leaf."""
+        doc = {"widgets": {
+            "a": {"type": "section", "widgets": {
+                "strip": {"type": "row", "widgets": {"x": {"type": "led"}}}}},
+            "b": {"type": "section", "widgets": {
+                "strip": {"type": "grid", "columns": 2,
+                          "widgets": {"y": {"type": "led"}}}}},
+        }}
+        errs = semantic_errors(doc)
+        assert any("duplicate widget name `strip`" in e for e in errs), errs
+        with pytest.raises(ValueError, match="'strip'"):
+            assign(doc["widgets"])
+
+    def test_cap_counts_decorations(self):
+        """Decorations consume an ID slot too — 240 leds + 1 label overflow."""
+        widgets = {f"w{i:03d}": {"type": "led"} for i in range(MAX_WIDGETS)}
+        assert len(assign(widgets)) == MAX_WIDGETS
+        widgets["zz_note"] = {"type": "label", "text": "x"}
+        with pytest.raises(ValueError, match="exceeds maximum"):
+            assign(widgets)

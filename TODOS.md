@@ -416,8 +416,9 @@ cleanup: move both sets into one shared module both `widget_ids.py` and `validat
 import from.
 
 **Status:** ✅ DONE — issue #43 (every widget gets a widget ID, 2026-09-25).
-`widget_ids.py` now owns `CONTAINER_TYPES` / `DECORATION_TYPES`; `validate.py`,
-`cpp_backend.py` and `python_backend.py` all import them. That also fixed the
+`widget_ids.py` now owns `CONTAINER_TYPES` and `ordered_member_paths()`; `validate.py`,
+`cpp_backend.py` and `python_backend.py` all import them. Decorations no longer need a
+type set of their own, since they get an ID like every other widget. That also fixed the
 drifted copy in `cpp_backend.py`, which was missing `dpad`: a top-level dpad's buttons
 never became C++ members.
 

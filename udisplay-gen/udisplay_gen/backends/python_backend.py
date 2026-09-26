@@ -22,8 +22,8 @@ import pathlib
 from typing import List
 
 from . import BuildContext, OutputFile
-from ._shared import _macro_name
-from ..widget_ids import CONTAINER_TYPES
+from ._shared import _macro_name, widget_id_macro_collisions
+from ..widget_ids import ordered_member_paths
 
 _RUNTIME_SOURCE = pathlib.Path(__file__).parent.parent / "runtime" / "udisplay_runtime.py"
 
@@ -47,7 +47,7 @@ _WRAPPER_CLASS = {
 # definition silently overwrites the earlier one — see
 # _validate_python_identifiers() below.
 #
-# Top level: every entry in _py_ordered_toplevel() becomes `self.<path>` on
+# Top level: every entry in ordered_member_paths() becomes `self.<path>` on
 # the generated UI class (_generate_ui_py below) — cross-reference against
 # every fixed attribute/method UI.__init__ and the class body assign there.
 _UI_RESERVED_NAMES = {
@@ -99,7 +99,7 @@ def _validate_python_identifiers(ctx: BuildContext) -> None:
                 f"generated UI/runtime API"
             )
 
-    ordered = _py_ordered_toplevel(widgets_yaml, widget_types)
+    ordered = ordered_member_paths(widgets_yaml, widget_types)
 
     for path in ordered:
         check_segment(path, _UI_RESERVED_NAMES, f"widget '{path}'")
@@ -115,16 +115,7 @@ def _validate_python_identifiers(ctx: BuildContext) -> None:
     # WIDGET_ID_* macro-name collisions (TODO-056) — every widget_ids key
     # (top-level AND nested, since widget_ids is keyed by full dotted path)
     # must normalize to a distinct constant name.
-    by_macro: dict = {}
-    for path in widget_ids:
-        by_macro.setdefault(_macro_name(path), []).append(path)
-    for macro, paths in sorted(by_macro.items()):
-        if len(paths) > 1:
-            errors.append(
-                "widget name collision: "
-                + ", ".join(repr(p) for p in sorted(paths))
-                + f" all normalize to the same generated constant WIDGET_ID_{macro}"
-            )
+    errors += widget_id_macro_collisions(widget_ids)
 
     # Same mechanism, scoped per dropdown, for the <NAME>_OPTION_<item> constants.
     from ..widget_ids import collect_dropdown_items
@@ -171,23 +162,6 @@ def _py_bytes_literal(data: bytes) -> str:
     and MicroPython regardless of byte value."""
     return 'b"' + "".join(f"\\x{b:02x}" for b in data) + '"'
 
-
-def _py_ordered_toplevel(widgets_yaml: dict, widget_types: dict) -> list:
-    """Every `UI` member path in YAML declaration order: every widget,
-    containers and decorations included (issue #43), each container
-    followed by its children at the same unprefixed level. Mirrors
-    cpp_backend.py's _cpp_ordered_toplevel."""
-    result: list = []
-    for key, widget in widgets_yaml.items():
-        if not isinstance(widget, dict):
-            continue
-        if key in widget_types:
-            result.append(key)
-        if widget.get("type", "") in CONTAINER_TYPES:
-            for child_path in _py_ordered_toplevel(widget.get("widgets", {}), widget_types):
-                if child_path not in result:
-                    result.append(child_path)
-    return result
 
 
 def _py_sub_members(path: str, widget_types: dict, widget_ids: dict) -> list:
@@ -419,7 +393,7 @@ def _generate_ui_py(ctx: BuildContext) -> str:
     chunks = [blob[i * CHUNK_SIZE:(i + 1) * CHUNK_SIZE] for i in range(n)]
     chunk_lens = [len(c) for c in chunks]
 
-    ordered = _py_ordered_toplevel(widgets_yaml, widget_types)
+    ordered = ordered_member_paths(widgets_yaml, widget_types)
 
     lines = [
         "# SPDX-License-Identifier: MIT",

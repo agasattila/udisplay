@@ -9,10 +9,10 @@ import re
 from typing import List
 
 from ..merkle import CHUNK_SIZE
-from ..widget_ids import CONTAINER_TYPES, collect_dropdown_items
+from ..widget_ids import collect_dropdown_items, ordered_member_paths
 from . import BuildContext, OutputFile
 from ._shared import (
-    _hex_rows, _HEADER_COMMENT,
+    _hex_rows, _HEADER_COMMENT, PROTO_VERSION_GUARD,
     _config_fields, _config_sequential_assignment,
     _ns_validate, _ns_fn,
 )
@@ -34,27 +34,6 @@ def _cpp_class_name(key: str) -> str:
     parts = re.split(r"[^a-zA-Z0-9]+", key)
     return "".join(p.capitalize() for p in parts if p) + "Widget"
 
-
-def _cpp_ordered_toplevel(widgets_yaml: dict, widget_types: dict) -> list:
-    """Return every `UDisplay` member path in YAML declaration order.
-
-    Every widget is a member (issue #43) — containers and decorations too,
-    as plain `Widget` members so firmware can set_property() them. A
-    container's children follow it, at the same (unprefixed) level, since
-    containers are transparent to their children's ID paths. Button face
-    children and button-group items are sub-members of their parent's
-    generated class instead (see _cpp_sub_members)."""
-    result: list = []
-    for key, widget in widgets_yaml.items():
-        if not isinstance(widget, dict):
-            continue
-        if key in widget_types:
-            result.append(key)
-        if widget.get("type", "") in CONTAINER_TYPES:
-            for child_path in _cpp_ordered_toplevel(widget.get("widgets", {}), widget_types):
-                if child_path not in result:
-                    result.append(child_path)
-    return result
 
 
 # UDisplay's own fixed members — a widget member with one of these names
@@ -100,7 +79,7 @@ def _validate_cpp_identifiers(ctx: BuildContext) -> None:
                 f"{where}: '{name}' collides with a member of the generated C++ API"
             )
 
-    for path in _cpp_ordered_toplevel(ctx.widgets_yaml or {}, widget_types):
+    for path in ordered_member_paths(ctx.widgets_yaml or {}, widget_types):
         check(path, _UDISPLAY_RESERVED_NAMES, f"widget '{path}'")
         if widget_types.get(path) in ("button", "button-group"):
             reserved = (_BUTTON_RESERVED_NAMES if widget_types[path] == "button"
@@ -423,7 +402,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
 
     n = math.ceil(len(blob) / CHUNK_SIZE)
     dropdown_items = collect_dropdown_items(widgets_yaml)
-    ordered = _cpp_ordered_toplevel(widgets_yaml, widget_types)
+    ordered = ordered_member_paths(widgets_yaml, widget_types)
 
     lines = [
         _HEADER_COMMENT.format(source=source, root_hex=root.hex(), version=version),
@@ -431,6 +410,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         "#include <stdint.h>",
         "#include <stddef.h>",
         '#include "udisplay.h"',
+        *PROTO_VERSION_GUARD,
     ]
     if variant == "modern":
         lines.append("#include <functional>")

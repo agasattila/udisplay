@@ -13,7 +13,7 @@ from . import BuildContext, OutputFile
 from ._shared import (
     _macro_name, _fn_suffix,
     _setter_for_type, _handler_for_type,
-    _hex_rows, _HEADER_COMMENT,
+    _hex_rows, _HEADER_COMMENT, PROTO_VERSION_GUARD, widget_id_macro_collisions,
     _config_fields, _config_designated_initializer,
     _ns_validate, _ns_macro, _ns_fn,
 )
@@ -21,6 +21,12 @@ from ._shared import (
 
 def generate(ctx: BuildContext) -> List[OutputFile]:
     _ns_validate(ctx.namespace)
+    errors = widget_id_macro_collisions(ctx.widget_ids)
+    if errors:
+        raise ValueError(
+            "Cannot generate valid C code from this YAML:\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
     return [
         OutputFile("udisplay_ui.h", _generate_header(ctx)),
         OutputFile("udisplay_ui.c", _generate_source(ctx)),
@@ -49,6 +55,7 @@ def _generate_header(ctx: BuildContext) -> str:
 
     if widget_types is not None:
         lines.append('#include "udisplay.h"')
+        lines += PROTO_VERSION_GUARD
 
     lines += [
         "",

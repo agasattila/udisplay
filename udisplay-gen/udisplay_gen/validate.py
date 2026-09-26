@@ -25,8 +25,8 @@ SUPPORTED_TYPES = [
     "section", "row", "grid", "dpad",
 ]
 
-# Container/decoration type sets are shared with ID assignment (TODO-007).
-from .widget_ids import CONTAINER_TYPES, DECORATION_TYPES  # noqa: E402
+# The container type set is shared with ID assignment (TODO-007).
+from .widget_ids import CONTAINER_TYPES  # noqa: E402
 
 
 def load_schema() -> dict:

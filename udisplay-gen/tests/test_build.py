@@ -1453,3 +1453,74 @@ def test_config_fields_match_udisplay_h():
         f"_config_fields() in _shared.py does not set -- update _config_fields() "
         f"so both codegen backends' generated init() stay correct."
     )
+
+
+# ── Proto-version guard: a v5 (every-widget ID) header must not build against
+# an older libudisplay, whose HANDSHAKE would make the client pick the legacy
+# leaf-only numbering and route every STATE_UPDATE to the wrong widget. ─────
+
+_LIBUDISPLAY_INCLUDE = pathlib.Path(__file__).resolve().parents[2] / "libudisplay" / "include"
+
+
+def _syntax_check(compiler: str, lang: str, header: str, tmp_path, include_dir):
+    import shutil
+    import subprocess
+    if shutil.which(compiler) is None:
+        pytest.skip(f"{compiler} not available")
+    hdr = tmp_path / "udisplay_ui.h"
+    hdr.write_text(header)
+    std = ["-std=c++17"] if lang == "c++" else []
+    return subprocess.run(
+        [compiler, "-fsyntax-only", *std, "-x", lang, f"-I{include_dir}", str(hdr)],
+        capture_output=True, text=True,
+    )
+
+
+def test_header_has_proto_version_guard(minimal_yaml):
+    for header in (_make_header(minimal_yaml), _make_cpp(minimal_yaml)):
+        assert "UDISPLAY_PROTO_VERSION < 0x05u" in header
+        assert "#error" in header
+
+
+@pytest.mark.parametrize("lang,compiler", [("c", "gcc"), ("c++", "g++")])
+def test_header_compiles_against_current_libudisplay(minimal_yaml, tmp_path, lang, compiler):
+    header = _make_header(minimal_yaml) if lang == "c" else _make_cpp(minimal_yaml)
+    r = _syntax_check(compiler, lang, header, tmp_path, _LIBUDISPLAY_INCLUDE)
+    assert r.returncode == 0, r.stderr
+
+
+@pytest.mark.parametrize("lang,compiler", [("c", "gcc"), ("c++", "g++")])
+def test_header_rejects_pre_v5_libudisplay(minimal_yaml, tmp_path, lang, compiler):
+    old_lib = tmp_path / "old_lib"
+    old_lib.mkdir()
+    (old_lib / "udisplay.h").write_text(
+        f'#include "{_LIBUDISPLAY_INCLUDE / "udisplay.h"}"\n'
+        "#undef UDISPLAY_PROTO_VERSION\n"
+        "#define UDISPLAY_PROTO_VERSION 0x04u\n"
+    )
+    header = _make_header(minimal_yaml) if lang == "c" else _make_cpp(minimal_yaml)
+    r = _syntax_check(compiler, lang, header, tmp_path, old_lib)
+    assert r.returncode != 0
+    assert "every-widget ID scheme" in r.stderr
+
+
+def test_c_backend_rejects_widget_id_macro_collision():
+    """A face label `btn.title` (which gets an ID since issue #43) and a
+    top-level `btn_title` both map to WIDGET_ID_BTN_TITLE. The C preprocessor
+    only warns on the redefinition, and one widget silently gets the other's
+    ID, so the backend must refuse (TODO-056, shared with MicroPython)."""
+    yaml_bytes = (
+        b"device:\n  name: t\nwidgets:\n"
+        b"  btn:\n    type: button\n    widgets:\n"
+        b"      title:\n        type: label\n        text: Go\n"
+        b"  btn_title:\n    type: toggle\n"
+    )
+    blob, root, hashes = compute(yaml_bytes)
+    doc = pyyaml.safe_load(yaml_bytes)
+    wids = assign(doc["widgets"])
+    assert {"btn.title", "btn_title"} <= set(wids)
+    ctx = BuildContext(widget_ids=wids, blob=blob, root=root, hashes=hashes,
+                       source="test.yaml", widget_types=collect_types(doc["widgets"]),
+                       widgets_yaml=doc["widgets"])
+    with pytest.raises(ValueError, match="WIDGET_ID_BTN_TITLE"):
+        c_backend.generate(ctx)
