@@ -14,6 +14,20 @@ from ..merkle import CHUNK_SIZE
 MAX_CHUNK_COUNT = 64
 
 
+# Emitted right after `#include "udisplay.h"`. The widget IDs in a generated
+# header follow the every-widget scheme (issue #43), which the client only
+# selects when the HANDSHAKE says proto >= 0x05 — and libudisplay, not the
+# header, sends that byte. A v5 header built against an older library would
+# have its STATE_UPDATEs silently routed to the wrong widgets, so fail the
+# build instead.
+PROTO_VERSION_GUARD = [
+    "#if !defined(UDISPLAY_PROTO_VERSION) || UDISPLAY_PROTO_VERSION < 0x05u",
+    '#error "This header uses the every-widget ID scheme (protocol 0x05); '
+    'update libudisplay to a release with UDISPLAY_PROTO_VERSION >= 0x05"',
+    "#endif",
+]
+
+
 def validate_blob_size(blob: bytes) -> None:
     """Raise ValueError if the blob requires more chunks than the protocol allows."""
     n = math.ceil(len(blob) / CHUNK_SIZE)
@@ -65,6 +79,23 @@ def _macro_name(key_path: str) -> str:
     Dots and any non-alphanumeric characters become underscores.
     """
     return re.sub(r"[^a-zA-Z0-9]+", "_", key_path).upper()
+
+
+def widget_id_macro_collisions(widget_ids: dict) -> list:
+    """One error per group of widget paths (top-level and nested) that
+    normalize to the same WIDGET_ID_* name, e.g. `pump_rate` and a face child
+    `pump.rate` (TODO-056). Every backend that emits WIDGET_ID_* constants
+    must reject these: the later definition silently wins otherwise."""
+    by_macro: dict = {}
+    for path in widget_ids:
+        by_macro.setdefault(_macro_name(path), []).append(path)
+    return [
+        "widget name collision: "
+        + ", ".join(repr(p) for p in sorted(paths))
+        + f" all normalize to the same generated constant WIDGET_ID_{macro}"
+        for macro, paths in sorted(by_macro.items())
+        if len(paths) > 1
+    ]
 
 
 def _fn_suffix(key_path: str) -> str:

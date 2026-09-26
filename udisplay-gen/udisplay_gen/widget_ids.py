@@ -31,8 +31,27 @@ MAX_WIDGETS = ID_MAX - ID_START + 1  # 240
 # of truth for validate.py and the cpp/python backends (TODO-007).
 CONTAINER_TYPES = frozenset({"section", "row", "grid", "dpad"})
 
-# Static decorations — carry no value (no setter/handler), but still get an ID.
-DECORATION_TYPES = frozenset({"label", "separator"})
+
+def ordered_member_paths(widgets_yaml: dict, widget_types: dict) -> list:
+    """Every top-level generated member path (C++ `UDisplay` / MicroPython
+    `UI`) in YAML declaration order.
+
+    Every widget is a member (issue #43), containers and decorations too. A
+    container's children follow it at the same (unprefixed) level, since
+    containers are transparent to their children's ID paths. Button face
+    children and button-group items are sub-members of their parent's
+    generated class instead."""
+    result: list = []
+    for key, widget in widgets_yaml.items():
+        if not isinstance(widget, dict):
+            continue
+        if key in widget_types:
+            result.append(key)
+        if widget.get("type", "") in CONTAINER_TYPES:
+            for child_path in ordered_member_paths(widget.get("widgets", {}), widget_types):
+                if child_path not in result:
+                    result.append(child_path)
+    return result
 
 
 def _collect(widgets: dict, prefix: str = "") -> list[str]:
