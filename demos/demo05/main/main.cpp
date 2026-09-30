@@ -360,27 +360,27 @@ static void heartbeat_timer_cb(TimerHandle_t t)
  * indication the client's BLE stack confirmed can still be lost before it
  * reaches the client application (seen on Linux/BlueZ right after
  * subscribing). The library asks for a one-shot timer to retry the HELLO
- * every UDISPLAY_BLE_HELLO_INTERVAL_MS; it runs in the timer service task,
- * like heartbeat_timer_cb above. */
-static StaticTimer_t g_ud_timer_buf;
-static TimerHandle_t g_ud_timer = NULL;   /* created in app_main */
+ * every UDISPLAY_BLE_HELLO_INTERVAL_MS.
+ *
+ * A NimBLE callout rather than a FreeRTOS timer: it fires in the NimBLE host
+ * task, the same task that delivers the client's echo (ctrl_access ->
+ * udisplay_feed), so a HELLO retry can never interleave with the HANDSHAKE
+ * the echo triggers — both use the instance's fragment buffer and packet_id. */
+static struct ble_npl_callout g_ud_callout;   /* initialised in app_main */
 
-static void ud_timer_cb(TimerHandle_t t)
+static void ud_callout_cb(struct ble_npl_event* ev)
 {
     udisplay_timer_expired(ui.ctx());
 }
 
 static void ud_timer_start(udisplay_t* ctx, uint32_t delay_ms)
 {
-    /* xTimerChangePeriod also (re)starts the timer. Block time 0: this is
-     * called from the NimBLE host task and from the timer task itself. */
-    TickType_t ticks = pdMS_TO_TICKS(delay_ms);
-    xTimerChangePeriod(g_ud_timer, ticks ? ticks : 1, 0);
+    ble_npl_callout_reset(&g_ud_callout, ble_npl_time_ms_to_ticks32(delay_ms));
 }
 
 static void ud_timer_stop(udisplay_t* ctx)
 {
-    xTimerStop(g_ud_timer, 0);
+    ble_npl_callout_stop(&g_ud_callout);
 }
 
 /* ── GATT characteristic access callbacks ────────────────────────────────── */
@@ -586,14 +586,13 @@ extern "C" void app_main(void)
 
     g_tx_lock = xSemaphoreCreateMutexStatic(&g_tx_lock_buf);
 
-    g_ud_timer = xTimerCreateStatic("ud", 1, pdFALSE, NULL, ud_timer_cb,
-                                    &g_ud_timer_buf);
-
     ui.init(send_cb, UDISPLAY_TRANSPORT_BLE);
     udisplay_set_timer(ui.ctx(), ud_timer_start, ud_timer_stop);
     register_ui_handlers();
 
     nimble_port_init();
+    ble_npl_callout_init(&g_ud_callout, nimble_port_get_dflt_eventq(),
+                         ud_callout_cb, NULL);
     ble_svc_gap_init();
     ble_svc_gatt_init();
     ble_svc_gap_device_name_set("Demo05");
