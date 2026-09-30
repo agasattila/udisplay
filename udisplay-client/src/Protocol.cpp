@@ -335,7 +335,7 @@ bool tcpUnframe(const QByteArray& buf, QByteArray& msg, int& consumed)
 /* docs/protocol.md § BLE GATT. Tests live in test_protocol.cpp.            */
 
 QVector<QByteArray> bleFrame(const QByteArray& msg, uint8_t attPayloadSize,
-                              uint8_t& packetId)
+                              uint8_t& packetId, uint8_t flags)
 {
     Q_ASSERT(attPayloadSize >= 7); /* minimum: 6-byte first-fragment header + 1 payload byte */
     Q_ASSERT(msg.size() > 0);
@@ -350,12 +350,12 @@ QVector<QByteArray> bleFrame(const QByteArray& msg, uint8_t attPayloadSize,
     while (offset < total) {
         QByteArray pkt;
         if (offset == 0) {
-            /* First fragment: [u16 offset=0][u8 packet_id][u16 length][u8 flags=0x00][payload] */
+            /* First fragment: [u16 offset=0][u8 packet_id][u16 length][u8 flags][payload] */
             uint8_t hdr[6];
             putU16le(hdr + 0, 0);
             hdr[2] = packetId;
             putU16le(hdr + 3, total);
-            hdr[5] = 0x00;
+            hdr[5] = flags;
             int payloadBytes = qMin(static_cast<int>(attPayloadSize) - 6,
                                     static_cast<int>(total));
             pkt.reserve(6 + payloadBytes);
@@ -395,7 +395,7 @@ BleRxResult bleFeed(const QByteArray& attPkt, BleRxState& state, QByteArray& out
         uint16_t length = getU16le(p + 3);
         uint8_t  flags  = p[5];
 
-        if (flags != 0x00)                               { state.active = false; return BleRxResult::Error; } /* D1: reserved flags */
+        if (flags != BLE_FLAGS_DATA && flags != BLE_FLAGS_CONTROL) { state.active = false; return BleRxResult::Error; } /* D1: reserved flags */
         if (length == 0 || length > UDISPLAY_MAX_MSG_SIZE) { state.active = false; return BleRxResult::Error; } /* D10: cap at 1024 */
 
         int payloadBytes = sz - 6;
@@ -407,12 +407,13 @@ BleRxResult bleFeed(const QByteArray& attPkt, BleRxState& state, QByteArray& out
         state.buf.append(attPkt.constData() + 6, payloadBytes);
         state.length   = length;
         state.packetId = pktId;
+        state.flags    = flags;
         state.active   = true;
 
         if (static_cast<uint16_t>(payloadBytes) == length) {
             out = state.buf;
             state.active = false;
-            return BleRxResult::Done;
+            return flags == BLE_FLAGS_CONTROL ? BleRxResult::Control : BleRxResult::Done;
         }
         return BleRxResult::More;
     }
@@ -439,7 +440,7 @@ BleRxResult bleFeed(const QByteArray& attPkt, BleRxState& state, QByteArray& out
     if (static_cast<uint16_t>(state.buf.size()) == state.length) {
         out = state.buf;
         state.active = false;
-        return BleRxResult::Done;
+        return state.flags == BLE_FLAGS_CONTROL ? BleRxResult::Control : BleRxResult::Done;
     }
     return BleRxResult::More;
 }
@@ -447,6 +448,14 @@ BleRxResult bleFeed(const QByteArray& attPkt, BleRxState& state, QByteArray& out
 bool bleUnframe(const QByteArray& attPkt, BleRxState& state, QByteArray& out)
 {
     return bleFeed(attPkt, state, out) == BleRxResult::Done;
+}
+
+bool bleControlReply(const QByteArray& ctrl, QByteArray& reply)
+{
+    if (ctrl.size() != 1 || static_cast<uint8_t>(ctrl[0]) != BLE_CTRL_HELLO)
+        return false;
+    reply = ctrl; /* HELLO is echoed unchanged */
+    return true;
 }
 
 } // namespace Proto
