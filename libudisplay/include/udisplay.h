@@ -54,13 +54,16 @@
  *       };
  *       udisplay_init(&g_ui, &cfg);
  *
- *       // On BLE connect:    udisplay_on_connect(&g_ui)
+ *       // On BLE subscribe:  udisplay_on_connect(&g_ui)   (starts the HELLO
+ *       //                    readiness check; HANDSHAKE follows its echo)
  *       // On BLE disconnect: udisplay_on_disconnect(&g_ui)
  *       // On BLE ATT write from client: udisplay_feed(&g_ui, data, len)
  *       //   (returns -1 on a framing error: disconnect)
  *       // From timer (e.g. every 5s): udisplay_heartbeat(&g_ui)
  *       // From sensor loop: udisplay_send_float(&g_ui, WIDGET_ID_READING, value)
  *       // On BLE MTU event:  udisplay_ble_set_mtu(&g_ui, mtu_value - 3)
+ *       // On readiness timer expiry: udisplay_timer_expired(&g_ui)
+ *       //   (see udisplay_timer_start_fn — optional, but recommended on BLE)
  *   }
  */
 
@@ -86,6 +89,17 @@ const char *udisplay_version(void);
 
 /** Default BLE ATT payload data capacity per fragment (ATT_MTU=23 minus 3 ATT header). */
 #define UDISPLAY_BLE_MTU_PAYLOAD_DEFAULT 20u
+
+/* BLE first-fragment `flags` values (see docs/protocol.md, BLE fragmentation).
+ * Any other value is a link error. */
+#define UDISPLAY_BLE_FLAGS_DATA          0x00u  /**< Payload is a uDisplay protocol message */
+#define UDISPLAY_BLE_FLAGS_CONTROL       0x01u  /**< Payload is a BLE transport control message */
+
+/* BLE transport control codes (first payload byte of a flags=CONTROL message). */
+#define UDISPLAY_BLE_CTRL_HELLO          0x01u  /**< Readiness probe; the client echoes it */
+
+/** Retry interval for the BLE HELLO readiness probe, in milliseconds. */
+#define UDISPLAY_BLE_HELLO_INTERVAL_MS   100u
 
 /*
  * Maximum reassembled/framed message size.
@@ -155,6 +169,9 @@ typedef enum {
     UDISPLAY_TRANSPORT_BLE  = 2,
 } udisplay_transport_t;
 
+/** One live protocol session — defined below (see "Internal state layout"). */
+typedef struct udisplay udisplay_t;
+
 /** Event received from the client (user interacted with a widget). */
 typedef struct {
     uint8_t  widget_id;    /**< Which widget generated the event */
@@ -201,6 +218,25 @@ typedef void (*udisplay_ready_fn)(void* userdata);
  * typically the same: tear down the connection so the client can retry.
  */
 typedef void (*udisplay_error_fn)(void* userdata);
+
+/**
+ * Arm the instance's one-shot timer to fire once after @p delay_ms. Arming an
+ * already-armed timer restarts it. When it fires, the host calls
+ * udisplay_timer_expired(ctx), serialized with the instance's other calls
+ * like any other entry point (see the udisplay_t concurrency contract).
+ *
+ * Used by the BLE transport to retry the HELLO readiness probe every
+ * UDISPLAY_BLE_HELLO_INTERVAL_MS until the client echoes it. The library
+ * needs one timer per instance; the host creates it up front (e.g. a static
+ * FreeRTOS timer) and maps @p ctx to it. Called from inside library calls, so
+ * it MUST NOT block or call back into the library.
+ */
+typedef void (*udisplay_timer_start_fn)(udisplay_t* ctx, uint32_t delay_ms);
+
+/** Disarm the instance's timer. Same rules as udisplay_timer_start_fn. A
+ *  late expiry that races the stop is harmless: udisplay_timer_expired()
+ *  ignores it. */
+typedef void (*udisplay_timer_stop_fn)(udisplay_t* ctx);
 
 /** Library configuration. Filled by the firmware using generated udisplay_ui.h. */
 typedef struct {
@@ -262,6 +298,17 @@ typedef struct {
      * Call udisplay_ble_set_mtu() after MTU negotiation to update at runtime.
      */
     uint16_t ble_mtu_payload;
+
+    /* ── Timer (optional) ────────────────────────────────────────────────────
+     * Host-provided one-shot timer, currently used only by the BLE HELLO
+     * readiness probe. Leave both NULL to go without: the probe is then
+     * retried from udisplay_heartbeat() instead, so a lost HELLO costs one
+     * heartbeat period rather than UDISPLAY_BLE_HELLO_INTERVAL_MS.
+     * Firmware using a generated wrapper can set them with
+     * udisplay_set_timer() after init.                                     */
+
+    udisplay_timer_start_fn timer_start;  /**< Arm the one-shot timer */
+    udisplay_timer_stop_fn  timer_stop;   /**< Disarm it */
 } udisplay_config_t;
 
 /* ── Internal state layout (documented-internal, not opaque) ──────────────
@@ -301,6 +348,7 @@ typedef struct {
     uint8_t  packet_id;       /**< packet_id from first fragment; expected on continuations */
     int      in_progress;     /**< 1 while reassembling; 0 when idle */
     int      overflow;        /**< Set on over-completion (cleared by ble_rx_reset) */
+    uint8_t  flags;           /**< flags from first fragment (UDISPLAY_BLE_FLAGS_*) */
 } ble_rx_t;
 
 /** TCP inbound reassembly state (u16_le length-prefixed streaming). */
@@ -327,7 +375,7 @@ typedef struct {
  * deadlock/reentrancy/blown interrupt latency, so the discipline is left to
  * the caller instead.
  */
-typedef struct {
+struct udisplay {
     udisplay_config_t cfg;
     chunk_server_t    chunk_srv;
     /* Inbound reassembly: exactly one of {ble_rx, tcp_rx} is ever active for
@@ -363,11 +411,13 @@ typedef struct {
     /* Transport framing */
     uint16_t          ble_mtu_payload;     /**< BLE ATT data bytes per fragment */
     uint8_t           ble_tx_packet_id;    /**< Per-connection outbound packet counter */
+    uint8_t           ble_ready;           /**< 1 once the client echoed a HELLO; the protocol
+                                                 (HANDSHAKE onwards) starts only after this */
     union {
         uint8_t ble_frag[517];                        /**< BLE outbound: one ATT fragment */
         uint8_t tcp_framed[UDISPLAY_MAX_MSG_SIZE + 2u]; /**< TCP outbound: length + payload */
     } tx_buf;
-} udisplay_t;
+};
 
 /* ── Lifecycle ───────────────────────────────────────────────────────────── */
 
@@ -380,13 +430,39 @@ typedef struct {
 void udisplay_init(udisplay_t* ctx, const udisplay_config_t* cfg);
 
 /**
- * Call when a client connects. Immediately transmits a HANDSHAKE message
- * via the configured send callback.
+ * Call when a client connects (on BLE: once the client has subscribed to
+ * indications on the data characteristic).
+ *
+ * TCP / TRANSPORT_NONE: immediately transmits a HANDSHAKE message via the
+ * configured send callback.
+ *
+ * BLE: first verifies the application-level path in both directions. Sends a
+ * HELLO transport control message and repeats it every
+ * UDISPLAY_BLE_HELLO_INTERVAL_MS (via cfg.timer_start) until the client
+ * echoes one back; only then is the HANDSHAKE sent. ATT-level confirmation of
+ * an indication does not prove the client application received it: a HELLO
+ * lost that way is simply sent again.
  */
 void udisplay_on_connect(udisplay_t* ctx);
 
-/** Call when the client disconnects. Resets bootstrap state. */
+/** Call when the client disconnects. Resets bootstrap state and stops the timer. */
 void udisplay_on_disconnect(udisplay_t* ctx);
+
+/* ── Timer ───────────────────────────────────────────────────────────────── */
+
+/**
+ * Set (or replace) the timer callbacks after udisplay_init() — for firmware
+ * that initialises through a generated wrapper, which leaves them NULL.
+ * Call before udisplay_on_connect().
+ */
+void udisplay_set_timer(udisplay_t* ctx, udisplay_timer_start_fn start,
+                        udisplay_timer_stop_fn stop);
+
+/**
+ * Call when the timer armed via cfg.timer_start fires. Expiries that arrive
+ * after the timer was stopped or the connection closed are ignored.
+ */
+void udisplay_timer_expired(udisplay_t* ctx);
 
 /* ── Transport-aware inbound feed ────────────────────────────────────────── */
 
@@ -409,7 +485,8 @@ void udisplay_on_disconnect(udisplay_t* ctx);
  *
  * @return 0 on success, -1 on a link error: a BLE framing violation (bad
  *         flags, length > UDISPLAY_MAX_MSG_SIZE, orphan continuation, wrong
- *         offset or packet_id, over-completion) or a TCP reassembly
+ *         offset or packet_id, over-completion, malformed or unknown control
+ *         message) or a TCP reassembly
  *         overflow. Both links are reliable and ordered, so this means a
  *         bug or corrupt state: the caller should drop the connection.
  *         Reassembly state has already been reset.
@@ -454,6 +531,10 @@ void udisplay_on_message(udisplay_t* ctx, const uint8_t* msg, uint16_t len);
 /**
  * Send a HEARTBEAT message. Call from a periodic timer (recommended: every 5s).
  * Ignored if no client is connected.
+ *
+ * BLE, before the client has echoed a HELLO: sends no HEARTBEAT (the protocol
+ * has not started), resends the HELLO if no timer is configured, and still
+ * counts a watchdog miss — a client that never echoes triggers on_comms_error.
  */
 void udisplay_heartbeat(udisplay_t* ctx);
 

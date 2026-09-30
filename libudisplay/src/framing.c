@@ -15,6 +15,7 @@ void ble_rx_reset(ble_rx_t* rx)
     rx->packet_id       = 0;
     rx->in_progress     = 0;
     rx->overflow        = 0;
+    rx->flags           = UDISPLAY_BLE_FLAGS_DATA;
 }
 
 ble_rx_status_t ble_rx_feed(ble_rx_t* rx,
@@ -32,8 +33,11 @@ ble_rx_status_t ble_rx_feed(ble_rx_t* rx,
         uint16_t msg_len = (uint16_t)att_payload[3] | ((uint16_t)att_payload[4] << 8u);
         uint8_t  flags   = att_payload[5];
 
-        /* Error rule 1: flags field must be 0x00 */
-        if (flags != 0x00u) { ble_rx_reset(rx); return BLE_RX_ERROR; }
+        /* Error rule 1: flags must be DATA or CONTROL; the rest stay reserved */
+        if (flags != UDISPLAY_BLE_FLAGS_DATA && flags != UDISPLAY_BLE_FLAGS_CONTROL) {
+            ble_rx_reset(rx);
+            return BLE_RX_ERROR;
+        }
         /* Error rule 2: declared length exceeds reassembly buffer */
         if (msg_len > UDISPLAY_MAX_MSG_SIZE) { ble_rx_reset(rx); return BLE_RX_ERROR; }
 
@@ -52,6 +56,7 @@ ble_rx_status_t ble_rx_feed(ble_rx_t* rx,
         rx->msg_len         = msg_len;
         rx->expected_offset = payload_len;
         rx->packet_id       = pkt_id;
+        rx->flags           = flags;
         rx->in_progress     = 1;
 
         if (payload_len == msg_len) {
@@ -98,6 +103,16 @@ void udisplay_ble_fragment(const uint8_t* msg, uint16_t msg_len,
                             void (*emit)(const uint8_t* frag, uint16_t frag_len, void* ud),
                             void* userdata)
 {
+    ble_fragment(msg, msg_len, mtu_payload, packet_id, UDISPLAY_BLE_FLAGS_DATA,
+                 frag_buf, frag_buf_cap, emit, userdata);
+}
+
+void ble_fragment(const uint8_t* msg, uint16_t msg_len,
+                  uint16_t mtu_payload, uint8_t packet_id, uint8_t flags,
+                  uint8_t* frag_buf, uint16_t frag_buf_cap,
+                  void (*emit)(const uint8_t* frag, uint16_t frag_len, void* ud),
+                  void* userdata)
+{
     if (msg_len == 0u) return;
     /* Minimum effective payload: 6-byte first-fragment header + 1 payload byte */
     if (mtu_payload < 7u) return;
@@ -119,7 +134,7 @@ void udisplay_ble_fragment(const uint8_t* msg, uint16_t msg_len,
         frag_buf[2] = packet_id;
         frag_buf[3] = (uint8_t)(msg_len & 0xFFu);           /* length lo */
         frag_buf[4] = (uint8_t)(msg_len >> 8u);             /* length hi */
-        frag_buf[5] = 0x00u;                                /* flags = 0 */
+        frag_buf[5] = flags;
         memcpy(frag_buf + 6, msg, chunk);
 
         emit(frag_buf, (uint16_t)(6u + chunk), userdata);

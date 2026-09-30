@@ -42,8 +42,11 @@ typedef enum {
  * BLE fragmentation format (v2.2, offset+packet_id scheme):
  *
  * First fragment (offset == 0):
- *   [u16 offset=0x0000][u8 packet_id][u16 length][u8 flags=0x00][payload...]
- *   Header: 6 bytes. flags MUST be 0x00; length is the total unframed message size.
+ *   [u16 offset=0x0000][u8 packet_id][u16 length][u8 flags][payload...]
+ *   Header: 6 bytes. flags is UDISPLAY_BLE_FLAGS_DATA (0x00, protocol message)
+ *   or UDISPLAY_BLE_FLAGS_CONTROL (0x01, transport control message); any
+ *   other value is an error. length is the total unframed message size.
+ *   On BLE_RX_DONE, rx->flags tells the caller which kind of message it is.
  *
  * Continuation fragment (offset > 0):
  *   [u16 offset][u8 packet_id][payload...]
@@ -54,6 +57,16 @@ typedef enum {
  */
 ble_rx_status_t ble_rx_feed(ble_rx_t* rx,
                              const uint8_t* att_payload, uint16_t att_len);
+
+/**
+ * udisplay_ble_fragment() with an explicit first-fragment @p flags value
+ * (UDISPLAY_BLE_FLAGS_DATA or UDISPLAY_BLE_FLAGS_CONTROL).
+ */
+void ble_fragment(const uint8_t* msg, uint16_t msg_len,
+                  uint16_t mtu_payload, uint8_t packet_id, uint8_t flags,
+                  uint8_t* frag_buf, uint16_t frag_buf_cap,
+                  void (*emit)(const uint8_t* frag, uint16_t frag_len, void* ud),
+                  void* userdata);
 
 /* ── TCP inbound reassembly ──────────────────────────────────────────────── */
 

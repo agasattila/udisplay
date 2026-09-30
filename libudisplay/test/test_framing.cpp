@@ -220,14 +220,44 @@ TEST(BleRx, TwoFragments_VectorData)
     EXPECT_EQ(memcmp(rx.buf, kChunkHeaderResponse, 34), 0);
 }
 
-TEST(BleRx, Error_FlagsNotZero)
+TEST(BleRx, ControlFlag_IsAcceptedAndReported)
 {
-    /* Error rule 1: first fragment with flags != 0x00 */
+    static const uint8_t att[] = {
+        0x00, 0x00,   /* offset=0 */
+        0x04,         /* packet_id=4 */
+        0x01, 0x00,   /* length=1 */
+        0x01,         /* flags=CONTROL */
+        0x01          /* HELLO */
+    };
+    ble_rx_t rx; ble_rx_reset(&rx);
+    ASSERT_EQ(ble_rx_feed(&rx, att, sizeof(att)), BLE_RX_DONE);
+    EXPECT_EQ(rx.flags, UDISPLAY_BLE_FLAGS_CONTROL);
+    ASSERT_EQ(rx.len, 1u);
+    EXPECT_EQ(rx.buf[0], UDISPLAY_BLE_CTRL_HELLO);
+
+    ble_rx_reset(&rx);
+    EXPECT_EQ(rx.flags, UDISPLAY_BLE_FLAGS_DATA);
+}
+
+TEST(BleFragment, ControlFlagInFirstFragmentOnly)
+{
+    std::vector<std::vector<uint8_t>> frags;
+    static const uint8_t msg[5] = { 1, 2, 3, 4, 5 };
+    ble_fragment(msg, 5, 8u, 3, UDISPLAY_BLE_FLAGS_CONTROL, sBuf, sizeof(sBuf),
+                 collect_emit, &frags);
+    ASSERT_EQ(frags.size(), 2u);   /* 2 payload bytes in the first, 3 in the second */
+    EXPECT_EQ(frags[0][5], UDISPLAY_BLE_FLAGS_CONTROL);
+    EXPECT_EQ(frags[1].size(), 6u);   /* continuation: 3-byte header, no flags */
+}
+
+TEST(BleRx, Error_ReservedFlags)
+{
+    /* Error rule 1: first fragment with flags other than DATA/CONTROL */
     static const uint8_t att[] = {
         0x00, 0x00,   /* offset=0 */
         0x00,         /* packet_id=0 */
         0x05, 0x00,   /* length=5 */
-        0x01,         /* flags=0x01 — INVALID */
+        0x02,         /* flags=0x02 — reserved, INVALID */
         0xAA, 0xBB, 0xCC, 0xDD, 0xEE
     };
     ble_rx_t rx; ble_rx_reset(&rx);
