@@ -16,8 +16,8 @@ const QBluetoothUuid BleTransport::kCtrlCharUuid{
 const QBluetoothUuid BleTransport::kDataCharUuid{
     QStringLiteral("29825AAA-D882-46F7-A4D6-EA8431AD3457")};
 
-/* CCCD value to enable notifications (little-endian 0x0001). */
-static const QByteArray kCccdNotifyEnable = QByteArray::fromHex("0100");
+/* CCCD value to enable indications (little-endian 0x0002). */
+static const QByteArray kCccdIndicateEnable = QByteArray::fromHex("0200");
 
 BleTransport::BleTransport(const QBluetoothDeviceInfo& deviceInfo,
                            QObject* parent)
@@ -152,6 +152,10 @@ void BleTransport::onDiscoveryFinished()
             this, &BleTransport::onCharacteristicChanged);
     connect(m_service, &QLowEnergyService::characteristicWritten,
             this, &BleTransport::onCharacteristicWritten);
+    connect(m_service, &QLowEnergyService::descriptorWritten,
+            this, &BleTransport::onDescriptorWritten);
+    connect(m_service, &QLowEnergyService::errorOccurred,
+            this, &BleTransport::onServiceError);
 
     m_service->discoverDetails();
 }
@@ -170,14 +174,58 @@ void BleTransport::onServiceStateChanged(QLowEnergyService::ServiceState state)
         return;
     }
 
-    /* Enable notifications on the Data characteristic via its CCCD. */
+    /* Enable indications on the Data characteristic via its CCCD. The device
+     * waits for the subscription before handshaking, so connected() waits for
+     * the write confirmation in onDescriptorWritten(). */
     const QLowEnergyDescriptor cccd = m_dataChar.descriptor(
         QBluetoothUuid::DescriptorType::ClientCharacteristicConfiguration);
-    if (cccd.isValid())
-        m_service->writeDescriptor(cccd, kCccdNotifyEnable);
+    if (!cccd.isValid()) {
+        failLink(QStringLiteral("uDisplay data characteristic has no CCCD"));
+        return;
+    }
+    m_service->writeDescriptor(cccd, kCccdIndicateEnable);
+}
+
+void BleTransport::onDescriptorWritten(const QLowEnergyDescriptor& d,
+                                       const QByteArray& value)
+{
+    if (m_connected || d != m_dataChar.descriptor(
+            QBluetoothUuid::DescriptorType::ClientCharacteristicConfiguration))
+        return;
+
+    if (value != kCccdIndicateEnable) {
+        failLink(QStringLiteral("Failed to enable indications on data characteristic"));
+        return;
+    }
 
     m_connected = true;
     emit connected();
+}
+
+void BleTransport::onServiceError(QLowEnergyService::ServiceError error)
+{
+    switch (error) {
+    case QLowEnergyService::DescriptorWriteError:
+        failLink(QStringLiteral("Failed to enable indications on data characteristic"));
+        break;
+    case QLowEnergyService::CharacteristicWriteError:
+        /* A confirmed control write failed: the fragment is lost and the
+         * in-flight slot would never be released. */
+        failLink(QStringLiteral("BLE write to control characteristic failed"));
+        break;
+    default:
+        break;
+    }
+}
+
+void BleTransport::failLink(const QString& reason)
+{
+    m_connected     = false;
+    m_writeInFlight = false;
+    m_writeQueue.clear();
+    emit errorOccurred(reason);
+    if (m_controller)
+        m_controller->disconnectFromDevice(); /* onControllerDisconnected() emits disconnected() */
 }
 
 void BleTransport::onCharacteristicChanged(const QLowEnergyCharacteristic& c,
@@ -187,15 +235,27 @@ void BleTransport::onCharacteristicChanged(const QLowEnergyCharacteristic& c,
         return;
 
     QByteArray msg;
-    if (Proto::bleUnframe(value, m_rxState, msg))
+    switch (Proto::bleFeed(value, m_rxState, msg)) {
+    case Proto::BleRxResult::Done:
         emit messageReceived(msg);
+        break;
+    case Proto::BleRxResult::More:
+        break;
+    case Proto::BleRxResult::Error:
+        /* Indications are confirmed and ordered, so a framing violation means
+         * a bug or corrupt state, not loss: drop the link instead of resyncing. */
+        failLink(QStringLiteral("BLE framing error on data characteristic"));
+        break;
+    }
 }
 
 void BleTransport::onCharacteristicWritten(const QLowEnergyCharacteristic& c,
                                            const QByteArray& value)
 {
-    Q_UNUSED(c)
     Q_UNUSED(value)
+    /* Only a confirmed control write releases the one-in-flight slot. */
+    if (c.uuid() != kCtrlCharUuid)
+        return;
     m_writeInFlight = false;
     drainWriteQueue();
 }

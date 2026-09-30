@@ -9,7 +9,7 @@ demo05 already proves the BLE path end to end, but only for a single LED. demo07
 goal is to go beyond that: a full v1 widget showcase driven by genuine hardware
 usage — real sensors and actuators reflected in the UI, not just toggling a single
 LED from a button press. Firmware flashed to a physical device, controlled from the
-mobile/desktop uDisplay client via BLE GATT notifications.
+mobile/desktop uDisplay client via BLE GATT indications.
 
 ## Blockers
 

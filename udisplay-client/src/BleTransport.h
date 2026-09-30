@@ -10,6 +10,7 @@
 #include <QBluetoothDeviceInfo>
 #include <QBluetoothUuid>
 #include <QLowEnergyController>
+#include <QLowEnergyDescriptor>
 #include <QLowEnergyService>
 #include <QQueue>
 
@@ -19,13 +20,19 @@
  * Implements the Transport interface over a BLE GATT connection.
  * Outbound messages are fragmented via Proto::bleFrame() into ATT packets
  * written sequentially to the Control characteristic (WRITE_WITH_RESPONSE).
- * Inbound ATT notifications on the Data characteristic are reassembled via
- * Proto::bleUnframe() and emitted as messageReceived().
+ * Inbound ATT indications on the Data characteristic are reassembled via
+ * Proto::bleFeed() and emitted as messageReceived(). A framing error is a
+ * link error: the transport reports it and disconnects.
+ *
+ * connected() is emitted only once the Data characteristic's CCCD write
+ * (0x0002, indications on) is confirmed: indication delivery is part of the
+ * transport contract, not an optional setup step. A missing CCCD or a failed
+ * GATT write is a link error.
  *
  * GATT service / characteristic layout (must match libudisplay firmware):
  *   Service  29825AAA-D882-46F7-A4D6-EA8431AD3455
  *     Ctrl   29825AAA-D882-46F7-A4D6-EA8431AD3456  (WRITE_WITH_RESPONSE)
- *     Data   29825AAA-D882-46F7-A4D6-EA8431AD3457  (NOTIFY)
+ *     Data   29825AAA-D882-46F7-A4D6-EA8431AD3457  (INDICATE)
  */
 class BleTransport : public Transport
 {
@@ -51,9 +58,14 @@ private slots:
                                  const QByteArray& value);
     void onCharacteristicWritten(const QLowEnergyCharacteristic& c,
                                  const QByteArray& value);
+    void onDescriptorWritten(const QLowEnergyDescriptor& d,
+                             const QByteArray& value);
+    void onServiceError(QLowEnergyService::ServiceError error);
     void drainWriteQueue();
 
 private:
+    void failLink(const QString& reason);
+
     static const QBluetoothUuid kUDisplaySvcUuid;
     static const QBluetoothUuid kCtrlCharUuid;
     static const QBluetoothUuid kDataCharUuid;

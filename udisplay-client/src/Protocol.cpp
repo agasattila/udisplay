@@ -379,27 +379,27 @@ QVector<QByteArray> bleFrame(const QByteArray& msg, uint8_t attPayloadSize,
     return packets;
 }
 
-bool bleUnframe(const QByteArray& attPkt, BleRxState& state, QByteArray& out)
+BleRxResult bleFeed(const QByteArray& attPkt, BleRxState& state, QByteArray& out)
 {
     const auto* p = reinterpret_cast<const uint8_t*>(attPkt.constData());
     int sz = attPkt.size();
 
-    if (sz < 3) return false; /* too short for any valid fragment header */
+    if (sz < 3) return BleRxResult::Error; /* too short for any valid fragment header */
 
     uint16_t offset = getU16le(p);
 
     if (offset == 0) {
         /* First fragment requires 6-byte header */
-        if (sz < 6) return false;
+        if (sz < 6) { state.active = false; return BleRxResult::Error; }
         uint8_t pktId  = p[2];
         uint16_t length = getU16le(p + 3);
         uint8_t  flags  = p[5];
 
-        if (flags != 0x00)                               return false; /* D1: reserved flags */
-        if (length == 0 || length > UDISPLAY_MAX_MSG_SIZE) return false; /* D10: cap at 1024 */
+        if (flags != 0x00)                               { state.active = false; return BleRxResult::Error; } /* D1: reserved flags */
+        if (length == 0 || length > UDISPLAY_MAX_MSG_SIZE) { state.active = false; return BleRxResult::Error; } /* D10: cap at 1024 */
 
         int payloadBytes = sz - 6;
-        if (payloadBytes < 0 || static_cast<uint32_t>(payloadBytes) > length) return false;
+        if (payloadBytes < 0 || static_cast<uint32_t>(payloadBytes) > length) { state.active = false; return BleRxResult::Error; }
 
         /* Start fresh reassembly */
         state.buf.clear();
@@ -412,26 +412,26 @@ bool bleUnframe(const QByteArray& attPkt, BleRxState& state, QByteArray& out)
         if (static_cast<uint16_t>(payloadBytes) == length) {
             out = state.buf;
             state.active = false;
-            return true;
+            return BleRxResult::Done;
         }
-        return false;
+        return BleRxResult::More;
     }
 
     /* Continuation fragment */
-    if (!state.active)                       return false; /* no in-flight message */
-    if (p[2] != state.packetId)              { state.active = false; return false; } /* wrong id */
+    if (!state.active)                       return BleRxResult::Error; /* no in-flight message */
+    if (p[2] != state.packetId)              { state.active = false; return BleRxResult::Error; } /* wrong id */
 
     uint16_t expected = static_cast<uint16_t>(state.buf.size());
-    if (offset != expected)                  { state.active = false; return false; } /* bad offset */
+    if (offset != expected)                  { state.active = false; return BleRxResult::Error; } /* bad offset */
 
     int payloadBytes = sz - 3;
-    if (payloadBytes <= 0)                   { state.active = false; return false; }
+    if (payloadBytes <= 0)                   { state.active = false; return BleRxResult::Error; }
 
     uint32_t accumulated = static_cast<uint32_t>(state.buf.size()) +
                            static_cast<uint32_t>(payloadBytes);
     if (accumulated > static_cast<uint32_t>(state.length)) {
         state.active = false;
-        return false; /* over-completion */
+        return BleRxResult::Error; /* over-completion */
     }
 
     state.buf.append(attPkt.constData() + 3, payloadBytes);
@@ -439,9 +439,14 @@ bool bleUnframe(const QByteArray& attPkt, BleRxState& state, QByteArray& out)
     if (static_cast<uint16_t>(state.buf.size()) == state.length) {
         out = state.buf;
         state.active = false;
-        return true;
+        return BleRxResult::Done;
     }
-    return false;
+    return BleRxResult::More;
+}
+
+bool bleUnframe(const QByteArray& attPkt, BleRxState& state, QByteArray& out)
+{
+    return bleFeed(attPkt, state, out) == BleRxResult::Done;
 }
 
 } // namespace Proto
