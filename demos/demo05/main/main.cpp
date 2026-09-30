@@ -18,6 +18,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/timers.h"
 #include "nvs_flash.h"
 
@@ -206,7 +207,10 @@ static uint8_t  g_subscribe_wait_ticks = 0;
  *
  * g_tx_lock guards only the ring and g_tx_inflight; BLE calls happen outside
  * it. Whoever flips g_tx_inflight false -> true owns the next indicate call,
- * which keeps fragments in order across tasks. */
+ * which keeps fragments in order across tasks. The ring is only touched from
+ * task context (NimBLE host task, heartbeat timer task), so g_tx_lock is a
+ * mutex rather than a critical section: copying a fragment of up to
+ * TX_FRAG_MAX bytes must not run with interrupts disabled. */
 #define TX_RING_BYTES 2048u   /* 1 KB message at MTU 23: ~60 fragments, ~1.3 KB with length prefixes */
 #define TX_FRAG_MAX   UDISPLAY_MAX_MSG_SIZE
 
@@ -214,7 +218,8 @@ static uint8_t    g_tx_ring[TX_RING_BYTES];
 static uint16_t   g_tx_head = 0;      /* next byte to read  */
 static uint16_t   g_tx_used = 0;      /* bytes queued (length prefixes included) */
 static bool       g_tx_inflight = false;
-static portMUX_TYPE g_tx_lock = portMUX_INITIALIZER_UNLOCKED;
+static StaticSemaphore_t g_tx_lock_buf;
+static SemaphoreHandle_t g_tx_lock = NULL;   /* created in app_main */
 
 static void link_error(const char* why)
 {
@@ -226,11 +231,11 @@ static void link_error(const char* why)
 
 static void tx_reset(void)
 {
-    portENTER_CRITICAL(&g_tx_lock);
+    xSemaphoreTake(g_tx_lock, portMAX_DELAY);
     g_tx_head = 0;
     g_tx_used = 0;
     g_tx_inflight = false;
-    portEXIT_CRITICAL(&g_tx_lock);
+    xSemaphoreGive(g_tx_lock);
 }
 
 static void ring_write(const uint8_t* src, uint16_t n)
@@ -261,7 +266,7 @@ static void tx_pump(void)
     static uint8_t frag[TX_FRAG_MAX];
     uint16_t len = 0;
 
-    portENTER_CRITICAL(&g_tx_lock);
+    xSemaphoreTake(g_tx_lock, portMAX_DELAY);
     if (!g_tx_inflight && g_tx_used > 0) {
         uint8_t hdr[2];
         ring_read(hdr, 2);
@@ -269,7 +274,7 @@ static void tx_pump(void)
         ring_read(frag, len);
         g_tx_inflight = true;
     }
-    portEXIT_CRITICAL(&g_tx_lock);
+    xSemaphoreGive(g_tx_lock);
 
     if (len == 0) return;
 
@@ -294,14 +299,14 @@ static void send_cb(const uint8_t* data, uint16_t len, void* ud)
     }
 
     bool ok;
-    portENTER_CRITICAL(&g_tx_lock);
+    xSemaphoreTake(g_tx_lock, portMAX_DELAY);
     ok = (uint32_t)g_tx_used + 2u + len <= TX_RING_BYTES;
     if (ok) {
         uint8_t hdr[2] = { (uint8_t)(len & 0xFFu), (uint8_t)(len >> 8) };
         ring_write(hdr, 2);
         ring_write(data, len);
     }
-    portEXIT_CRITICAL(&g_tx_lock);
+    xSemaphoreGive(g_tx_lock);
 
     if (!ok) {
         link_error("TX queue overflow");
@@ -491,9 +496,9 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
         if (ev->notify_tx.attr_handle != g_data_attr_handle) break;
         if (ev->notify_tx.status == BLE_HS_EDONE) {
             /* Peer confirmed the indication: send the next queued fragment. */
-            portENTER_CRITICAL(&g_tx_lock);
+            xSemaphoreTake(g_tx_lock, portMAX_DELAY);
             g_tx_inflight = false;
-            portEXIT_CRITICAL(&g_tx_lock);
+            xSemaphoreGive(g_tx_lock);
             tx_pump();
         } else if (ev->notify_tx.status != 0) {
             /* BLE_HS_ETIMEOUT (no confirmation within the ATT timeout) or a send error.
@@ -547,6 +552,8 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     led_init();
+
+    g_tx_lock = xSemaphoreCreateMutexStatic(&g_tx_lock_buf);
 
     ui.init(send_cb, UDISPLAY_TRANSPORT_BLE);
     register_ui_handlers();
