@@ -15,8 +15,8 @@ import "./"
  * Item fill color, press-darken, shape/radius, and disabled opacity come
  * from the shared ButtonFace.qml component (see its header comment) so
  * items look and behave exactly like a standalone button. Selection is
- * layered on top as a border + bold-label overlay — independent of
- * ButtonFace's own fill/press styling.
+ * layered on top as a border + bold-label overlay, plus ButtonFace's
+ * `selected` flag, which holds the same darkened fill as a press.
  *
  * Selection is device-authoritative (docs/designs/
  * button-group-exclusive-select.md): a press only forwards the item's
@@ -122,8 +122,8 @@ Rectangle {
                         anchors.centerIn: parent
                         text: model.label
                         /* button_text unconditionally — fill is always
-                         * _itemStyle.button (via ButtonFace's accentColor)
-                         * regardless of selection, so _itemStyle.text (meant
+                         * _itemStyle.button (via ButtonFace's accentColor),
+                         * darkened when selected, so _itemStyle.text (meant
                          * for the old dark "surface" fill) would be
                          * unreadable here. */
                         color: _itemStyle.button_text

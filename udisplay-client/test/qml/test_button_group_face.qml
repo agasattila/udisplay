@@ -7,9 +7,10 @@ import "../../qml/widgets" as W
 /**
  * Regression test for ButtonGroupWidget.qml's grid items consuming
  * ButtonFace.qml (see ButtonGroupWidget.qml's header comment): items must
- * fill with the same accent color as a standalone button REGARDLESS of
- * selection state (selection is now a border + bold-label overlay only,
- * not a fill difference), and disabled opacity must match button's 0.3
+ * fill with the same accent color as a standalone button, the selected
+ * item darkened exactly like a pressed button (Qt.darker(accent, 1.3)) on
+ * top of the border + bold-label overlay, and disabled opacity must match
+ * button's 0.3
  * (previously 0.35).
  *
  * Also covers container-level style cascading for button-group items
@@ -259,13 +260,15 @@ Item {
             }
             if (!selected || !unselected) { fail("could not identify selected/unselected items"); return }
 
-            /* Fill must be IDENTICAL for both — selection is a border/label
-             * overlay only now, not a fill difference. */
-            if (selected.color.toString() !== unselected.color.toString())
-                { fail("selected/unselected fill should match (same as button's accent) — got " +
-                       selected.color + " vs " + unselected.color); return }
-            if (selected.color.toString() !== controller.activeStyle.button)
-                { fail("item fill should equal activeStyle.button, got " + selected.color); return }
+            /* Unselected fill is the button's accent; the selected item
+             * holds ButtonFace's press-darkened fill. */
+            var accent = controller.activeStyle.button
+            var darkAccent = Qt.darker(accent, 1.3).toString()
+            if (unselected.color.toString() !== accent)
+                { fail("unselected item fill should equal activeStyle.button, got " + unselected.color); return }
+            if (selected.color.toString() !== darkAccent)
+                { fail("selected item fill should be Qt.darker(activeStyle.button, 1.3) = " + darkAccent +
+                       ", got " + selected.color); return }
 
             /* Selection shows via border color: button_text (the on-fill
              * contrast token), never the fill color itself, which would
@@ -340,6 +343,8 @@ Item {
                 { fail("after value=0x11, item 0x10 should lose the selection ring, got " + selected.border.color); return }
             if (labelOf(unselected).font.bold !== true || labelOf(selected).font.bold !== false)
                 { fail("after value=0x11, only item 0x11's label should be bold"); return }
+            if (unselected.color.toString() !== darkAccent || selected.color.toString() !== accent)
+                { fail("after value=0x11, only item 0x11 should have the darkened fill"); return }
 
             /* clear_<group>() sends 0: a reserved ID, so no item is ringed. */
             group.value = 0
@@ -348,6 +353,8 @@ Item {
                 { fail("after value=0 (cleared), no item should show the selection ring"); return }
             if (labelOf(selected).font.bold || labelOf(unselected).font.bold)
                 { fail("after value=0 (cleared), no item label should be bold"); return }
+            if (selected.color.toString() !== accent || unselected.color.toString() !== accent)
+                { fail("after value=0 (cleared), no item should have the darkened fill"); return }
             group.value = 0x10   /* restore for any later scenario */
 
             /* Cascading: item with its own style (row 2, ownStyle) renders
