@@ -158,6 +158,10 @@ def _config_fields(
     UDISPLAY_BLE_MTU_PAYLOAD_DEFAULT for any value < 7, so 0 is a correct
     default rather than an omission, and firmware updates it at runtime via
     udisplay_ble_set_mtu() after MTU negotiation.
+    timer_start/timer_stop are intentionally always NULL: the timer is
+    platform-specific, so firmware sets it after init with
+    udisplay_set_timer() (without one, the BLE HELLO readiness probe is
+    retried from udisplay_heartbeat() instead).
     """
     return [
         ("merkle_root",     merkle_root_expr),
@@ -175,6 +179,8 @@ def _config_fields(
         ("fill_random",     "NULL"),
         ("transport",       transport_expr),
         ("ble_mtu_payload", "0"),
+        ("timer_start",     "NULL"),
+        ("timer_stop",      "NULL"),
     ]
 
 

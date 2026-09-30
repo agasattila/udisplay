@@ -283,6 +283,16 @@ class TestMessageVectors:
         reassembled = first_payload + last_payload
         assert reassembled == full
 
+    def test_ble_control_hello(self, vectors):
+        """HELLO readiness probe: one first fragment, flags=0x01 (control), payload 0x01."""
+        raw = _bytes(vectors["messages"]["BLE_control_HELLO"])
+        assert struct.unpack("<H", raw[0:2])[0] == 0      # offset
+        assert raw[2] == 0                                # packet_id
+        assert struct.unpack("<H", raw[3:5])[0] == 1      # length
+        assert raw[5] == 0x01                             # flags = control
+        assert raw[6:] == b"\x01"                         # HELLO
+        assert len(raw) == 7
+
     def test_tcp_framing(self, vectors):
         """TCP frame: u16_le length + payload."""
         raw = _bytes(vectors["messages"]["TCP_framed_STATE_float32"])

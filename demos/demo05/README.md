@@ -126,7 +126,11 @@ uDisplay client (Qt app):
    `led_init()`/`led_set(false)` must leave it off on every board/polarity.)
 2. **Advertise + connect** — flash and monitor; confirm `advertising as
    "Demo05"` in the log, then connect from the client. Confirm `connected`
-   and `client subscribed — sending HANDSHAKE` appear.
+   and `client subscribed — sending HELLO, HANDSHAKE follows its echo`
+   appear, and that the client proceeds to bootstrap (the HANDSHAKE is sent
+   only after the client echoes the HELLO readiness probe).
+   Disconnect and reconnect several times: every reconnect must bootstrap
+   without a device-side delay (issue #45).
 3. **Initial state push** — once the client reports ready, confirm the LED
    widget renders **OFF** (matches the firmware's `status_led` initial
    value pushed from `on_client_ready`).

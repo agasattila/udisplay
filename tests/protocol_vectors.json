@@ -401,6 +401,16 @@
       "bytes": "11 00 00 eb 11 20 40 f3 c4 41 b4 5a 49 95 2b 3b b9 c1 09 00",
       "total_bytes": 20
     },
+    "BLE_control_HELLO": {
+      "description": "BLE transport control message HELLO (issue #45): single first fragment, flags=0x01 (control), length=1, payload 0x01 (HELLO). The device sends it on connect and every 100 ms until the client echoes it; packet_id=0 is the device's first message of the connection. The client's echo is byte-identical apart from packet_id, which comes from the client's own counter. Never passed to the protocol layer.",
+      "input": {
+        "packet_id": 0,
+        "flags": "0x01",
+        "control": "HELLO"
+      },
+      "bytes": "00 00 00 01 00 01 01",
+      "total_bytes": 7
+    },
     "TCP_framed_STATE_float32": {
       "description": "TCP framing: u16_le length prefix (7) + STATE_UPDATE_float32 payload.",
       "input": {

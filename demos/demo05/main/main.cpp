@@ -353,6 +353,36 @@ static void heartbeat_timer_cb(TimerHandle_t t)
     }
 }
 
+/* ── uDisplay timer (BLE HELLO readiness retries) ──────────────────────────
+ *
+ * After the client subscribes, the library sends a HELLO transport control
+ * message and waits for the client to echo it before sending HANDSHAKE: an
+ * indication the client's BLE stack confirmed can still be lost before it
+ * reaches the client application (seen on Linux/BlueZ right after
+ * subscribing). The library asks for a one-shot timer to retry the HELLO
+ * every UDISPLAY_BLE_HELLO_INTERVAL_MS; it runs in the timer service task,
+ * like heartbeat_timer_cb above. */
+static StaticTimer_t g_ud_timer_buf;
+static TimerHandle_t g_ud_timer = NULL;   /* created in app_main */
+
+static void ud_timer_cb(TimerHandle_t t)
+{
+    udisplay_timer_expired(ui.ctx());
+}
+
+static void ud_timer_start(udisplay_t* ctx, uint32_t delay_ms)
+{
+    /* xTimerChangePeriod also (re)starts the timer. Block time 0: this is
+     * called from the NimBLE host task and from the timer task itself. */
+    TickType_t ticks = pdMS_TO_TICKS(delay_ms);
+    xTimerChangePeriod(g_ud_timer, ticks ? ticks : 1, 0);
+}
+
+static void ud_timer_stop(udisplay_t* ctx)
+{
+    xTimerStop(g_ud_timer, 0);
+}
+
 /* ── GATT characteristic access callbacks ────────────────────────────────── */
 
 static int ctrl_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -481,13 +511,14 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
         /* Fires on every CCCD write, including unsubscribe and, on some
          * stacks, a resubscribe mid-connection (e.g. after MTU
          * renegotiation). Gate on indicate-enable of the data characteristic,
-         * and only send HANDSHAKE once per connection — udisplay_on_connect()
+         * and only start the session once per connection — udisplay_on_connect()
          * resets BLE fragment/reassembly state, so firing it twice would
-         * corrupt an in-progress bootstrap. */
+         * corrupt an in-progress bootstrap. It sends HELLO first; HANDSHAKE
+         * follows once the client echoes it (see ud_timer_start above). */
         if (ev->subscribe.attr_handle == g_data_attr_handle &&
             ev->subscribe.cur_indicate && !g_handshake_sent) {
             g_handshake_sent = true;
-            ESP_LOGI(TAG, "client subscribed — sending HANDSHAKE");
+            ESP_LOGI(TAG, "client subscribed — sending HELLO, HANDSHAKE follows its echo");
             udisplay_on_connect(ui.ctx());
         }
         break;
@@ -555,7 +586,11 @@ extern "C" void app_main(void)
 
     g_tx_lock = xSemaphoreCreateMutexStatic(&g_tx_lock_buf);
 
+    g_ud_timer = xTimerCreateStatic("ud", 1, pdFALSE, NULL, ud_timer_cb,
+                                    &g_ud_timer_buf);
+
     ui.init(send_cb, UDISPLAY_TRANSPORT_BLE);
+    udisplay_set_timer(ui.ctx(), ud_timer_start, ud_timer_stop);
     register_ui_handlers();
 
     nimble_port_init();
