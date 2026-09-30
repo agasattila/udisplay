@@ -32,6 +32,7 @@ Rectangle {
     property string shape:     "rect"  // rect | circle | square
     property bool   showLabel: true    // callers with their own label overlay (e.g. selection styling) set this false
     property var    effectiveStyle: controller.activeStyle
+    property bool   selected: false
 
     readonly property alias labelImplicitWidth:  labelText.implicitWidth
     readonly property alias labelImplicitHeight: labelText.implicitHeight
@@ -43,7 +44,7 @@ Rectangle {
     readonly property color accentColor: effectiveStyle.button
 
     radius:  shape === "circle" ? Math.min(width, height) / 2 : shape === "square" ? 4 : 8
-    color:   mouseArea.pressed ? Qt.darker(accentColor, 1.3) : accentColor
+    color:   (selected || mouseArea.pressed) ? Qt.darker(accentColor, 1.3) : accentColor
     opacity: enabled ? 1.0 : 0.3
 
     Text {

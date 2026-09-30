@@ -112,6 +112,7 @@ Rectangle {
                     border.color: root.value === model.widgetId
                                   ? _itemStyle.button_text : _itemStyle.border
                     border.width: 1
+                    selected: root.value === model.widgetId
 
                     onButtonPressed:  controller.sendButtonPress(model.widgetId)
                     onButtonReleased: controller.sendButtonRelease(model.widgetId)
