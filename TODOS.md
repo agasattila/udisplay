@@ -736,37 +736,6 @@ landing (fixes the three known instances first; this TODO generalizes the fix).
 
 ---
 
-### TODO-038: Pre-existing `test_handshake` merkle_root vector mismatch
-**What:** `udisplay-gen/tests/test_vectors.py::TestMessageVectors::test_handshake` fails —
-the computed `merkle_root` slice (`raw[2:34].hex()`) doesn't match
-`tests/protocol_vectors.json`'s `messages.HANDSHAKE.input.merkle_root`. The byte pattern is
-suspicious, not random noise: actual = `0074ac9fa684...d10bac7bdffdb` (32 bytes, leading
-`00`), expected = `74ac9fa68428...0bac7bdffdb6e` (32 bytes, trailing `6e`). Actual reads
-like expected shifted right by one byte with a `00` prepended and the real trailing byte
-dropped off the end of the read window — a strong hint that either the `HANDSHAKE` message
-layout gained/lost a byte somewhere before `merkle_root` (e.g. an extra flags/reserved byte)
-without the test vector being regenerated, or the vector's own `bytes` field is stale
-relative to the current message encoder.
-**Why:** Blocks trusting `test_handshake` as a real regression gate — it's currently "always
-red," so a genuine handshake-encoding regression would ship unnoticed alongside this
-known-failing baseline.
-**Pros:** Once fixed, restores `test_handshake` as a meaningful canary for the handshake
-message format — currently dead weight in the suite.
-**Cons:** Requires tracing the actual `HANDSHAKE` message encoder (likely in `libudisplay` or
-`Protocol.cpp`) against the vector's `bytes` field byte-by-byte to find where the one-byte
-drift is introduced — not a quick fix, needs proper investigation (`/investigate` recommended).
-**Context:** Confirmed pre-existing and unrelated to `feat/widget-model-redesign-button` —
-verified by stashing all Increment 1 changes and re-running; failure is byte-for-byte
-identical with and without those changes. First noticed during `/review` on
-`fix/widget-model-redesign`, re-confirmed during `/ship` of
-`feat/widget-model-redesign-button`.
-**Effort:** M (human: ~half day / CC: ~30-45 min, mostly investigation)
-**Priority:** P0 — a permanently-red protocol-compatibility test undermines trust in the
-whole vector suite; should be root-caused before it masks a real regression.
-**Depends on:** Nothing blocking. Independent of the button-face composition redesign.
-
----
-
 ### TODO-039: Untested non-scalar guard branches in YamlParser.cpp
 **What:** `parseFlex()`, `parseGridColumns()`, and `parseAlign()` (`udisplay-client/src/
 YamlParser.cpp`) all guard with `!node[key].IsScalar()` and silently treat a non-scalar
@@ -944,6 +913,47 @@ turning a config-portability task into also completing a half-finished feature.
 **Depends on:** Nothing. Can be done any time.
 
 ## Completed
+
+### TODO-038: Pre-existing `test_handshake` merkle_root vector mismatch
+**What:** `udisplay-gen/tests/test_vectors.py::TestMessageVectors::test_handshake` fails —
+the computed `merkle_root` slice (`raw[2:34].hex()`) doesn't match
+`tests/protocol_vectors.json`'s `messages.HANDSHAKE.input.merkle_root`. The byte pattern is
+suspicious, not random noise: actual = `0074ac9fa684...d10bac7bdffdb` (32 bytes, leading
+`00`), expected = `74ac9fa68428...0bac7bdffdb6e` (32 bytes, trailing `6e`). Actual reads
+like expected shifted right by one byte with a `00` prepended and the real trailing byte
+dropped off the end of the read window — a strong hint that either the `HANDSHAKE` message
+layout gained/lost a byte somewhere before `merkle_root` (e.g. an extra flags/reserved byte)
+without the test vector being regenerated, or the vector's own `bytes` field is stale
+relative to the current message encoder.
+**Why:** Blocks trusting `test_handshake` as a real regression gate — it's currently "always
+red," so a genuine handshake-encoding regression would ship unnoticed alongside this
+known-failing baseline.
+**Pros:** Once fixed, restores `test_handshake` as a meaningful canary for the handshake
+message format — currently dead weight in the suite.
+**Cons:** Requires tracing the actual `HANDSHAKE` message encoder (likely in `libudisplay` or
+`Protocol.cpp`) against the vector's `bytes` field byte-by-byte to find where the one-byte
+drift is introduced — not a quick fix, needs proper investigation (`/investigate` recommended).
+**Context:** Confirmed pre-existing and unrelated to `feat/widget-model-redesign-button` —
+verified by stashing all Increment 1 changes and re-running; failure is byte-for-byte
+identical with and without those changes. First noticed during `/review` on
+`fix/widget-model-redesign`, re-confirmed during `/ship` of
+`feat/widget-model-redesign-button`.
+**Effort:** M (human: ~half day / CC: ~30-45 min, mostly investigation)
+**Priority:** P0 — a permanently-red protocol-compatibility test undermines trust in the
+whole vector suite; should be root-caused before it masks a real regression.
+**Status:** ✅ DONE (stale; already fixed): re-checked for issue #30. The vector,
+the test, and all three implementations agree on the proto 0x04 39-byte layout
+`[msg_type, proto_version, flags, root[32], chunk_count u16, chunk_size u16]`:
+`test_vectors.py::test_handshake` reads `merkle_root` from `raw[3:35]` and asserts the
+`flags` byte at offset 2 and `len == 39`; `tests/protocol_vectors.json`'s `HANDSHAKE`
+`bytes` include the flags byte; libudisplay's `proto_handshake()` matches it byte-for-byte
+(`ProtoEncode.Handshake_ExactBytes`); and `udisplay-client`'s `parseHandshake()` reads
+the root at offset 3 for proto >= 0x04. The "shifted by one byte" symptom described above
+was exactly that missing flags byte: the test used to read the pre-auth 38-byte layout
+(`raw[2:34]`). udisplay-gen: 385/385 passing; libudisplay CTest: 134/134 passing.
+**Depends on:** Nothing blocking. Independent of the button-face composition redesign.
+
+---
 
 ### TODO-045: "capability check is a no-op" false claim — in TODOS.md AND in the schema
 **What:** Correct every copy of the false "capability check is a no-op" claim. Two
