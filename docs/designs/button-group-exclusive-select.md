@@ -62,8 +62,10 @@ assumes widget IDs.
   dropdown's `Option`), `void set(Item)` and `void clear()`.
   Firmware: `ui.mode_sel.set(ModeSelWidget::Item::fast)`.
 - **Python**: `ButtonGroupWidget.set(item)` accepts the item object
-  (`ui.mode_sel.set(ui.mode_sel.fast)`) or a raw `WIDGET_ID_*` int;
-  `clear()` sends 0.
+  (`ui.mode_sel.set(ui.mode_sel.fast)`) or a raw `WIDGET_ID_*` int, and
+  raises `ValueError` for anything that isn't one of this group's items
+  (another group's item, a stray int), the runtime counterpart of the C++
+  `Item` enum (PR #42 review); `clear()` sends 0.
 - Effort: M (human ~1 day / CC ~30 min). Risk: Low. No wire change.
 
 ### Approach C: Client-side optimistic selection plus firmware veto
