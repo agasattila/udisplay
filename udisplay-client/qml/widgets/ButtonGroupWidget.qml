@@ -15,17 +15,20 @@ import "./"
  * Item fill color, press-darken, shape/radius, and disabled opacity come
  * from the shared ButtonFace.qml component (see its header comment) so
  * items look and behave exactly like a standalone button. Selection is
- * layered on top as a border + bold-label overlay — independent of
- * ButtonFace's own fill/press styling — since `value` is currently
- * unimplemented on the firmware side (see the design doc); the overlay
- * stays inert until a real setter exists but the visuals are already
- * correct for when it does. */
+ * layered on top as a border + bold-label overlay, plus ButtonFace's
+ * `selected` flag, which holds the same darkened fill as a press.
+ *
+ * Selection is device-authoritative (docs/designs/
+ * button-group-exclusive-select.md): a press only forwards the item's
+ * press/release/click events; `value` changes solely when firmware calls
+ * the generated set_<group>()/clear_<group>(), which sends
+ * STATE_UPDATE(group, uint8 item widgetId). 0 = no selection. */
 Rectangle {
     id: root
     required property int    widgetId
     required property string label
     required property bool   enabled
-    required property var    value    /* active item widgetId or null */
+    required property var    value    /* selected item widgetId; 0 or null = none */
     required property var    props
     /* Every item in this group, as a real model (see
      * WidgetModel::childModel()) — supplied by WidgetDelegate.qml. */
@@ -109,6 +112,7 @@ Rectangle {
                     border.color: root.value === model.widgetId
                                   ? _itemStyle.button_text : _itemStyle.border
                     border.width: 1
+                    selected: root.value === model.widgetId
 
                     onButtonPressed:  controller.sendButtonPress(model.widgetId)
                     onButtonReleased: controller.sendButtonRelease(model.widgetId)
@@ -118,8 +122,8 @@ Rectangle {
                         anchors.centerIn: parent
                         text: model.label
                         /* button_text unconditionally — fill is always
-                         * _itemStyle.button (via ButtonFace's accentColor)
-                         * regardless of selection, so _itemStyle.text (meant
+                         * _itemStyle.button (via ButtonFace's accentColor),
+                         * darkened when selected, so _itemStyle.text (meant
                          * for the old dark "surface" fill) would be
                          * unreadable here. */
                         color: _itemStyle.button_text

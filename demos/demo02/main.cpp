@@ -29,6 +29,7 @@ static UDisplay ui;
 
 static float  g_base_rate_hz = 1.0f;
 static float  g_multiplier   = 1.0f;
+static ModeSelWidget::Item g_mode = ModeSelWidget::Item::slow;   /* confirmed mode_sel item */
 static int    g_enabled      = 1;
 static int    g_power_on     = 0;
 static double g_sim_time     = 0.0;
@@ -47,9 +48,19 @@ static void handle_power_btn()
     printf("[EVENT] power_btn  → power_led %s\n", g_power_on ? "ON" : "OFF");
 }
 
-static void handle_mode_sel_fast()  { g_multiplier = 2.0f; printf("[EVENT] mode_sel   → fast (2×)\n"); }
-static void handle_mode_sel_slow()  { g_multiplier = 1.0f; printf("[EVENT] mode_sel   → slow (1×)\n"); }
-static void handle_mode_sel_turbo() { g_multiplier = 0.5f; printf("[EVENT] mode_sel   → turbo (0.5×)\n"); }
+/* button-group selection is device-authoritative: a press only reports the
+ * tap; the firmware confirms it with mode_sel.set(), whose STATE_UPDATE is
+ * what moves the selection ring on the client. */
+static void select_mode(ModeSelWidget::Item item, float multiplier)
+{
+    g_mode       = item;
+    g_multiplier = multiplier;
+    ui.mode_sel.set(g_mode);
+}
+
+static void handle_mode_sel_fast()  { select_mode(ModeSelWidget::Item::fast,  2.0f); printf("[EVENT] mode_sel   → fast (2×)\n"); }
+static void handle_mode_sel_slow()  { select_mode(ModeSelWidget::Item::slow,  1.0f); printf("[EVENT] mode_sel   → slow (1×)\n"); }
+static void handle_mode_sel_turbo() { select_mode(ModeSelWidget::Item::turbo, 0.5f); printf("[EVENT] mode_sel   → turbo (0.5×)\n"); }
 
 static void handle_rate_slider(float v)
 {
@@ -109,6 +120,7 @@ static void on_tick(double dt_sec)
         ui.rate_slider.set(g_base_rate_hz);
         ui.enable_toggle.set((bool)g_enabled);
         ui.power_btn.power_led.set((bool)g_power_on);
+        ui.mode_sel.set(g_mode);
     }
 
     /* temp_display: 20 + 5·sin(t) °C */

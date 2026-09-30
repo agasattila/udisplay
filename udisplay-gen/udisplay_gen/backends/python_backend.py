@@ -72,7 +72,7 @@ _BUTTON_RESERVED_NAMES = {"_device", "_widget_id", "on_press", "on_release", "on
 
 # button-group items become `self.<path>.<item_key>` on a ButtonGroupWidget
 # instance — cross-reference against ButtonGroupWidget's own __init__ body.
-_BUTTON_GROUP_RESERVED_NAMES = {"_device", "_widget_id"}
+_BUTTON_GROUP_RESERVED_NAMES = {"_device", "_widget_id", "_items", "set", "clear"}
 
 
 def _validate_python_identifiers(ctx: BuildContext) -> None:
@@ -309,12 +309,28 @@ ButtonItem = ButtonWidget
 
 
 class ButtonGroupWidget:
-    # No .set() -- button-group has no real device-side setter in ANY
-    # backend yet (see TODOS.md TODO-006). Items are ButtonItem
-    # sub-attributes, assigned in UI.__init__ below.
+    # Exclusive selection is device-authoritative: an item press only fires
+    # that item's callbacks; firmware confirms with set(), which pushes
+    # STATE_UPDATE(group, uint8 item widget ID). Items are ButtonItem
+    # sub-attributes, assigned in UI.__init__ below along with _items, the
+    # tuple of their widget IDs.
     def __init__(self, device, widget_id):
         self._device = device
         self._widget_id = widget_id
+        self._items = ()
+    def set(self, item):
+        # item: one of this group's ButtonItem attributes (ui.mode.fast) or
+        # its WIDGET_ID_* constant. Anything else (another group's item, a
+        # stray int) raises ValueError -- the runtime counterpart of the C++
+        # per-group Item enum, instead of silently selecting nothing.
+        if isinstance(item, ButtonItem):
+            item = item._widget_id
+        if item not in self._items:
+            raise ValueError("not an item of this button-group")
+        self._device.send_uint8(self._widget_id, item)
+    def clear(self):
+        # 0 is a reserved widget ID, never a real item: no item selected.
+        self._device.send_uint8(self._widget_id, 0)
 '''.lstrip("\n")
 
 
@@ -341,10 +357,16 @@ def _py_instantiate(path: str, type_str: str, widget_types: dict, widget_ids: di
     const = f"WIDGET_ID_{_macro_name(path)}"
     lines = [f"        self.{path} = {cls}(self._device, {const})"]
     if type_str in ("button", "button-group"):
+        item_consts = []
         for sub_key, sub_type, sub_wid in _py_sub_members(path, widget_types, widget_ids):
             sub_cls = _WRAPPER_CLASS.get(sub_type, "LedWidget")
             sub_const = f"WIDGET_ID_{_macro_name(path + '.' + sub_key)}"
             lines.append(f"        self.{path}.{sub_key} = {sub_cls}(self._device, {sub_const})")
+            if sub_type == "button-group-item":
+                item_consts.append(sub_const)
+        if type_str == "button-group":
+            # Trailing comma keeps a one-item group a tuple.
+            lines.append(f"        self.{path}._items = ({''.join(c + ', ' for c in item_consts).rstrip()})")
     return lines
 
 

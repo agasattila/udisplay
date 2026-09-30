@@ -85,6 +85,9 @@ _SETTER_TYPES: dict[str, tuple[str, str]] = {
     "text-rw":           ("const char* s, uint8_t n", "udisplay_send_string"),
     "text-ro":           ("const char* s, uint8_t n", "udisplay_send_string"),
     "dropdown":          ("uint8_t index",             "udisplay_send_uint8"),
+    # Value is the selected item's widget ID (WIDGET_ID_<GROUP>_<ITEM>), or 0
+    # for "no selection" (0x00-0x0F are reserved, never a real item).
+    "button-group":      ("uint8_t item_id",           "udisplay_send_uint8"),
 }
 
 # Maps type_str -> list of (event_name_suffix, handler_arg_decl, dispatch_arg_expr)
@@ -110,6 +113,15 @@ _HANDLER_TYPES: dict[str, list[tuple[str, str, str]]] = {
 def _setter_for_type(type_str: str) -> Optional[tuple[str, str]]:
     """Return (arg_decl, send_fn) or None if this widget type has no setter."""
     return _SETTER_TYPES.get(type_str)
+
+
+def _setter_arg_names(arg_decl: str) -> str:
+    """'const char* s, uint8_t n' -> 's, n'. The generated setter body passes
+    its own parameters through, so the names must come from the declaration
+    (a hardcoded `v` broke every setter whose parameter isn't called `v`)."""
+    return ", ".join(
+        re.split(r"[\s*]+", part.strip())[-1] for part in arg_decl.split(",")
+    )
 
 
 def _handler_for_type(type_str: str) -> Optional[list[tuple[str, str, str]]]:

@@ -202,7 +202,23 @@ def _cpp_generated_classes(
                 lines += ["", "/* -- Generated per-widget derived classes ----------------------------------- */", ""]
                 header_emitted = True
             cn = _cpp_class_name(path)
-            lines += [f"class {cn} : public Widget {{", "public:"]
+            # Exclusive selection is device-authoritative: an item press only
+            # fires that item's handlers; firmware confirms via set(), which
+            # pushes STATE_UPDATE(group, uint8 item widget ID). Item values
+            # ARE the items' widget IDs; clear() sends 0 (reserved, no item).
+            lines += [
+                f"class {cn} : public Widget {{",
+                "public:",
+                "    enum class Item : uint8_t {",
+            ]
+            for idx, (sub_key, _, sw) in enumerate(sub):
+                comma = "," if idx < len(sub) - 1 else ""
+                lines.append(f"        {sub_key} = 0x{sw:02X}u{comma}")
+            lines += [
+                "    };",
+                "    void set(Item v) { udisplay_send_uint8(_ctx, _id, static_cast<uint8_t>(v)); }",
+                "    void clear()     { udisplay_send_uint8(_ctx, _id, 0u); }",
+            ]
             for sub_key, _, _ in sub:
                 lines.append(f"    ButtonItem {sub_key};")
             params = ["udisplay_t* ctx", "uint8_t group_id"] + [f"uint8_t {sk}_id" for sk, _, _ in sub]

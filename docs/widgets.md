@@ -107,7 +107,7 @@ udisplay-gen validate my_device.yaml   # exits 0 on success, non-zero with error
 | `led` | no | bool (STATE_UPDATE) | — | `set_X(udisplay_t* ctx, uint8_t v)` | — |
 | `rgbled` | no | int32 0x00RRGGBB (STATE_UPDATE) | — | `set_X(udisplay_t* ctx, int32_t rgb)` | — |
 | `button` | yes | — | BUTTON_PRESS / BUTTON_RELEASE / BUTTON_CLICK events | — | `on_X_press()`, `on_X_release()`, `on_X_click()` |
-| `button-group` | yes | — | BUTTON_PRESS / BUTTON_RELEASE / BUTTON_CLICK (per item) | — | — |
+| `button-group` | yes | uint8 selected item ID, 0 = none (STATE_UPDATE) | — (events come from the items) | `set_X(udisplay_t* ctx, uint8_t item_id)`, `clear_X(udisplay_t* ctx)` | — |
 | `button-group-item` | yes (child) | — | BUTTON_PRESS / BUTTON_RELEASE / BUTTON_CLICK events | — | `on_X_press()`, `on_X_release()`, `on_X_click()` |
 | `slider` | yes | float echo (STATE_UPDATE) | SLIDER_CHANGE event | `set_X(udisplay_t* ctx, float v)` | `on_X_change(float value)` |
 | `toggle` | yes | bool echo (STATE_UPDATE) | TOGGLE_CHANGE event | `set_X(udisplay_t* ctx, uint8_t v)` | `on_X_change(uint8_t state)` |
@@ -507,19 +507,41 @@ int main(/* ... */) {
 
 ### `button-group`
 
-Exclusive-select button group. Exactly one item is active at a time. Sends a
-BUTTON_PRESS event with the **item's** widget ID when the selection changes.
+Exclusive-select button group: at most one item is selected at a time.
 Renders as a wrapping grid. For a directional pad, use the [`dpad`](#dpad)
-container type instead — dpad has no selection/setter, so it doesn't belong
+container type instead. dpad has no selection/setter, so it doesn't belong
 here (a `button-group`'s only reason to exist as a distinct widget type,
 versus placing several `button`s in a grid, is its exclusive-select
 semantics).
 
-The group itself has no setter and no handler — events come from the items.
+Selection is **device-authoritative** (Design Principle 1). Pressing an item
+sends that item's ordinary BUTTON_PRESS / BUTTON_RELEASE / BUTTON_CLICK events
+with the **item's** widget ID. It does *not* select the item. The firmware
+decides whether to accept the selection and, if it does, calls the group's
+generated setter. The setter sends a STATE_UPDATE on the **group's** widget ID
+whose `uint8` value is the selected item's widget ID. Only then does the client
+move the selection ring. A rejected press simply never gets a STATE_UPDATE, so
+the previous selection stays visible.
 
 ```
-Client selects item ──BUTTON_PRESS(item_id)──► Device
+Client                                      Device (firmware)
+  │ user taps "Turbo"                          │
+  ├──EVENT(mode_sel.turbo, button_press)──────►│ on_mode_sel_turbo_press()
+  │   (no local selection change)              │   accept? ── no ──► nothing sent,
+  │                                            │   │yes               old selection stays
+  │                                            │ set_mode_sel(ctx, WIDGET_ID_MODE_SEL_TURBO)
+  │◄──STATE_UPDATE(mode_sel, uint8=turbo id)───┤
+  │ ring moves to "Turbo"                      │
+  │                                            │ clear_mode_sel(ctx)
+  │◄──STATE_UPDATE(mode_sel, uint8=0)──────────┤
+  │ no item selected                           │
 ```
+
+No item is selected until the device sends the first STATE_UPDATE, so push the
+initial selection from your client-ready callback. `0` means "no selection".
+IDs `0x00`–`0x0F` are reserved, so `0` can never be a real item. `set` and
+`clear` are reserved item names (they are methods on the generated C++ and
+Python group objects), so `udisplay-gen validate` rejects them.
 
 **Attributes:**
 
@@ -556,33 +578,63 @@ mode_sel:
 
 **Generated C API:**
 
-No setter for the group itself. Three handlers per item — wire up only the ones
-you need:
+`set_<group>(ctx, item_id)` selects an item and `clear_<group>(ctx)` deselects
+all. The symbolic item values are the items' own widget-ID macros
+(`WIDGET_ID_<GROUP>_<ITEM>`), so firmware never hardcodes a number. Each item
+also gets three handlers; wire up only the ones you need:
 
 ```c
 #include "udisplay.h"
 #include "udisplay_ui.h"
 
+static udisplay_t g_ctx;
 static int g_rate_multiplier = 1;
+static int g_turbo_allowed = 1;   /* e.g. cleared on over-temperature */
 
-static void handle_fast_click(void) { g_rate_multiplier = 2; }
-static void handle_slow_click(void) { g_rate_multiplier = 1; }
-static void handle_turbo_click(void) { g_rate_multiplier = 4; }
+static void handle_fast_press(void)
+{
+    g_rate_multiplier = 2;
+    set_mode_sel(&g_ctx, WIDGET_ID_MODE_SEL_FAST);    /* confirm selection */
+}
+
+static void handle_slow_press(void)
+{
+    g_rate_multiplier = 1;
+    set_mode_sel(&g_ctx, WIDGET_ID_MODE_SEL_SLOW);
+}
+
+static void handle_turbo_press(void)
+{
+    if (!g_turbo_allowed) return;                     /* rejected: no STATE_UPDATE,
+                                                         the old item stays selected */
+    g_rate_multiplier = 4;
+    set_mode_sel(&g_ctx, WIDGET_ID_MODE_SEL_TURBO);
+}
+
+static void handle_client_ready(void)
+{
+    set_mode_sel(&g_ctx, WIDGET_ID_MODE_SEL_SLOW);    /* initial selection */
+}
 
 static const udisplay_ui_handlers_t g_handlers = {
+    .on_client_ready         = handle_client_ready,
     // ...
-    .on_mode_sel_fast_click  = handle_fast_click,
-    .on_mode_sel_slow_click  = handle_slow_click,
-    .on_mode_sel_turbo_click = handle_turbo_click,
+    .on_mode_sel_fast_press  = handle_fast_press,
+    .on_mode_sel_slow_press  = handle_slow_press,
+    .on_mode_sel_turbo_press = handle_turbo_press,
     // ...
 };
+
+/* Elsewhere: drop the selection entirely */
+/*   clear_mode_sel(&g_ctx);                 */
 ```
 
 **Generated C++ API:**
 
-The group gets its own derived class holding one `ButtonItem` member per item —
-no separate group-level handler. Lambda handlers require `--lang cpp --modern`
-(see `button` above for why).
+The group gets its own derived class holding one `ButtonItem` member per item,
+plus a scoped `Item` enum (the values are the items' widget IDs) and
+`set(Item)` / `clear()`. Lambda handlers require `--lang cpp --modern` (see
+`button` above for why).
 
 ```cpp
 #include "udisplay.h"
@@ -595,10 +647,32 @@ static UDisplay ui;
 static int g_rate_multiplier = 1;
 
 int main(/* ... */) {
-    ui.mode_sel.fast.on_click  = []() { g_rate_multiplier = 2; };
-    ui.mode_sel.slow.on_click  = []() { g_rate_multiplier = 1; };
-    ui.mode_sel.turbo.on_click = []() { g_rate_multiplier = 4; };
+    ui.on_client_ready = []() { ui.mode_sel.set(ModeSelWidget::Item::slow); };
+
+    ui.mode_sel.fast.on_press  = []() { g_rate_multiplier = 2; ui.mode_sel.set(ModeSelWidget::Item::fast); };
+    ui.mode_sel.slow.on_press  = []() { g_rate_multiplier = 1; ui.mode_sel.set(ModeSelWidget::Item::slow); };
+    ui.mode_sel.turbo.on_press = []() { g_rate_multiplier = 4; ui.mode_sel.set(ModeSelWidget::Item::turbo); };
+
+    // ui.mode_sel.clear();   // no item selected
 }
+```
+
+**Generated MicroPython API:**
+
+`set()` takes the item attribute itself (or its `WIDGET_ID_*` constant);
+`clear()` deselects all.
+
+```python
+import ui
+
+u = ui.UI(send=my_send)
+
+def on_fast():
+    u.mode_sel.set(u.mode_sel.fast)     # confirm selection
+
+u.mode_sel.fast.on_press = on_fast
+u.on_client_ready = lambda: u.mode_sel.set(u.mode_sel.slow)   # initial selection
+# u.mode_sel.clear()                    # no item selected
 ```
 
 ---

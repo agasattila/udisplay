@@ -116,6 +116,89 @@ class TestGeneratedContent:
         assert "self.slider_rate.on_change" in ui_py
         assert "self.fire_btn.on_press" in ui_py
 
+    def test_button_group_set_and_clear_send_state_update(self, full_vocab_yaml, tmp_path):
+        """Device-authoritative selection: set() pushes the item's widget ID
+        (from the item object or its WIDGET_ID_* constant) as a uint8
+        STATE_UPDATE on the GROUP's ID; clear() pushes 0 (no item)."""
+        ctx = _make_ctx(full_vocab_yaml)
+        for f in python_backend.generate(ctx):
+            (tmp_path / f.name).write_text(f.content)
+        sys.path.insert(0, str(tmp_path))
+        try:
+            sys.modules.pop("ui", None)
+            sys.modules.pop("udisplay_runtime", None)
+            import ui as generated_ui
+
+            sent = []
+
+            class _FakeDevice:
+                def send_uint8(self, wid, value):
+                    sent.append((wid, value))
+
+            group = generated_ui.ButtonGroupWidget(_FakeDevice(), generated_ui.WIDGET_ID_MODE_SEL)
+            group.ac = generated_ui.ButtonItem(group._device, generated_ui.WIDGET_ID_MODE_SEL_AC)
+            group._items = (generated_ui.WIDGET_ID_MODE_SEL_AC, generated_ui.WIDGET_ID_MODE_SEL_DC)
+            group.set(group.ac)
+            group.set(generated_ui.WIDGET_ID_MODE_SEL_DC)
+            group.clear()
+            assert sent == [
+                (generated_ui.WIDGET_ID_MODE_SEL, generated_ui.WIDGET_ID_MODE_SEL_AC),
+                (generated_ui.WIDGET_ID_MODE_SEL, generated_ui.WIDGET_ID_MODE_SEL_DC),
+                (generated_ui.WIDGET_ID_MODE_SEL, 0),
+            ]
+        finally:
+            sys.path.remove(str(tmp_path))
+            sys.modules.pop("ui", None)
+            sys.modules.pop("udisplay_runtime", None)
+
+    def test_button_group_set_rejects_non_member(self, full_vocab_yaml, tmp_path):
+        """set() only accepts this group's own items (object or WIDGET_ID_*
+        constant) -- another group's ButtonItem or an arbitrary widget ID
+        raises ValueError and sends nothing, mirroring the C++ per-group
+        Item enum."""
+        ctx = _make_ctx(full_vocab_yaml)
+        for f in python_backend.generate(ctx):
+            (tmp_path / f.name).write_text(f.content)
+        sys.path.insert(0, str(tmp_path))
+        try:
+            sys.modules.pop("ui", None)
+            sys.modules.pop("udisplay_runtime", None)
+            import ui as generated_ui
+
+            sent = []
+
+            class _FakeDevice:
+                def send_uint8(self, wid, value):
+                    sent.append((wid, value))
+
+            u = generated_ui.UI(send=lambda _b: None)
+            assert u.mode_sel._items == (generated_ui.WIDGET_ID_MODE_SEL_AC,
+                                         generated_ui.WIDGET_ID_MODE_SEL_DC)
+            u.mode_sel._device = _FakeDevice()
+            u.mode_sel.set(u.mode_sel.dc)
+            n = len(sent)
+            assert n == 1
+            foreign = generated_ui.ButtonItem(u._device, generated_ui.WIDGET_ID_FIRE_BTN)
+            with pytest.raises(ValueError):
+                u.mode_sel.set(foreign)
+            with pytest.raises(ValueError):
+                u.mode_sel.set(generated_ui.WIDGET_ID_FIRE_BTN)
+            with pytest.raises(ValueError):
+                u.mode_sel.set(0)
+            assert len(sent) == n
+        finally:
+            sys.path.remove(str(tmp_path))
+            sys.modules.pop("ui", None)
+            sys.modules.pop("udisplay_runtime", None)
+
+    def test_button_group_items_tuple_generated(self, full_vocab_yaml):
+        ctx = _make_ctx(full_vocab_yaml)
+        ui_py = next(f for f in python_backend.generate(ctx) if f.name == "ui.py").content
+        assert "self.mode_sel._items = (WIDGET_ID_MODE_SEL_AC, WIDGET_ID_MODE_SEL_DC,)" in ui_py
+
+    def test_button_group_set_clear_item_names_reserved(self):
+        assert {"_items", "set", "clear"} <= python_backend._BUTTON_GROUP_RESERVED_NAMES
+
     def test_dispatch_button_group_items(self, full_vocab_yaml):
         ctx = _make_ctx(full_vocab_yaml)
         ui_py = next(f for f in python_backend.generate(ctx) if f.name == "ui.py").content

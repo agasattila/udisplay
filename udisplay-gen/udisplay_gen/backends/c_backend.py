@@ -12,7 +12,7 @@ from ..widget_ids import collect_dropdown_items
 from . import BuildContext, OutputFile
 from ._shared import (
     _macro_name, _fn_suffix,
-    _setter_for_type, _handler_for_type,
+    _setter_for_type, _setter_arg_names, _handler_for_type,
     _hex_rows, _HEADER_COMMENT,
     _config_fields, _config_designated_initializer,
     _ns_validate, _ns_macro, _ns_fn,
@@ -86,13 +86,15 @@ def _generate_header(ctx: BuildContext) -> str:
             arg_decl, send_fn = info
             fn = f"{ns}_set_{_fn_suffix(path)}" if ns else f"set_{_fn_suffix(path)}"
             macro = _ns_macro(ns, f"WIDGET_ID_{_macro_name(path)}")
-            if type_str in ("text-rw", "text-ro"):
-                body = f"{send_fn}(ctx, {macro}, s, n);"
-            else:
-                body = f"{send_fn}(ctx, {macro}, v);"
+            body = f"{send_fn}(ctx, {macro}, {_setter_arg_names(arg_decl)});"
             setters.append(
                 f"static inline void {fn}(udisplay_t* ctx, {arg_decl}) {{ {body} }}"
             )
+            if type_str == "button-group":
+                clear_fn = f"{ns}_clear_{_fn_suffix(path)}" if ns else f"clear_{_fn_suffix(path)}"
+                setters.append(
+                    f"static inline void {clear_fn}(udisplay_t* ctx) {{ {send_fn}(ctx, {macro}, 0u); }}"
+                )
 
         if setters:
             lines += [
