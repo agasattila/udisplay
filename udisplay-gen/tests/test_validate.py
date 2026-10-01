@@ -700,41 +700,6 @@ def test_style_on_button_group_item_unknown_stylesheet_rejected():
     assert any("nope" in e for e in errors)
 
 
-def test_style_duplicate_leaf_name_still_caught_for_button():
-    """Regression: the button branch added to _semantic_errors_in_map() must
-    fall through to the existing seen_names check for its OWN key, not
-    early-`continue` past it (the same mistake the CONTAINER_TYPES branch's
-    shape would produce if copied literally)."""
-    doc = {
-        "device": {"name": "x"},
-        "widgets": {
-            "dup": {"type": "button"},
-            "row1": {"type": "row", "widgets": {"dup": {"type": "toggle"}}},
-        },
-    }
-    errors = validate(doc, SCHEMA)
-    assert errors
-    assert any("dup" in e and "duplicate" in e for e in errors)
-
-
-def test_style_duplicate_leaf_name_still_caught_for_button_group_itself():
-    """Same regression, the button-group branch: it must ALSO fall through
-    to seen_names for its own key. Previously this was asserted by the test
-    name/docstring above without actually exercising a button-group widget —
-    caught by the pre-landing testing specialist during /ship."""
-    doc = {
-        "device": {"name": "x"},
-        "widgets": {
-            "dup": {"type": "button-group",
-                    "items": {"a": {"label": "A"}, "b": {"label": "B"}}},
-            "row1": {"type": "row", "widgets": {"dup": {"type": "toggle"}}},
-        },
-    }
-    errors = validate(doc, SCHEMA)
-    assert errors
-    assert any("dup" in e and "duplicate" in e for e in errors)
-
-
 def test_style_two_buttons_same_face_child_name_accepted():
     """Widget identity is compound-path-based (widget_ids.py's assign(),
     YamlParser.cpp's collectPathsRecursive()): "btn_a.icon" != "btn_b.icon".
@@ -988,11 +953,11 @@ def test_label_align_and_text_align_together():
     assert validate(doc, SCHEMA) == []
 
 
-# ── Semantic: duplicate leaf names ────────────────────────────────────────────
+# ── Semantic: widget names are local to their parent ────────────────────────────────────────────
 
-def test_duplicate_leaf_name_in_same_scope():
-    """Two widgets with the same key at the top level (impossible in YAML dict, caught by schema)."""
-    # YAML dicts deduplicate keys, so test cross-container duplication instead
+def test_leaf_name_reused_inside_a_section_valid():
+    """Keys are local to their parent: a top-level `relay` and a `relay` in
+    section `grp` are `relay` and `grp.relay`."""
     doc = {
         "device": {"name": "x"},
         "widgets": {
@@ -1003,12 +968,10 @@ def test_duplicate_leaf_name_in_same_scope():
             },
         },
     }
-    errors = semantic_errors(doc)
-    assert errors
-    assert any("relay" in e and "duplicate" in e for e in errors)
+    assert semantic_errors(doc) == []
 
 
-def test_duplicate_leaf_name_across_nested_containers():
+def test_same_leaf_name_in_two_sections_valid():
     doc = {
         "device": {"name": "x"},
         "widgets": {
@@ -1022,9 +985,7 @@ def test_duplicate_leaf_name_across_nested_containers():
             },
         },
     }
-    errors = semantic_errors(doc)
-    assert errors
-    assert any("volt" in e for e in errors)
+    assert semantic_errors(doc) == []
 
 
 def test_unique_leaf_names_across_containers_valid():

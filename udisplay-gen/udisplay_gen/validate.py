@@ -159,22 +159,18 @@ def _check_style_ref(style_ref: str | None, style_names: set[str],
 
 
 def _semantic_errors_in_map(widgets: dict, path_prefix: str,
-                            seen_names: set[str], style_names: set[str]) -> list[str]:
+                            style_names: set[str]) -> list[str]:
     """
     Recursive semantic check for a widget map.
     - slider min < max
     - dpad's button children must all have position
-    - widget names (containers and decorations included — every widget gets
-      a widget ID, issue #43) globally unique across all container scopes
-      (scoped to CONTAINER_TYPES's transparent-prefix subtree — see the
-      `button` branch below for why a `button`'s own face children get a
-      FRESH local scope instead of sharing this one)
-    - style: names a declared stylesheet
-    - button face children and button-group items — previously invisible to
-      every check above (CONTAINER_TYPES never included button/button-group,
-      so this function never recursed into them) — now get the style check
-      too, closing a pre-existing gap independent of button's own style:
-      acceptance
+    - style: names a declared stylesheet (containers, button face children
+      and button-group items included)
+
+    Widget names need no uniqueness check beyond YAML's own: a widget's ID
+    path is the chain of keys from the top level (`section.row.leaf`), so
+    keys only have to be unique among siblings, which a YAML mapping already
+    guarantees.
     """
     errors: list[str] = []
 
@@ -185,19 +181,6 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
         widget_path = f"{path_prefix}.{key}" if path_prefix else f"widgets.{key}"
 
         errors.extend(_check_style_ref(widget.get("style"), style_names, widget_path))
-
-        # Every widget — container, decoration or leaf — takes a slot in the
-        # widget-ID namespace of this scope (issue #43), so its name must be
-        # unique here. Checked before recursing so a container's own name is
-        # seen before its children's.
-        if key in seen_names:
-            errors.append(
-                f"  {widget_path}: duplicate widget name `{key}` — "
-                f"widget names (containers and labels included) must be globally "
-                f"unique across all container scopes"
-            )
-        else:
-            seen_names.add(key)
 
         if wtype in CONTAINER_TYPES:
             sub_widgets = widget.get("widgets", {})
@@ -211,33 +194,17 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
                         f"  {widget_path}: dpad requires `position` on every child "
                         f"button; missing: {', '.join(missing)}"
                     )
-            errors.extend(_semantic_errors_in_map(sub_widgets, widget_path, seen_names, style_names))
+            errors.extend(_semantic_errors_in_map(sub_widgets, widget_path, style_names))
             continue
 
         if wtype == "button":
-            # `button` is NOT a prefix-transparent container (widget_ids.py's
-            # assign() and YamlParser.cpp's collectPathsRecursive() both key
-            # identity on the full compound path, e.g. "button_a.icon" !=
-            # "button_b.icon") — unlike CONTAINER_TYPES, where a short key IS
-            # the full identity path. Recursing with the GLOBAL seen_names
-            # set would reject valid YAML where two different buttons each
-            # have a same-named face child (e.g. "icon") as a false
-            # duplicate. A fresh, button-local set still correctly catches
-            # the real collision case: two sibling containers *inside this
-            # same button's face* reusing a name.
             errors.extend(_semantic_errors_in_map(
-                widget.get("widgets", {}), widget_path, set(), style_names))
-            # The button's OWN key was already checked against the
-            # global/outer scope above, like every other widget.
+                widget.get("widgets", {}), widget_path, style_names))
 
         if wtype == "button-group":
             # Items are hand-built (no `type:` key, per buttonGroupItem's
             # schema) and have no sub-widgets of their own to recurse into —
-            # just check each item's own style: ref. No name-uniqueness
-            # check is needed here: YAML mapping keys are already unique
-            # within one button-group, and different groups never share a
-            # path prefix (each gets its own "group_key.item_key"), so
-            # there's nothing for seen_names to usefully catch across items.
+            # just check each item's own style: ref.
             for item_key, item in widget.get("items", {}).items():
                 if not isinstance(item, dict):
                     continue
@@ -250,8 +217,6 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
                         f"button-group item name (generated C++/Python groups have "
                         f"`{item_key}()` methods); rename this item"
                     )
-            # The group's OWN key was already checked against the
-            # global/outer scope above, like every other widget.
 
         if wtype == "slider":
             mn, mx = widget.get("min"), widget.get("max")
@@ -268,16 +233,14 @@ def semantic_errors(doc: dict) -> list[str]:
     Semantic checks not expressible in JSON Schema:
     - slider min < max
     - dpad's button children must all have position
-    - leaf names globally unique across all container scopes
     - style: names a declared stylesheet
     """
-    seen: set[str] = set()
     # "default" is always implicitly valid, even with no style: block at all
     # — matches udisplay-client's YamlParser.cpp parseStyles(), which always
     # populates a "default" entry (from the style.default: block if present,
     # else hardcoded StyleToken C++ defaults).
     style_names = set(doc.get("style", {}).keys()) | {"default"}
-    return _semantic_errors_in_map(doc.get("widgets", {}), "", seen, style_names)
+    return _semantic_errors_in_map(doc.get("widgets", {}), "", style_names)
 
 
 def validate(doc: dict, schema: dict | None = None,

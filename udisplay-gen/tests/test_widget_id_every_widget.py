@@ -1,9 +1,12 @@
 """Issue #43: every widget gets a widget ID — containers (section/row/grid/
 dpad) and decorations (label/separator) included — so firmware can target any
-node with SET_PROPERTY / RESET_PROPERTY. Covers ID assignment, validation,
+node with SET_PROPERTY / RESET_PROPERTY. Container keys are segments of
+their descendants' ID paths (`panel.power_btn.face_row.icon`), and the
+generated object APIs nest the same way. Covers ID assignment, validation,
 and every backend's generated API (docs/designs/widget-id-for-every-widget.md).
 """
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -95,9 +98,11 @@ widgets:
 """
 
 EXPECTED_PATHS = {
-    "panel", "title", "power_btn", "power_btn.face_row", "power_btn.icon",
-    "power_btn.caption", "power_btn.status", "meters", "amps", "rate",
-    "zone", "relay", "sep", "net", "ssid", "pad", "up_btn", "down_btn",
+    "panel", "panel.title", "panel.power_btn", "panel.power_btn.face_row",
+    "panel.power_btn.face_row.icon", "panel.power_btn.face_row.caption",
+    "panel.power_btn.status", "meters", "meters.amps", "meters.rate",
+    "zone", "zone.relay", "zone.sep", "zone.net", "zone.ssid",
+    "pad", "pad.up_btn", "pad.down_btn",
     "mode_sel", "mode_sel.dc", "mode_sel.ac",
 }
 
@@ -138,10 +143,13 @@ class TestAssign:
         ids = assign(_widgets())
         assert [ids[p] for p in sorted(ids)] == list(range(0x10, 0x10 + len(ids)))
 
-    def test_containers_transparent_to_children_paths(self):
+    def test_container_keys_are_path_segments(self):
+        """Every ancestor's key is part of a widget's path — containers
+        included, at any depth (a row on a button face too)."""
         ids = assign(_widgets())
-        assert not any(p.startswith(("panel.", "meters.", "zone.", "pad.")) for p in ids)
-        assert "power_btn.icon" in ids and "power_btn.face_row.icon" not in ids
+        assert "panel.power_btn.face_row.icon" in ids
+        assert "power_btn.icon" not in ids and "icon" not in ids
+        assert "pad.up_btn" in ids and "up_btn" not in ids
 
     def test_types_reported_for_containers_and_decorations(self):
         types = collect_types(_widgets())
@@ -149,32 +157,41 @@ class TestAssign:
         assert types["meters"] == "row"
         assert types["zone"] == "grid"
         assert types["pad"] == "dpad"
-        assert types["title"] == "label"
-        assert types["sep"] == "separator"
-        assert types["power_btn.face_row"] == "row"
-        assert types["power_btn.caption"] == "label"
+        assert types["panel.title"] == "label"
+        assert types["zone.sep"] == "separator"
+        assert types["panel.power_btn.face_row"] == "row"
+        assert types["panel.power_btn.face_row.caption"] == "label"
         assert set(types) == EXPECTED_PATHS
 
     def test_dropdown_items_still_get_no_id(self):
         ids = assign({"dd": {"type": "dropdown", "items": {"a": "A", "b": "B"}}})
         assert ids == {"dd": 0x10}
 
-    def test_container_name_colliding_with_leaf_raises(self):
-        """A section named like a slider in another section resolves to the
-        same path — must raise, not silently share one ID."""
+    def test_container_name_reused_by_leaf_in_another_section_allowed(self):
+        """Keys are local to their parent: a section `advanced` and a slider
+        `advanced` in another section are distinct paths."""
         widgets = {
             "advanced": {"type": "section", "widgets": {"x": {"type": "toggle"}}},
             "basic": {"type": "section", "widgets": {"advanced": {"type": "slider"}}},
         }
-        with pytest.raises(ValueError, match="'advanced'"):
-            assign(widgets)
+        ids = assign(widgets)
+        assert {"advanced", "advanced.x", "basic", "basic.advanced"} == set(ids)
 
-    def test_label_name_colliding_across_sections_raises(self):
+    def test_same_label_name_in_two_sections_allowed(self):
         widgets = {
             "a": {"type": "section", "widgets": {"hdr": {"type": "label", "text": "A"}}},
             "b": {"type": "section", "widgets": {"hdr": {"type": "label", "text": "B"}}},
         }
-        with pytest.raises(ValueError, match="'hdr'"):
+        ids = assign(widgets)
+        assert ids["a.hdr"] != ids["b.hdr"]
+
+    def test_dotted_key_shadowing_a_nested_path_raises(self):
+        """Only a key containing '.' (rejected by the schema) can collide."""
+        widgets = {
+            "a": {"type": "section", "widgets": {"b": {"type": "led"}}},
+            "a.b": {"type": "led"},
+        }
+        with pytest.raises(ValueError, match="'a.b'"):
             assign(widgets)
 
     def test_cap_counts_containers(self):
@@ -192,22 +209,20 @@ class TestValidate:
     def test_every_widget_fixture_is_valid(self):
         assert semantic_errors(pyyaml.safe_load(EVERY_WIDGET_YAML)) == []
 
-    def test_container_name_colliding_with_leaf_rejected(self):
+    def test_container_name_reused_by_leaf_in_another_section_valid(self):
         doc = {"widgets": {
             "advanced": {"type": "section", "widgets": {"x": {"type": "toggle"}}},
             "basic": {"type": "section", "widgets": {"advanced": {"type": "slider",
                                                                   "min": 0, "max": 1}}},
         }}
-        errs = semantic_errors(doc)
-        assert any("duplicate widget name `advanced`" in e for e in errs), errs
+        assert semantic_errors(doc) == []
 
-    def test_label_name_colliding_with_leaf_rejected(self):
+    def test_label_in_row_named_like_top_level_leaf_valid(self):
         doc = {"widgets": {
             "row1": {"type": "row", "widgets": {"volt": {"type": "label", "text": "V"}}},
             "volt": {"type": "display"},
         }}
-        errs = semantic_errors(doc)
-        assert any("duplicate widget name `volt`" in e for e in errs), errs
+        assert semantic_errors(doc) == []
 
     def test_same_face_child_name_in_two_buttons_still_allowed(self):
         doc = {"widgets": {
@@ -223,15 +238,18 @@ class TestCBackend:
     def test_macro_for_every_widget(self, tmp_path):
         header = (_build(tmp_path, "c") / "udisplay_ui.h").read_text()
         for macro in ("WIDGET_ID_PANEL", "WIDGET_ID_METERS", "WIDGET_ID_ZONE", "WIDGET_ID_PAD",
-                      "WIDGET_ID_TITLE", "WIDGET_ID_SEP", "WIDGET_ID_POWER_BTN_FACE_ROW",
-                      "WIDGET_ID_POWER_BTN_CAPTION"):
+                      "WIDGET_ID_PANEL_TITLE", "WIDGET_ID_ZONE_SEP",
+                      "WIDGET_ID_PANEL_POWER_BTN_FACE_ROW",
+                      "WIDGET_ID_PANEL_POWER_BTN_FACE_ROW_CAPTION",
+                      "WIDGET_ID_METERS_RATE", "WIDGET_ID_PAD_UP_BTN"):
             assert f"#define {macro} " in header, macro
 
     def test_no_typed_api_for_containers_or_decorations(self, tmp_path):
         header = (_build(tmp_path, "c") / "udisplay_ui.h").read_text()
-        for name in ("panel", "meters", "zone", "pad", "title", "sep"):
+        for name in ("panel", "meters", "zone", "pad", "panel_title", "zone_sep"):
             assert f"set_{name}(" not in header
-            assert f"on_{name}_" not in header
+            assert not re.search(rf"on_{name}_(press|release|click|change|submit)\b",
+                                 header), name
 
 
 # ── C++ backend ──────────────────────────────────────────────────────────────
@@ -240,12 +258,23 @@ class TestCppBackend:
     def _header(self, tmp_path, extra_args=()):
         return (_build(tmp_path, "cpp", extra_args=extra_args) / "udisplay_ui.hpp").read_text()
 
-    def test_containers_and_decorations_are_widget_members(self, tmp_path):
+    def test_containers_get_classes_holding_their_children(self, tmp_path):
+        """A container is a namespace: its own generated class, with its
+        children as members (ui.meters.rate)."""
         header = self._header(tmp_path)
-        for name in ("panel", "title", "meters", "zone", "sep", "pad"):
-            assert f"    Widget {name};" in header, name
+        for cls, name in (("PanelWidget", "panel"), ("MetersWidget", "meters"),
+                          ("ZoneWidget", "zone"), ("PadWidget", "pad")):
+            assert f"class {cls} : public Widget {{" in header, cls
+            assert f"    {cls} {name};" in header, name
+        assert "    SliderWidget rate;" in header
+        assert "    ToggleWidget relay;" in header
 
-    def test_top_level_dpad_children_are_members(self, tmp_path):
+    def test_decorations_are_widget_members(self, tmp_path):
+        header = self._header(tmp_path)
+        assert "    Widget title;" in header
+        assert "    Widget sep;" in header
+
+    def test_dpad_children_are_members(self, tmp_path):
         """Regression (A2): the C++ member walk's old local container set
         lacked "dpad", so a top-level dpad's buttons were never members."""
         header = self._header(tmp_path)
@@ -253,13 +282,27 @@ class TestCppBackend:
         assert "    ButtonWidget down_btn;" in header
 
     def test_face_sub_members_typed_by_their_own_type(self, tmp_path):
-        """Regression (A3): every face child used to be emitted as LedWidget."""
+        """Regression (A3): every face child used to be emitted as LedWidget.
+        A face row is a namespace like any container."""
         header = self._header(tmp_path)
+        assert "class PanelPowerBtnWidget : public ButtonWidget {" in header
+        assert "    PanelPowerBtnFaceRowWidget face_row;" in header
         assert "    LedWidget icon;" in header
         assert "    RgbLedWidget status;" in header
         assert "    Widget caption;" in header
-        assert "    Widget face_row;" in header
         assert "LedWidget caption;" not in header
+
+    def test_classes_emitted_before_their_users(self, tmp_path):
+        header = self._header(tmp_path)
+        assert (header.index("class PanelPowerBtnFaceRowWidget ")
+                < header.index("class PanelPowerBtnWidget ")
+                < header.index("class PanelWidget "))
+
+    def test_nested_dispatch_uses_full_member_path(self, tmp_path):
+        header = self._header(tmp_path)
+        assert "self->meters.rate.on_change(ev->slider_value)" in header
+        assert "self->pad.up_btn.on_click()" in header
+        assert "self->mode_sel.ac.on_click()" in header
 
     def test_widget_base_exposes_property_api(self, tmp_path):
         header = self._header(tmp_path)
@@ -282,6 +325,20 @@ class TestCppBackend:
     def test_face_child_shadowing_widget_api_rejected(self, name):
         text = EVERY_WIDGET_YAML.replace("          status:\n", f"          {name}:\n")
         with pytest.raises(ValueError, match=f"'{name}' collides"):
+            cpp_backend.generate(_ctx(text))
+
+    @pytest.mark.parametrize("name", ["set_property", "id"])
+    def test_container_child_shadowing_widget_api_rejected(self, name):
+        text = EVERY_WIDGET_YAML.replace("      amps:\n", f"      {name}:\n")
+        with pytest.raises(ValueError, match=f"'{name}' collides"):
+            cpp_backend.generate(_ctx(text))
+
+    def test_class_name_collision_rejected(self):
+        """`meters_amps` and `meters.amps` would both be MetersAmpsWidget /
+        WIDGET_ID_METERS_AMPS."""
+        text = EVERY_WIDGET_YAML.replace(
+            "  zone:\n", "  meters_amps:\n    type: led\n  zone:\n")
+        with pytest.raises(ValueError, match="WIDGET_ID_METERS_AMPS"):
             cpp_backend.generate(_ctx(text))
 
 
@@ -313,8 +370,11 @@ class TestGeneratedCompiles:
             "static udisplay_ui::UDisplay ui;\n"
             "void use() {\n"
             "    ui.panel.set_property(UDISPLAY_PROP_VISIBLE, 0);\n"
-            "    ui.power_btn.caption.reset_property(UDISPLAY_PROP_VISIBLE);\n"
-            "    ui.up_btn.set_property(UDISPLAY_PROP_ENABLED, ui.pad.id());\n"
+            "    ui.panel.power_btn.face_row.caption.reset_property(UDISPLAY_PROP_VISIBLE);\n"
+            "    ui.panel.power_btn.status.set(0x00FF00u);\n"
+            "    ui.pad.up_btn.set_property(UDISPLAY_PROP_ENABLED, ui.pad.id());\n"
+            "    ui.meters.rate.set(1.0f);\n"
+            "    ui.mode_sel.set(udisplay_ui::ModeSelWidget::Item::ac);\n"
             "}\n")
         self._check("g++", tu, "-std=c++17")
 
@@ -324,11 +384,15 @@ class TestGeneratedCompiles:
 class TestPythonBackend:
     def test_containers_and_decorations_are_widget_members(self, tmp_path):
         ui_py = (_build(tmp_path, "micropython") / "ui.py").read_text()
-        for name in ("panel", "title", "meters", "zone", "sep", "pad"):
-            assert f"self.{name} = Widget(self._device, WIDGET_ID_{name.upper()})" in ui_py
-        assert "self.power_btn.caption = Widget(" in ui_py
-        assert "self.power_btn.icon = LedWidget(" in ui_py
-        assert "self.up_btn = ButtonWidget(" in ui_py
+        for name in ("panel", "meters", "zone", "pad"):
+            assert (f"self.{name} = ContainerWidget(self._device, "
+                    f"WIDGET_ID_{name.upper()})") in ui_py
+        assert "self.panel.title = Widget(self._device, WIDGET_ID_PANEL_TITLE)" in ui_py
+        assert "self.zone.sep = Widget(self._device, WIDGET_ID_ZONE_SEP)" in ui_py
+        assert "self.panel.power_btn.face_row = ContainerWidget(" in ui_py
+        assert "self.panel.power_btn.face_row.caption = Widget(" in ui_py
+        assert "self.panel.power_btn.face_row.icon = LedWidget(" in ui_py
+        assert "self.pad.up_btn = ButtonWidget(" in ui_py
 
     def test_set_property_on_container_sends_set_property(self, tmp_path):
         out = _build(tmp_path, "micropython")
@@ -347,15 +411,26 @@ class TestPythonBackend:
             sent.clear()
 
             u.panel.set_property(UDISPLAY_PROP_VISIBLE, 0)
-            u.power_btn.caption.reset_property(UDISPLAY_PROP_VISIBLE)
-            u.relay.set_property(UDISPLAY_PROP_ENABLED, 0)
+            u.panel.power_btn.face_row.caption.reset_property(UDISPLAY_PROP_VISIBLE)
+            u.zone.relay.set_property(UDISPLAY_PROP_ENABLED, 0)
             payloads = [tcp_unframe(m)[0] for m in sent]
             assert payloads == [
                 bytes([0x32, generated_ui.WIDGET_ID_PANEL, UDISPLAY_PROP_VISIBLE, 0]),
-                bytes([0x33, generated_ui.WIDGET_ID_POWER_BTN_CAPTION, UDISPLAY_PROP_VISIBLE]),
-                bytes([0x32, generated_ui.WIDGET_ID_RELAY, UDISPLAY_PROP_ENABLED, 0]),
+                bytes([0x33, generated_ui.WIDGET_ID_PANEL_POWER_BTN_FACE_ROW_CAPTION,
+                       UDISPLAY_PROP_VISIBLE]),
+                bytes([0x32, generated_ui.WIDGET_ID_ZONE_RELAY, UDISPLAY_PROP_ENABLED, 0]),
             ]
             assert u.pad.id == generated_ui.WIDGET_ID_PAD
+
+            # Events reach nested members.
+            clicks, rates = [], []
+            u.pad.up_btn.on_click = lambda: clicks.append("up")
+            u.meters.rate.on_change = rates.append
+            u._on_event(generated_ui.WIDGET_ID_PAD_UP_BTN,
+                        generated_ui.UDISPLAY_EVENT_BUTTON_CLICK, None)
+            u._on_event(generated_ui.WIDGET_ID_METERS_RATE,
+                        generated_ui.UDISPLAY_EVENT_SLIDER_CHANGE, 2.5)
+            assert clicks == ["up"] and rates == [2.5]
         finally:
             sys.path.remove(str(out))
             for mod in ("ui", "udisplay_runtime"):
@@ -364,6 +439,11 @@ class TestPythonBackend:
     @pytest.mark.parametrize("name", ["set_property", "reset_property", "id"])
     def test_face_child_shadowing_widget_api_rejected(self, name):
         text = EVERY_WIDGET_YAML.replace("          status:\n", f"          {name}:\n")
+        with pytest.raises(ValueError, match="reserved"):
+            python_backend.generate(_ctx(text))
+
+    def test_container_child_shadowing_widget_api_rejected(self):
+        text = EVERY_WIDGET_YAML.replace("      amps:\n", "      set_property:\n")
         with pytest.raises(ValueError, match="reserved"):
             python_backend.generate(_ctx(text))
 
@@ -381,11 +461,11 @@ class TestCSetterParamFix:
         to forward an undeclared `v`. Text check so it fails fast even where
         the gcc compile test is skipped."""
         header = (_build(tmp_path, "c") / "udisplay_ui.h").read_text()
-        assert ("set_power_btn_status(udisplay_t* ctx, int32_t rgb) "
-                "{ udisplay_send_int(ctx, WIDGET_ID_POWER_BTN_STATUS, rgb); }") in header
-        assert ("set_net(udisplay_t* ctx, uint8_t index) "
-                "{ udisplay_send_uint8(ctx, WIDGET_ID_NET, index); }") in header
-        assert "udisplay_send_float(ctx, WIDGET_ID_AMPS, v);" in header
+        assert ("set_panel_power_btn_status(udisplay_t* ctx, int32_t rgb) "
+                "{ udisplay_send_int(ctx, WIDGET_ID_PANEL_POWER_BTN_STATUS, rgb); }") in header
+        assert ("set_zone_net(udisplay_t* ctx, uint8_t index) "
+                "{ udisplay_send_uint8(ctx, WIDGET_ID_ZONE_NET, index); }") in header
+        assert "udisplay_send_float(ctx, WIDGET_ID_METERS_AMPS, v);" in header
 
 
 class TestReservedNamesExtra:
@@ -440,21 +520,19 @@ class TestShipAuditGaps:
         with pytest.raises(ValueError, match="Python keyword"):
             python_backend.generate(_ctx(text))
 
-    def test_container_name_colliding_with_container_rejected(self):
-        """Two containers sharing a name in different transparent scopes
-        both take the same ID path — validate must catch it, not just
-        container-vs-leaf."""
+    def test_same_container_name_in_two_sections_allowed(self):
+        """Two containers sharing a name in different sections are distinct
+        namespaces, down to their own children."""
         doc = {"widgets": {
             "a": {"type": "section", "widgets": {
                 "strip": {"type": "row", "widgets": {"x": {"type": "led"}}}}},
             "b": {"type": "section", "widgets": {
                 "strip": {"type": "grid", "columns": 2,
-                          "widgets": {"y": {"type": "led"}}}}},
+                          "widgets": {"x": {"type": "led"}}}}},
         }}
-        errs = semantic_errors(doc)
-        assert any("duplicate widget name `strip`" in e for e in errs), errs
-        with pytest.raises(ValueError, match="'strip'"):
-            assign(doc["widgets"])
+        assert semantic_errors(doc) == []
+        ids = assign(doc["widgets"])
+        assert {"a.strip", "a.strip.x", "b.strip", "b.strip.x"} <= set(ids)
 
     def test_cap_counts_decorations(self):
         """Decorations consume an ID slot too — 240 leds + 1 label overflow."""

@@ -10,77 +10,68 @@ button-group items alike — so SET_PROPERTY / RESET_PROPERTY can target any
 node of the widget tree. Dropdown items are options, not widgets, and get no
 ID.
 
-IDs are assigned alphabetically by ID path, starting at 0x10. Containers are
-transparent to their CHILDREN's paths (a container's own key is never a
-segment of a child's path), but the container itself gets an ID under its
-own key at the position it occupies — exactly like a leaf would.
+IDs are assigned alphabetically by ID path, starting at 0x10. A widget's ID
+path is the chain of YAML keys from the top level down to it: every widget
+with children (section, row, grid, dpad, a button face, a button-group's
+items) is a namespace for them, so `settings.advanced.rate` is the `rate`
+slider in the `advanced` row of the `settings` section. Widget keys only
+need to be unique among their siblings.
 
 See docs/protocol.md § Widget ID Assignment.
 """
 from __future__ import annotations
 
+from typing import NamedTuple
+
 ID_START = 0x10
 ID_MAX = 0xFF
 MAX_WIDGETS = ID_MAX - ID_START + 1  # 240
 
-# Layout containers — transparent to their children's ID paths. Single source
-# of truth for validate.py and the cpp/python backends (TODO-007).
+# Layout containers. Single source of truth for validate.py and the
+# backends (TODO-007).
 CONTAINER_TYPES = frozenset({"section", "row", "grid", "dpad"})
 
 
-def ordered_member_paths(widgets_yaml: dict, widget_types: dict) -> list:
-    """Every top-level generated member path (C++ `UDisplay` / MicroPython
-    `UI`) in YAML declaration order.
-
-    Every widget is a member (issue #43), containers and decorations too. A
-    container's children follow it at the same (unprefixed) level, since
-    containers are transparent to their children's ID paths. Button face
-    children and button-group items are sub-members of their parent's
-    generated class instead."""
-    result: list = []
-    for key, widget in widgets_yaml.items():
-        if not isinstance(widget, dict):
-            continue
-        if key in widget_types:
-            result.append(key)
-        if widget.get("type", "") in CONTAINER_TYPES:
-            for child_path in ordered_member_paths(widget.get("widgets", {}), widget_types):
-                if child_path not in result:
-                    result.append(child_path)
-    return result
+class WidgetNode(NamedTuple):
+    """One widget of the YAML tree: its own key, its full ID path, and its
+    children (widget-map children and button-group items) in YAML
+    declaration order."""
+    key: str
+    path: str
+    children: tuple
 
 
-def _collect(widgets: dict, prefix: str = "") -> list[str]:
-    """
-    Recursively collect every widget's ID path.
-
-    - Every widget map entry gets a path: `<prefix>.<key>` (or `<key>` at the
-      top level / under top-level containers).
-    - Containers (section/row/grid/dpad) recurse with the SAME prefix — their
-      own name is excluded from their children's paths.
-    - Any other widget with `widgets:` (a button face) recurses with its own
-      path as the prefix, so face children are `<button>.<child>`; a
-      container on a face (`btn.face_row`) is again transparent to its own
-      children (`btn.icon`).
-    - button-group items get `<group>.<item>`; dropdown items get nothing.
-    """
-    paths: list[str] = []
+def widget_tree(widgets: dict, prefix: str = "") -> list:
+    """The widget tree as WidgetNodes, in YAML declaration order — every
+    node that gets an ID in _collect(), shaped the way the generated
+    object APIs (C++ `UDisplay`, MicroPython `UI`) nest their members."""
+    nodes: list = []
     for key, widget in widgets.items():
         if not isinstance(widget, dict):
             continue
-        wtype = widget.get("type", "")
-
         path = f"{prefix}.{key}" if prefix else key
-        paths.append(path)
+        children = widget_tree(widget.get("widgets", {}), path)
+        if widget.get("type", "") == "button-group":
+            children += [WidgetNode(item_key, f"{path}.{item_key}", ())
+                         for item_key in widget.get("items", {})]
+        nodes.append(WidgetNode(key, path, tuple(children)))
+    return nodes
 
-        child_prefix = prefix if wtype in CONTAINER_TYPES else path
-        paths.extend(_collect(widget.get("widgets", {}), child_prefix))
 
-        if wtype == "button-group":
-            for item_key in widget.get("items", {}):
-                paths.append(f"{path}.{item_key}")
+def walk(nodes) -> list:
+    """Every node of a widget_tree(), parents before children."""
+    result: list = []
+    for node in nodes:
+        result.append(node)
+        result.extend(walk(node.children))
+    return result
 
-    return paths
+
+def _collect(widgets: dict) -> list[str]:
+    """Every widget's ID path: `<parent path>.<key>`, or `<key>` at the top
+    level. button-group items get `<group>.<item>`; dropdown items are
+    options, not widgets, and get nothing."""
+    return [node.path for node in walk(widget_tree(widgets))]
 
 
 def collect_types(widgets: dict, prefix: str = "") -> dict[str, str]:
@@ -107,8 +98,7 @@ def collect_types(widgets: dict, prefix: str = "") -> dict[str, str]:
         else:
             result[path] = wtype
 
-        child_prefix = prefix if wtype in CONTAINER_TYPES else path
-        result.update(collect_types(widget.get("widgets", {}), child_prefix))
+        result.update(collect_types(widget.get("widgets", {}), path))
 
         if wtype == "button-group":
             for item_key in widget.get("items", {}):
@@ -127,12 +117,8 @@ def collect_dropdown_items(widgets: dict, prefix: str = "") -> dict[str, list[tu
         if not isinstance(widget, dict):
             continue
         wtype = widget.get("type", "")
-
-        if wtype in CONTAINER_TYPES:
-            result.update(collect_dropdown_items(widget.get("widgets", {}), prefix))
-            continue
-
         path = f"{prefix}.{key}" if prefix else key
+        result.update(collect_dropdown_items(widget.get("widgets", {}), path))
         if wtype == "dropdown":
             items = widget.get("items", {})
             # str() guards against YAML 1.1 boolean/int key coercion (e.g. `off:` → False)
@@ -146,12 +132,10 @@ def assign(widgets: dict) -> dict[str, int]:
     Return a mapping of id_path → widget_id for every widget.
 
     Raises ValueError if widget count exceeds 240 (containers and decorations
-    count too), or if two widgets resolve to the same id_path. Containers
-    don't contribute their own name to their children's paths, so two
-    same-named widgets under different containers sharing a transparent-
-    prefix ancestor collide — including a container whose own name equals a
-    widget's name elsewhere in the same scope (e.g. a section `advanced` and
-    a slider `advanced` in another section).
+    count too), or if two widgets resolve to the same id_path. Valid YAML
+    can't produce a duplicate (every parent's key is a path segment of its
+    children, and the schema forbids '.' in keys); the check guards input
+    that skipped schema validation.
     """
     paths = sorted(_collect(widgets))
     if len(paths) > MAX_WIDGETS:
@@ -164,10 +148,7 @@ def assign(widgets: dict) -> dict[str, int]:
         if path in seen:
             raise ValueError(
                 f"Duplicate widget ID path '{path}' — two widgets resolve to the same "
-                f"protocol ID. Widget names (containers and labels included) must be "
-                f"unique across sibling containers (section/row/grid/dpad, or a "
-                f"button face's nested containers) that share a transparent-prefix "
-                f"ancestor."
+                f"protocol ID. Widget keys must not contain '.'."
             )
         seen.add(path)
     return {path: ID_START + i for i, path in enumerate(paths)}

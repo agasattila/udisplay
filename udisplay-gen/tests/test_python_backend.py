@@ -172,8 +172,9 @@ class TestGeneratedContent:
                     sent.append((wid, value))
 
             u = generated_ui.UI(send=lambda _b: None)
-            assert u.mode_sel._items == (generated_ui.WIDGET_ID_MODE_SEL_AC,
-                                         generated_ui.WIDGET_ID_MODE_SEL_DC)
+            # YAML declaration order (dc, ac)
+            assert u.mode_sel._items == (generated_ui.WIDGET_ID_MODE_SEL_DC,
+                                         generated_ui.WIDGET_ID_MODE_SEL_AC)
             u.mode_sel._device = _FakeDevice()
             u.mode_sel.set(u.mode_sel.dc)
             n = len(sent)
@@ -194,7 +195,7 @@ class TestGeneratedContent:
     def test_button_group_items_tuple_generated(self, full_vocab_yaml):
         ctx = _make_ctx(full_vocab_yaml)
         ui_py = next(f for f in python_backend.generate(ctx) if f.name == "ui.py").content
-        assert "self.mode_sel._items = (WIDGET_ID_MODE_SEL_AC, WIDGET_ID_MODE_SEL_DC,)" in ui_py
+        assert "self.mode_sel._items = (WIDGET_ID_MODE_SEL_DC, WIDGET_ID_MODE_SEL_AC,)" in ui_py
 
     def test_button_group_set_clear_item_names_reserved(self):
         assert {"_items", "set", "clear"} <= python_backend._BUTTON_GROUP_RESERVED_NAMES

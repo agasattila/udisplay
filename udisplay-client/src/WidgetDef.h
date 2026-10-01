@@ -48,7 +48,7 @@ enum class WidgetType {
     /* Decoration types (static: no value, no events) */
     Label,
     Separator,
-    /* Container types (transparent to their children's ID paths) */
+    /* Container types (their key prefixes their children's ID paths) */
     Section,
     Row,
     Grid,

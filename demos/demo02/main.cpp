@@ -29,7 +29,7 @@ static UDisplay ui;
 
 static float  g_base_rate_hz = 1.0f;
 static float  g_multiplier   = 1.0f;
-static ModeSelWidget::Item g_mode = ModeSelWidget::Item::slow;   /* confirmed mode_sel item */
+static GridBtnGrpModeSelWidget::Item g_mode = GridBtnGrpModeSelWidget::Item::slow;   /* confirmed mode_sel item */
 static int    g_enabled      = 1;
 static int    g_power_on     = 0;
 static double g_sim_time     = 0.0;
@@ -44,23 +44,23 @@ static double g_update_acc = 0.0;
 static void handle_power_btn()
 {
     g_power_on = !g_power_on;
-    ui.power_btn.power_led.set((bool)g_power_on);
+    ui.row1.power_btn.power_led.set((bool)g_power_on);
     printf("[EVENT] power_btn  → power_led %s\n", g_power_on ? "ON" : "OFF");
 }
 
 /* button-group selection is device-authoritative: a press only reports the
  * tap; the firmware confirms it with mode_sel.set(), whose STATE_UPDATE is
  * what moves the selection ring on the client. */
-static void select_mode(ModeSelWidget::Item item, float multiplier)
+static void select_mode(GridBtnGrpModeSelWidget::Item item, float multiplier)
 {
     g_mode       = item;
     g_multiplier = multiplier;
-    ui.mode_sel.set(g_mode);
+    ui.grid_btn_grp.mode_sel.set(g_mode);
 }
 
-static void handle_mode_sel_fast()  { select_mode(ModeSelWidget::Item::fast,  2.0f); printf("[EVENT] mode_sel   → fast (2×)\n"); }
-static void handle_mode_sel_slow()  { select_mode(ModeSelWidget::Item::slow,  1.0f); printf("[EVENT] mode_sel   → slow (1×)\n"); }
-static void handle_mode_sel_turbo() { select_mode(ModeSelWidget::Item::turbo, 0.5f); printf("[EVENT] mode_sel   → turbo (0.5×)\n"); }
+static void handle_mode_sel_fast()  { select_mode(GridBtnGrpModeSelWidget::Item::fast,  2.0f); printf("[EVENT] mode_sel   → fast (2×)\n"); }
+static void handle_mode_sel_slow()  { select_mode(GridBtnGrpModeSelWidget::Item::slow,  1.0f); printf("[EVENT] mode_sel   → slow (1×)\n"); }
+static void handle_mode_sel_turbo() { select_mode(GridBtnGrpModeSelWidget::Item::turbo, 0.5f); printf("[EVENT] mode_sel   → turbo (0.5×)\n"); }
 
 static void handle_rate_slider(float v)
 {
@@ -74,7 +74,7 @@ static void handle_rate_slider(float v)
 static void handle_enable_toggle(bool state)
 {
     g_enabled = state ? 1 : 0;
-    ui.enable_toggle.set((bool)g_enabled);
+    ui.row_temp.enable_toggle.set((bool)g_enabled);
     printf("[EVENT] enable     → %s\n", g_enabled ? "ON" : "OFF");
 }
 
@@ -118,20 +118,20 @@ static void on_tick(double dt_sec)
     if (!g_initial_sent) {
         g_initial_sent = 1;
         ui.rate_slider.set(g_base_rate_hz);
-        ui.enable_toggle.set((bool)g_enabled);
-        ui.power_btn.power_led.set((bool)g_power_on);
-        ui.mode_sel.set(g_mode);
+        ui.row_temp.enable_toggle.set((bool)g_enabled);
+        ui.row1.power_btn.power_led.set((bool)g_power_on);
+        ui.grid_btn_grp.mode_sel.set(g_mode);
     }
 
     /* temp_display: 20 + 5·sin(t) °C */
     if (g_enabled) {
         float temp = 20.0f + 5.0f * static_cast<float>(std::sin(g_sim_time));
-        ui.temp_display.set(temp);
+        ui.row_temp.temp_display.set(temp);
     }
 
     /* status_led: toggle every 3 ticks */
     if (g_tick % 3 == 0)
-        ui.status_led.set((bool)((g_tick / 3) % 2));
+        ui.grid_btn_grp.status_led.set((bool)((g_tick / 3) % 2));
 }
 
 static void on_connect()
@@ -161,12 +161,12 @@ int main(int argc, char* argv[])
 
     ui.init(demo_tcp_send, UDISPLAY_TRANSPORT_TCP);
 
-    ui.power_btn.on_press       = handle_power_btn;
-    ui.mode_sel.fast.on_press   = handle_mode_sel_fast;
-    ui.mode_sel.slow.on_press   = handle_mode_sel_slow;
-    ui.mode_sel.turbo.on_press  = handle_mode_sel_turbo;
+    ui.row1.power_btn.on_press       = handle_power_btn;
+    ui.grid_btn_grp.mode_sel.fast.on_press   = handle_mode_sel_fast;
+    ui.grid_btn_grp.mode_sel.slow.on_press   = handle_mode_sel_slow;
+    ui.grid_btn_grp.mode_sel.turbo.on_press  = handle_mode_sel_turbo;
     ui.rate_slider.on_change    = handle_rate_slider;
-    ui.enable_toggle.on_change  = handle_enable_toggle;
+    ui.row_temp.enable_toggle.on_change  = handle_enable_toggle;
     ui.text_input.on_submit     = handle_text_input;
 
     demo_tcp_hooks_t hooks = { on_rx, on_tick, on_connect, on_disconnect };

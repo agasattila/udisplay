@@ -288,8 +288,8 @@ def test_collect_types_button_grid_grandchild_recurses():
     """Increment 2 regression: collect_types() used to only recurse one
     level into a button's own widgets:, silently dropping a container
     child's own grandchildren. A button -> grid -> led shape must produce a
-    correctly-typed, correctly-prefixed entry for the led (container name
-    "face" excluded from the path — transparent, same as top-level)."""
+    correctly-typed, correctly-prefixed entry for the led (the face grid's
+    own key is a path segment, like any container's)."""
     widgets = {
         "pwr": {
             "type": "button",
@@ -304,19 +304,14 @@ def test_collect_types_button_grid_grandchild_recurses():
     }
     result = collect_types(widgets)
     assert result["pwr"] == "button"
-    assert result["pwr.face"] == "grid"   # container: own entry (issue #43)
-    assert result["pwr.status"] == "led"  # ...but transparent to its child's path
+    assert result["pwr.face"] == "grid"         # container: own entry (issue #43)
+    assert result["pwr.face.status"] == "led"   # ...and a namespace for its child
 
 
-def test_assign_duplicate_id_path_across_sibling_containers_raises():
+def test_assign_same_leaf_name_in_sibling_face_containers():
     """Two sibling containers inside ONE button face, each with a
-    same-named leaf, resolve to the same id_path ("pwr.x" in both cases —
-    containers don't contribute their own name to the path, and both
-    siblings share the button as their transparent-prefix ancestor).
-    Confirmed via adversarial review to silently collapse to one shared
-    protocol ID before this guard (assign() would just overwrite); must
-    now raise, not silently corrupt. Mirrors YamlParser.cpp's client-side
-    guard for the same collision class."""
+    same-named leaf: the containers' keys keep the paths apart
+    ("pwr.left.x" vs "pwr.right.x"), so both get their own ID."""
     widgets = {
         "pwr": {
             "type": "button",
@@ -326,20 +321,16 @@ def test_assign_duplicate_id_path_across_sibling_containers_raises():
             },
         }
     }
-    with pytest.raises(ValueError, match="pwr.x"):
-        assign(widgets)
+    ids = assign(widgets)
+    assert ids["pwr.left.x"] != ids["pwr.right.x"]
 
 
-def test_assign_duplicate_id_path_across_top_level_sibling_containers_raises():
-    """Same collision class at the top level (two sibling row containers,
-    no button involved) — the root cause (container transparency + shared
-    prefix) is not button-specific, so the guard must not be either."""
+def test_assign_same_leaf_name_in_top_level_sibling_containers():
     widgets = {
         "left":  {"type": "row", "widgets": {"x": {"type": "toggle"}}},
         "right": {"type": "row", "widgets": {"x": {"type": "toggle"}}},
     }
-    with pytest.raises(ValueError, match="'x'"):
-        assign(widgets)
+    assert assign(widgets) == {"left": 0x10, "left.x": 0x11, "right": 0x12, "right.x": 0x13}
 
 
 def test_collect_ids_button_grid_grandchild_recurses():
@@ -361,8 +352,8 @@ def test_collect_ids_button_grid_grandchild_recurses():
     }
     ids = assign(widgets)
     assert ids["pwr"] == 0x10
-    assert ids["pwr.face"] == 0x11      # the face grid itself (issue #43)
-    assert ids["pwr.status"] == 0x12    # container name excluded from path
+    assert ids["pwr.face"] == 0x11          # the face grid itself (issue #43)
+    assert ids["pwr.face.status"] == 0x12   # container key is a path segment
     assert ids["zzz_toggle"] == 0x13
 
 
@@ -374,7 +365,7 @@ def test_collect_types_button_row_grandchild_recurses():
         }
     }
     result = collect_types(widgets)
-    assert result["pwr.rgb"] == "rgbled"
+    assert result["pwr.face.rgb"] == "rgbled"
 
 
 def test_collect_types_button_group_items_typed_correctly():
@@ -935,25 +926,22 @@ def test_text_rw_in_decorations_yaml_gets_id(decorations_yaml):
 
 # ── TODO-009: container layout codegen ───────────────────────────────────────
 
-def test_container_names_excluded_from_ids(layout_yaml):
-    """section/row names must not appear as ID path prefixes (containers are
-    transparent to their children's paths)."""
+def test_container_names_prefix_child_ids(layout_yaml):
+    """section/row keys are segments of their children's ID paths."""
     _, wids = _load_types_and_ids(layout_yaml)
-    # Container names 'sensors' and 'controls' must not be in any path
-    assert not any(k.startswith("sensors.") or k.startswith("controls.") for k in wids)
-    # Children must be present at top-level paths
-    assert "volt" in wids
-    assert "temp" in wids
-    assert "relay" in wids
-    assert "reset_btn" in wids
+    assert not any(k in wids for k in ("volt", "temp", "relay", "reset_btn"))
+    assert "sensors.volt" in wids
+    assert "sensors.temp" in wids
+    assert "controls.relay" in wids
+    assert "controls.reset_btn" in wids
 
 
 def test_containers_get_own_ids_and_types(layout_yaml):
     """Issue #43: every container gets its own ID under its own key, and
     reports its own type."""
     wtypes, wids = _load_types_and_ids(layout_yaml)
-    assert wtypes["volt"] == "display"
-    assert wtypes["relay"] == "toggle"
+    assert wtypes["sensors.volt"] == "display"
+    assert wtypes["controls.relay"] == "toggle"
     assert wtypes["sensors"] == "section"
     assert "sensors" in wids and "controls" in wids
 
@@ -972,12 +960,12 @@ def test_build_cli_layout(layout_yaml, tmp_path):
     assert result.exit_code == 0, result.output
     header = (tmp_path / "udisplay_ui.h").read_text()
     # Children and containers both get ID macros (issue #43)
-    assert "WIDGET_ID_VOLT" in header
-    assert "WIDGET_ID_RELAY" in header
-    assert "WIDGET_ID_SENSORS" in header
-    # ...but no typed setter/handler for a container
-    assert "set_sensors" not in header
-    assert "on_sensors" not in header
+    assert "WIDGET_ID_SENSORS_VOLT" in header
+    assert "WIDGET_ID_CONTROLS_RELAY" in header
+    assert "WIDGET_ID_SENSORS " in header
+    # ...but no typed setter/handler for a container itself
+    assert "set_sensors(" not in header
+    assert "on_sensors_" not in header  # displays only: no handlers at all
 
 
 # ── TODO-021: rgbled widget codegen ──────────────────────────────────────────
@@ -1074,7 +1062,7 @@ def test_cpp_buttongroup_item_enum_and_setter(full_vocab_yaml):
     _, wids = _load_types_and_ids(full_vocab_yaml)
     hpp = _make_cpp(full_vocab_yaml)
     assert "    enum class Item : uint8_t {" in hpp
-    assert f"        ac = 0x{wids['mode_sel.ac']:02X}u," in hpp
+    assert f"        ac = 0x{wids['mode_sel.ac']:02X}u" in hpp
     assert f"        dc = 0x{wids['mode_sel.dc']:02X}u" in hpp
     assert "void set(Item v) { udisplay_send_uint8(_ctx, _id, static_cast<uint8_t>(v)); }" in hpp
     assert "void clear()     { udisplay_send_uint8(_ctx, _id, 0u); }" in hpp

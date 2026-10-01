@@ -134,25 +134,25 @@ class TestRateClamping:
 class TestSimulationHandlers:
     def test_mode_buttons_set_the_expected_multiplier(self, demo04_module):
         u, _ = _active_ui(demo04_module)
-        u.mode_sel.fast.on_press()
+        u.grid_btn_grp.mode_sel.fast.on_press()
         assert demo04_module._multiplier == 2.0
-        u.mode_sel.slow.on_press()
+        u.grid_btn_grp.mode_sel.slow.on_press()
         assert demo04_module._multiplier == 1.0
-        u.mode_sel.turbo.on_press()
+        u.grid_btn_grp.mode_sel.turbo.on_press()
         assert demo04_module._multiplier == 5.0
 
     def test_power_button_toggles_and_pushes_led_state(self, demo04_module):
         u, sent = _active_ui(demo04_module)
         assert demo04_module._power_on is False
-        u.power_btn.on_press()
+        u.row1.power_btn.on_press()
         assert demo04_module._power_on is True
         assert len(sent) == 1  # power_led.set() pushed over the wire
-        u.power_btn.on_press()
+        u.row1.power_btn.on_press()
         assert demo04_module._power_on is False
 
     def test_enable_toggle_updates_flag_and_echoes_state(self, demo04_module):
         u, sent = _active_ui(demo04_module)
-        u.enable_toggle.on_change(0)
+        u.row_temp.enable_toggle.on_change(0)
         assert demo04_module._enabled is False
         assert len(sent) == 1
 
