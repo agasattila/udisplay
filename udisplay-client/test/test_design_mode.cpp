@@ -197,11 +197,11 @@ private slots:
         QVERIFY(dc.widgetModel()->rowCount() >= 2);
     }
 
-    /* ── Widget-ID scheme (issue #43) ───────────────────────── */
+    /* ── Widget IDs (issue #43) ──────────────────────────────── */
 
-    /* Design mode renders a file as current udisplay-gen builds it: every
-     * widget, the section included, gets an ID (panel 0x10 < relay 0x11). */
-    void designMode_usesEveryWidgetIdScheme()
+    /* Every widget, the section included, gets an ID, numbered as
+     * udisplay-gen does (panel 0x10 < relay 0x11). */
+    void designMode_numbersEveryWidget()
     {
         const char* yaml =
             "device:\n"
@@ -223,27 +223,6 @@ private slots:
         QCOMPARE(m->rowCount(), 2);
         QCOMPARE(m->data(m->index(0), WidgetModel::WidgetIdRole).toInt(), 0x10);
         QCOMPARE(m->data(m->index(1), WidgetModel::WidgetIdRole).toInt(), 0x11);
-    }
-
-    /* Device path with no BootstrapManager (never connected): falls back to
-     * the current EveryWidget scheme, not LeafOnly. */
-    void deviceMode_withoutBootstrap_usesEveryWidgetIdScheme()
-    {
-        const char* yaml =
-            "device:\n"
-            "  name: testdev\n"
-            "widgets:\n"
-            "  panel:\n"
-            "    type: section\n"
-            "    widgets:\n"
-            "      relay:\n"
-            "        type: toggle\n";
-        DeviceController dc;
-        injectBootstrap(dc, yaml);
-
-        WidgetModel* m = dc.widgetModel();
-        QCOMPARE(m->rowCount(), 2);
-        QCOMPARE(m->data(m->index(0), WidgetModel::WidgetIdRole).toInt(), 0x10);
     }
 
     /* ── startDesignMode — missing file ──────────────────────── */

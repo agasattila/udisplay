@@ -59,7 +59,6 @@ void BootstrapManager::start()
 void BootstrapManager::onConnected()
 {
     m_state = State::AwaitingHandshake;
-    m_deviceProtoVersion = 0;
 }
 
 void BootstrapManager::onDisconnected()
@@ -123,7 +122,6 @@ void BootstrapManager::handleHandshake(const QByteArray& msg)
             .arg(hs.protoVersion));
         return;
     }
-    m_deviceProtoVersion = hs.protoVersion;
 
     /* Auth challenge: device wants credentials before sending merkle root. */
     if (hs.flags == 0x01u) {

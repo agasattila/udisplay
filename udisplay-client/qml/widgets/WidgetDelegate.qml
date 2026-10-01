@@ -93,9 +93,8 @@ Loader {
                                  || _type === "button-group" || _type === "dpad" || _type === "section"
 
     /* Every widget's own children, scoped by its FLAT ROW index — NOT
-     * widgetId: containers of a pre-v5 device (YamlParser::IdScheme::
-     * LeafOnly) all have widgetId 0, so keying on widgetId would collide
-     * every such container into one shared child model. `model.row` (WidgetModel::RowRole) is this
+     * widgetId: WidgetDef::parentId (and so WidgetModel's children lookup)
+     * is keyed by row. `model.row` (WidgetModel::RowRole) is this
      * row's own unique flat-list index, always distinct. This is the one
      * place a QML container reaches the global WidgetModel singleton —
      * every container component itself receives childModel as a plain
@@ -235,9 +234,9 @@ Loader {
                 item.childModel = Qt.binding(function() { return root._childModel })
                 item.effectiveStyle = Qt.binding(function() { return root._effectiveStyle })
                 /* toggleSection() takes the flat-model row this section
-                 * itself occupies (model.row), not widgetId — sections
-                 * have widgetId 0 on pre-v5 devices (see this file's own _childModel
-                 * comment on why row, not widgetId, keys container lookups). */
+                 * itself occupies (model.row), not widgetId (see this
+                 * file's own _childModel comment on why row, not widgetId,
+                 * keys container lookups). */
                 item.toggleClicked.connect(function() { controller.widgetModel.toggleSection(model.row) })
             }
             Layout.fillWidth: true

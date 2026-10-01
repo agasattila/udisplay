@@ -155,24 +155,13 @@ static bool isContainer(const std::string& type)
     return type == "section" || type == "row" || type == "grid" || type == "dpad";
 }
 
-/* Decoration types: no value, no events. Under IdScheme::LeafOnly they get
- * no ID, like containers. */
-static bool isDecoration(const std::string& type)
-{
-    return type == "label" || type == "separator";
-}
-
-/* Mirrors widget_ids.py's _collect(). Under IdScheme::EveryWidget every
- * widget map entry gets a path (issue #43) — a container at `<prefix>.<key>`
- * like any leaf, while its children keep `prefix` (container transparency).
- * Under IdScheme::LeafOnly (pre-v5 devices) containers and decorations get
- * no path at all, reproducing the pre-v5 numbering exactly. */
+/* Mirrors widget_ids.py's _collect(). Every widget map entry gets a path
+ * (issue #43) — a container at `<prefix>.<key>` like any leaf, while its
+ * children keep `prefix` (container transparency). */
 static void collectPathsRecursive(const YAML::Node& widgets,
                                   const std::string& prefix,
-                                  YamlParser::IdScheme scheme,
                                   std::vector<PathEntry>& entries)
 {
-    const bool everyWidget = scheme == YamlParser::IdScheme::EveryWidget;
     for (auto it = widgets.begin(); it != widgets.end(); ++it) {
         std::string key = it->first.as<std::string>();
         YAML::Node  w   = it->second;
@@ -184,26 +173,23 @@ static void collectPathsRecursive(const YAML::Node& widgets,
 
         std::string path = prefix.empty() ? key : prefix + "." + key;
 
+        entries.push_back({ path, !prefix.empty(), prefix, key });
+
         if (isContainer(type)) {
-            if (everyWidget)
-                entries.push_back({ path, !prefix.empty(), prefix, key });
             if (w["widgets"] && w["widgets"].IsMap())
-                collectPathsRecursive(w["widgets"], prefix, scheme, entries);
+                collectPathsRecursive(w["widgets"], prefix, entries);
             continue;
         }
-
-        if (isDecoration(type) && !everyWidget) continue;
-
-        entries.push_back({ path, !prefix.empty(), prefix, key });
 
         /* Recurse (not a flat loop) so a container-typed child (row/grid,
          * widget-model-redesign Increment 2) is transparent to its
          * children's ID paths just like a top-level container — its own
          * grandchildren get IDs prefixed by this widget's own path, not the
-         * container's throwaway key. This is the exact same walk the top-level `widgets` map gets,
-         * so the client and the offline codegen tool agree on ID numbering. */
+         * container's throwaway key. This is the exact same walk the
+         * top-level `widgets` map gets, so the client and the offline
+         * codegen tool agree on ID numbering. */
         if (w["widgets"] && w["widgets"].IsMap())
-            collectPathsRecursive(w["widgets"], path, scheme, entries);
+            collectPathsRecursive(w["widgets"], path, entries);
 
         if (type == "button-group" && w["items"] && w["items"].IsMap()) {
             for (auto ii = w["items"].begin();
@@ -215,11 +201,10 @@ static void collectPathsRecursive(const YAML::Node& widgets,
     }
 }
 
-static std::vector<PathEntry> collectPaths(const YAML::Node& widgets,
-                                           YamlParser::IdScheme scheme)
+static std::vector<PathEntry> collectPaths(const YAML::Node& widgets)
 {
     std::vector<PathEntry> entries;
-    collectPathsRecursive(widgets, {}, scheme, entries);
+    collectPathsRecursive(widgets, {}, entries);
     std::sort(entries.begin(), entries.end(),
               [](const PathEntry& a, const PathEntry& b) {
                   return a.path < b.path;
@@ -713,7 +698,7 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
              * Its own flex is never used (nothing above a top-level widget
              * reads its flex weight) — matches original behavior, which
              * never parsed flex for a top-level row/grid either. Its own ID
-             * (0 under IdScheme::LeafOnly) is looked up by its bare key. */
+             * is looked up by its bare key. */
             uint8_t wid = idMap.count(key) ? idMap.at(key) : 0;
             buildWidget(key, node, wid, /*idPrefix=*/{}, idMap, parentId, out, diags);
 
@@ -862,7 +847,7 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
     }
     const YAML::Node& widgets = doc["widgets"];
 
-    auto entries = collectPaths(widgets, m_idScheme);
+    auto entries = collectPaths(widgets);
     if (entries.size() > 240) {
         m_error = QStringLiteral("Too many widget paths (%1); maximum is 240")
                       .arg(static_cast<int>(entries.size()));
@@ -899,26 +884,6 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
 
     widgetsOut.clear();
     buildAndAppendWidgets(widgets, idMap, /*parentId=*/-1, widgetsOut, m_diagnostics);
-
-    /* LeafOnly: containers and decorations have no ID of their own. The
-     * build sites above still look them up in idMap by path, and a pre-v5
-     * YAML may legally reuse a leaf's name for one of them (e.g. section
-     * `fan` + slider `fan` in another section) — the lookup would then hand
-     * the container the leaf's ID, and the leaf's STATE_UPDATE and
-     * SET_PROPERTY(ENABLED/VISIBLE) would land on the whole section. */
-    if (m_idScheme == IdScheme::LeafOnly) {
-        for (WidgetDef& w : widgetsOut) {
-            switch (w.type) {
-            case WidgetType::Section: case WidgetType::Row:
-            case WidgetType::Grid:    case WidgetType::Dpad:
-            case WidgetType::Label:   case WidgetType::Separator:
-                w.widgetId = 0;
-                break;
-            default:
-                break;
-            }
-        }
-    }
 
     /* style: name validation — a post-pass over the fully-built flat list,
      * now that stylesOut (the full named-stylesheet registry, parsed before

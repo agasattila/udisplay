@@ -13,7 +13,7 @@ from . import BuildContext, OutputFile
 from ._shared import (
     _macro_name, _fn_suffix,
     _setter_for_type, _setter_arg_names, _handler_for_type,
-    _hex_rows, _HEADER_COMMENT, PROTO_VERSION_GUARD, widget_id_macro_collisions,
+    _hex_rows, _HEADER_COMMENT, widget_id_macro_collisions,
     _config_fields, _config_designated_initializer,
     _ns_validate, _ns_macro, _ns_fn,
 )
@@ -55,7 +55,6 @@ def _generate_header(ctx: BuildContext) -> str:
 
     if widget_types is not None:
         lines.append('#include "udisplay.h"')
-        lines += PROTO_VERSION_GUARD
 
     lines += [
         "",

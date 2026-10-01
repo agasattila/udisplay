@@ -15,10 +15,6 @@ transparent to their CHILDREN's paths (a container's own key is never a
 segment of a child's path), but the container itself gets an ID under its
 own key at the position it occupies — exactly like a leaf would.
 
-This is ID scheme v5 (PROTO_VERSION 0x05). The client keeps the older
-leaf-only scheme for devices reporting PROTO_VERSION < 0x05 (see
-YamlParser.cpp's IdScheme); codegen only ever emits v5.
-
 See docs/protocol.md § Widget ID Assignment.
 """
 from __future__ import annotations

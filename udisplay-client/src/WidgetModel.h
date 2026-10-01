@@ -16,8 +16,7 @@
  *
  * Roles exposed to QML:
  *   widgetId    uint     unique 0x10–0xFF ID — every widget, containers and
- *                        decorations included (0 only for containers/
- *                        decorations of a pre-v5 device, see YamlParser::IdScheme)
+ *                        decorations included
  *   type        string   widget type name
  *   label       string
  *   enabled     bool     effective: false if this widget OR any ancestor is

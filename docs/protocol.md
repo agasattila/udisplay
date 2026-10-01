@@ -661,25 +661,10 @@ Widget IDs are assigned by `udisplay-gen build` at code generation time (ID sche
 
 The Qt client derives the same mapping by parsing the YAML blob (same sort order). Both sides use `widget_id` as the sole identifier in all STATE_UPDATE, EVENT, SET_PROPERTY and RESET_PROPERTY messages.
 
-**Legacy scheme (proto < 0x05).** Firmware built before proto 0x05 used the
-leaf-only scheme: containers and decorations got no ID and took no slot. The
-YAML blob does not record which scheme its header was generated with, so the
-client selects it from the HANDSHAKE `proto_version`: `< 0x05` → leaf-only,
-`≥ 0x05` → every widget. Always build firmware with a `udisplay-gen` and a
-`libudisplay` from the same release — a v5 header linked against a v4 library
-would advertise the wrong scheme. Generated C/C++ headers enforce this: they
-`#error` when `UDISPLAY_PROTO_VERSION` is below 0x05.
-
-**Migrating a YAML from proto 0x04.** Regenerating with a v5 `udisplay-gen`
-can reject a YAML that used to build:
-- Widget names must now be unique across containers and decorations too. A
-  `label`/`separator` key repeated in two sections, or a section named like a
-  leaf elsewhere, is a `duplicate widget name` error. Rename one of them.
-- Containers and decorations count toward the 240-widget cap.
-
-The generated firmware API also changes: button face children are now typed
-by their own widget type (an `rgbled` face child is an `RgbLedWidget`, a
-`label` a plain `Widget`) instead of always an `LedWidget`.
+**Pre-0x05 firmware.** Before proto 0x05 containers and decorations got no
+ID, so the numbering of any YAML containing them differs. The client
+implements only the current scheme: regenerate firmware built with an older
+`udisplay-gen`, and build it against the `libudisplay` from the same release.
 
 **Property inheritance.** `ENABLED` and `VISIBLE` apply to a widget's whole
 subtree: setting `ENABLED=0` on a `section` disables every widget inside it;
@@ -876,4 +861,4 @@ are the real-hardware showpieces.
 | v2.3 | 2026-07-27 | `dpad` split out of `button-group` into its own v1 layout container (`section`/`row`/`grid`/`dpad`) — `button-group`'s `layout: dpad` removed (grid-only now); a dpad's children are ordinary `button` widgets carrying a `position` (`"top"`\|`"right"`\|`"bottom"`\|`"left"`\|`"center"`). No wire-format change — dpad carries no widget ID and sends no protocol messages of its own; each child button sends its own independent `button_press`/`button_release`/`button_click` events, same as any standalone button. No PROTO_VERSION bump. |
 | v2.4 | 2026-09-25 | `button-group` exclusive selection implemented (issue #41): firmware selects an item with STATE_UPDATE(group widget_id, `uint8`, item widget_id), `0` = none. No wire-format change: reuses the existing STATE_UPDATE and `uint8` value type. No PROTO_VERSION bump. |
 | v2.5 | 2026-09-30 | BLE transport readiness check (issue #45). First-fragment `flags` now defined: `0x00` = data, `0x01` = transport control; other values stay reserved. New control message `HELLO` (`0x01`): the device repeats it every 100 ms after the client subscribes and sends `HANDSHAKE` only after the client echoes it, because an ATT-confirmed indication can still be lost before it reaches the client application. libudisplay: optional host timer (`timer_start`/`timer_stop` in `udisplay_config_t`, `udisplay_timer_expired()`, `udisplay_set_timer()`); without one, the HELLO is retried from `udisplay_heartbeat()`. BLE only; no PROTO_VERSION bump. Older clients reject `flags = 0x01`, so devices on this version need an updated client. |
-| v2.6 | 2026-10-01 | Every widget gets a `widget_id` (issue #43): containers (`section`/`row`/`grid`/`dpad`) and decorations (`label`/`separator`) now take an ID slot under their own key, while staying transparent to their children's ID paths. SET_PROPERTY/RESET_PROPERTY can target any widget; `ENABLED`/`VISIBLE` on a container apply to its subtree. IDs shift relative to the old leaf-only scheme, so PROTO_VERSION bumped to 0x05: clients use the leaf-only scheme for devices reporting `proto_version < 0x05`; older clients reject v5 devices with the existing "Update the app" error. No message-format change. |
+| v2.6 | 2026-10-01 | Every widget gets a `widget_id` (issue #43): containers (`section`/`row`/`grid`/`dpad`) and decorations (`label`/`separator`) now take an ID slot under their own key, while staying transparent to their children's ID paths. SET_PROPERTY/RESET_PROPERTY can target any widget; `ENABLED`/`VISIBLE` on a container apply to its subtree. IDs shift relative to the old leaf-only scheme, so PROTO_VERSION bumped to 0x05: older clients reject v5 devices with the existing "Update the app" error. Firmware generated before 0x05 must be regenerated — the client has no leaf-only fallback (pre-release, no compatibility shim). No message-format change. |

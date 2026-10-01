@@ -12,7 +12,7 @@ from ..merkle import CHUNK_SIZE
 from ..widget_ids import collect_dropdown_items, ordered_member_paths
 from . import BuildContext, OutputFile
 from ._shared import (
-    _hex_rows, _HEADER_COMMENT, PROTO_VERSION_GUARD,
+    _hex_rows, _HEADER_COMMENT,
     _config_fields, _config_sequential_assignment,
     _ns_validate, _ns_fn,
 )
@@ -426,7 +426,6 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         "#include <stdint.h>",
         "#include <stddef.h>",
         '#include "udisplay.h"',
-        *PROTO_VERSION_GUARD,
     ]
     if variant == "modern":
         lines.append("#include <functional>")

@@ -14,20 +14,6 @@ from ..merkle import CHUNK_SIZE
 MAX_CHUNK_COUNT = 64
 
 
-# Emitted right after `#include "udisplay.h"`. The widget IDs in a generated
-# header follow the every-widget scheme (issue #43), which the client only
-# selects when the HANDSHAKE says proto >= 0x05 — and libudisplay, not the
-# header, sends that byte. A v5 header built against an older library would
-# have its STATE_UPDATEs silently routed to the wrong widgets, so fail the
-# build instead.
-PROTO_VERSION_GUARD = [
-    "#if !defined(UDISPLAY_PROTO_VERSION) || UDISPLAY_PROTO_VERSION < 0x05u",
-    '#error "This header uses the every-widget ID scheme (protocol 0x05); '
-    'update libudisplay to a release with UDISPLAY_PROTO_VERSION >= 0x05"',
-    "#endif",
-]
-
-
 def validate_blob_size(blob: bytes) -> None:
     """Raise ValueError if the blob requires more chunks than the protocol allows."""
     n = math.ceil(len(blob) / CHUNK_SIZE)

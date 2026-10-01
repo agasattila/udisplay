@@ -20,9 +20,8 @@ void WidgetModel::setWidgets(const QList<WidgetDef>& widgets)
     m_collapsedSections.clear();
     m_childrenByParent.clear();
     for (int i = 0; i < m_widgets.size(); ++i) {
-        /* Every widget has an ID under the current scheme (issue #43);
-         * widgetId=0 only occurs for containers/decorations parsed under
-         * YamlParser::IdScheme::LeafOnly (pre-v5 devices) — not addressable. */
+        /* Every widget has an ID (issue #43); 0 is reserved, never a real
+         * widget, so it is never addressable. */
         if (m_widgets[i].widgetId != 0)
             m_idToRow[m_widgets[i].widgetId] = i;
         m_childrenByParent[m_widgets[i].parentId].append(i);

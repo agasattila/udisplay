@@ -30,7 +30,7 @@ there is no ID to send. The YAML model and the runtime property model disagree.
    exists today keeps the same name, unless a container/decoration name now
    collides with a generated identifier (rejected at codegen with a clear
    error, see Eng Review OV4). Numeric values shift, and that is a wire
-   change: see Eng Review OV1 (PROTO_VERSION 0x05 + client legacy mode).
+   change: see Eng Review OV1 (PROTO_VERSION 0x05).
 3. The 0x10..0xFF range (240 slots) stays. Containers and decorations now
    count against it. Real dashboards (all 5 demos: 10-24 IDs after the change)
    are nowhere near the cap.
@@ -254,12 +254,15 @@ fires on a property change.
   the ID algorithm. Old firmware + new client would re-derive shifted IDs
   from an unchanged blob, and events would hit the wrong handlers.
   **Decision:** bump `PROTO_VERSION` to 0x05 (libudisplay, client,
-  MicroPython runtime). The client keeps the leaf-only ("legacy") ID scheme
-  for devices whose HANDSHAKE reports a version below 0x05. Old clients
-  reject v5 devices with the existing "Update the app" error. The current
-  golden fixtures are kept as `widget_id_fixtures_legacy` and checked against
-  the client's legacy mode. The new fixtures cover the v5 scheme. The
+  MicroPython runtime). Old clients reject v5 devices with the existing
+  "Update the app" error. The golden fixtures cover the v5 scheme. The
   header and libudisplay must come from the same release (documented).
+  *Revised in PR review (#44):* the first implementation also kept the
+  leaf-only ID scheme in the client for devices reporting < 0x05, frozen
+  legacy fixtures, and a generated-header `#error` against older
+  libudisplay. All three were dropped: uDisplay has no public release yet,
+  and every firmware example ships in this repo and is regenerated with the
+  protocol change, so there is no old firmware to stay compatible with.
 - **OV2 [P1] QML won't disable rendered subtrees.** DpadWidget reads
   `ChildModel::get()` snapshots, and the section header has no enabled
   binding. **Decision:** `WidgetDelegate.qml` binds `enabled: _enabled` on
