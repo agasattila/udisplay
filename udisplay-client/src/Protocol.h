@@ -190,22 +190,32 @@ bool tcpUnframe(const QByteArray& buf, QByteArray& msg, int& consumed);
  *  BLE GATT transport framing  (implemented in TODO-011 / BleTransport)
  *
  *  Fragment formats (little-endian fields):
- *    First fragment:       [u16 offset=0][u8 packet_id][u16 length][u8 flags=0x00][payload]
+ *    First fragment:       [u16 offset=0][u8 packet_id][u16 length][u8 flags][payload]
  *    Continuation fragment:[u16 offset  ][u8 packet_id][payload]
  *
  *  Completion: offset + fragment_payload_size == length
  *  packet_id: 8-bit, increments per message, wraps 255→0, resets to 0 on reconnect.
  *  Max message size: UDISPLAY_MAX_MSG_SIZE (1024 bytes).
  *  Minimum MTU: 7 effective bytes (6-byte first-fragment header + 1 payload byte).
+ *
+ *  flags: BLE_FLAGS_DATA (uDisplay protocol message) or BLE_FLAGS_CONTROL
+ *  (transport control message, never passed to the protocol layer). Any other
+ *  value is a link error. The only control message is HELLO, the device's
+ *  readiness probe, which the client echoes back unchanged.
  * ══════════════════════════════════════════════════════════════════════════ */
 
 constexpr uint16_t UDISPLAY_MAX_MSG_SIZE = 1024;
+
+constexpr uint8_t BLE_FLAGS_DATA    = 0x00;
+constexpr uint8_t BLE_FLAGS_CONTROL = 0x01;
+constexpr uint8_t BLE_CTRL_HELLO    = 0x01;
 
 /** Per-connection receiver state for BLE reassembly.  Reset on each new connection. */
 struct BleRxState {
     QByteArray buf;        /**< accumulated payload bytes */
     uint16_t   length = 0; /**< total message length from first fragment */
     uint8_t    packetId = 0;
+    uint8_t    flags    = BLE_FLAGS_DATA; /**< flags from the first fragment */
     bool       active  = false; /**< true after a valid first fragment is received */
 };
 
@@ -214,22 +224,32 @@ struct BleRxState {
  * attPayloadSize is the effective per-packet payload capacity (negotiated MTU − 3).
  * packetId is incremented by this function before use (caller maintains the counter
  * per characteristic; pass 0xFF to get packet_id=0 on the first call).
+ * flags goes into the first fragment (BLE_FLAGS_DATA or BLE_FLAGS_CONTROL).
  * Returns one QByteArray per ATT packet to write in order.
  */
 QVector<QByteArray> bleFrame(const QByteArray& msg, uint8_t attPayloadSize,
-                              uint8_t& packetId);
+                              uint8_t& packetId, uint8_t flags = BLE_FLAGS_DATA);
 
-enum class BleRxResult { More, Done, Error };
+enum class BleRxResult { More, Done, Control, Error };
 
 /**
  * Feed one incoming ATT packet into the receiver state machine.
- * Done: out holds the reassembled message. More: fragment accepted, message incomplete.
+ * Done: out holds the reassembled protocol message.
+ * Control: out holds a reassembled transport control message (see bleControlReply).
+ * More: fragment accepted, message incomplete.
  * Error: framing violation. The link is reliable and ordered, so the caller should
  * drop the connection. State is reset regardless.
  */
 BleRxResult bleFeed(const QByteArray& attPkt, BleRxState& state, QByteArray& out);
 
-/** bleFeed() collapsed to bool: true only when a complete message arrived. */
+/** bleFeed() collapsed to bool: true only when a complete protocol message arrived. */
 bool bleUnframe(const QByteArray& attPkt, BleRxState& state, QByteArray& out);
+
+/**
+ * Compute the client's answer to a transport control message from the device.
+ * HELLO: reply is the HELLO itself (to be sent back with BLE_FLAGS_CONTROL).
+ * Returns false for a malformed or unknown control message (link error).
+ */
+bool bleControlReply(const QByteArray& ctrl, QByteArray& reply);
 
 } // namespace Proto

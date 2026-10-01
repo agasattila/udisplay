@@ -88,11 +88,16 @@ void BleTransport::disconnectFromDevice()
 
 void BleTransport::send(const QByteArray& msg)
 {
+    sendFramed(msg, Proto::BLE_FLAGS_DATA);
+}
+
+void BleTransport::sendFramed(const QByteArray& msg, uint8_t flags)
+{
     if (!m_connected || !m_service)
         return;
 
     const QVector<QByteArray> fragments =
-        Proto::bleFrame(msg, m_attPayloadSize, m_txPacketId);
+        Proto::bleFrame(msg, m_attPayloadSize, m_txPacketId, flags);
 
     for (const QByteArray& frag : fragments)
         m_writeQueue.enqueue(frag);
@@ -239,6 +244,19 @@ void BleTransport::onCharacteristicChanged(const QLowEnergyCharacteristic& c,
     case Proto::BleRxResult::Done:
         emit messageReceived(msg);
         break;
+    case Proto::BleRxResult::Control: {
+        /* Transport-level: the device probes readiness with HELLO and starts
+         * the protocol once our echo arrives. Never reaches the protocol layer. */
+        QByteArray reply;
+        if (!Proto::bleControlReply(msg, reply)) {
+            failLink(QStringLiteral("Unknown BLE control message on data characteristic"));
+            break;
+        }
+        /* Before the CCCD confirmation there is nothing to echo on yet; the
+         * device repeats its HELLO. */
+        sendFramed(reply, Proto::BLE_FLAGS_CONTROL);
+        break;
+    }
     case Proto::BleRxResult::More:
         break;
     case Proto::BleRxResult::Error:

@@ -16,6 +16,17 @@ const char *udisplay_version(void)
 
 /* ── Internal helpers ────────────────────────────────────────────────────── */
 
+/* Fragment one BLE message (protocol or transport control) and emit it. */
+static void ble_send(udisplay_t* ctx, const uint8_t* msg, uint16_t len, uint8_t flags)
+{
+    uint16_t mtu = ctx->ble_mtu_payload;
+    if (mtu < 7u) mtu = UDISPLAY_BLE_MTU_PAYLOAD_DEFAULT;
+    ble_fragment(msg, len, mtu, ctx->ble_tx_packet_id, flags,
+                 ctx->tx_buf.ble_frag, (uint16_t)sizeof(ctx->tx_buf.ble_frag),
+                 ctx->cfg.send, ctx->cfg.userdata);
+    ctx->ble_tx_packet_id++;
+}
+
 /* Route a complete protocol message through transport framing.
  * always=1: send even before ctx->active (bootstrap); always=0: require active. */
 static void framed_send_raw(udisplay_t* ctx, const uint8_t* msg, uint16_t len, int always)
@@ -24,15 +35,11 @@ static void framed_send_raw(udisplay_t* ctx, const uint8_t* msg, uint16_t len, i
     if (!always && !ctx->active) return;
 
     switch (ctx->cfg.transport) {
-        case UDISPLAY_TRANSPORT_BLE: {
-            uint16_t mtu = ctx->ble_mtu_payload;
-            if (mtu < 7u) mtu = UDISPLAY_BLE_MTU_PAYLOAD_DEFAULT;
-            udisplay_ble_fragment(msg, len, mtu, ctx->ble_tx_packet_id,
-                                   ctx->tx_buf.ble_frag, (uint16_t)sizeof(ctx->tx_buf.ble_frag),
-                                   ctx->cfg.send, ctx->cfg.userdata);
-            ctx->ble_tx_packet_id++;
+        case UDISPLAY_TRANSPORT_BLE:
+            /* No protocol traffic until the HELLO readiness check passed. */
+            if (!ctx->ble_ready) return;
+            ble_send(ctx, msg, len, UDISPLAY_BLE_FLAGS_DATA);
             break;
-        }
         case UDISPLAY_TRANSPORT_TCP: {
             uint16_t n = udisplay_tcp_frame(ctx->tx_buf.tcp_framed,
                                              (uint16_t)sizeof(ctx->tx_buf.tcp_framed),
@@ -159,16 +166,10 @@ static void fill_auth_salt(udisplay_t* ctx)
     }
 }
 
-void udisplay_on_connect(udisplay_t* ctx)
+/* Start the uDisplay protocol: send the first HANDSHAKE (auth challenge or
+ * normal). On BLE this runs only once the transport is ready. */
+static void protocol_start(udisplay_t* ctx)
 {
-    ctx->connected          = 1;
-    ctx->active             = 0;
-    ctx->comms_miss_count   = 0;
-    ctx->awaiting_auth_ack  = 0;
-    ctx->pending_disconnect = 0;
-    ctx->ble_tx_packet_id   = 0;
-    rx_reset(ctx);
-
     if (ctx->cfg.auth_algo != UDISPLAY_AUTH_NONE) {
         fill_auth_salt(ctx);
         ctx->awaiting_auth_ack = 1;
@@ -186,8 +187,70 @@ void udisplay_on_connect(udisplay_t* ctx)
     }
 }
 
+/* ── BLE transport readiness (HELLO) ─────────────────────────────────────────
+ * Lives entirely in the transport layer: the protocol state machine above
+ * never sees HELLO, and protocol_start() is simply deferred until the client
+ * has echoed one. */
+
+static int ble_hello_pending(const udisplay_t* ctx)
+{
+    return ctx->connected && ctx->cfg.transport == UDISPLAY_TRANSPORT_BLE
+        && !ctx->ble_ready;
+}
+
+static void ble_send_hello(udisplay_t* ctx)
+{
+    static const uint8_t hello = UDISPLAY_BLE_CTRL_HELLO;
+    if (!ctx->cfg.send) return;
+    ble_send(ctx, &hello, 1u, UDISPLAY_BLE_FLAGS_CONTROL);
+}
+
+/* Send a HELLO and schedule the next attempt. */
+static void ble_hello_attempt(udisplay_t* ctx)
+{
+    ble_send_hello(ctx);
+    if (ctx->cfg.timer_start)
+        ctx->cfg.timer_start(ctx, UDISPLAY_BLE_HELLO_INTERVAL_MS);
+}
+
+/* Handle a reassembled flags=CONTROL message. Returns -1 on a link error. */
+static int ble_on_control(udisplay_t* ctx, const uint8_t* msg, uint16_t len)
+{
+    if (len != 1u || msg[0] != UDISPLAY_BLE_CTRL_HELLO) return -1;
+
+    /* A HELLO from the client is the echo of one of ours. Echoes of HELLOs
+     * that were still in flight when the first one came back are ignored. */
+    if (!ble_hello_pending(ctx)) return 0;
+
+    ctx->ble_ready        = 1;
+    ctx->comms_miss_count = 0;
+    if (ctx->cfg.timer_stop) ctx->cfg.timer_stop(ctx);
+    protocol_start(ctx);
+    return 0;
+}
+
+void udisplay_on_connect(udisplay_t* ctx)
+{
+    ctx->connected          = 1;
+    ctx->active             = 0;
+    ctx->comms_miss_count   = 0;
+    ctx->awaiting_auth_ack  = 0;
+    ctx->pending_disconnect = 0;
+    ctx->ble_tx_packet_id   = 0;
+    ctx->ble_ready          = 0;
+    rx_reset(ctx);
+
+    if (ctx->cfg.transport == UDISPLAY_TRANSPORT_BLE) {
+        ble_hello_attempt(ctx);
+    } else {
+        protocol_start(ctx);
+    }
+}
+
 void udisplay_on_disconnect(udisplay_t* ctx)
 {
+    if (ble_hello_pending(ctx) && ctx->cfg.timer_stop) ctx->cfg.timer_stop(ctx);
+    ctx->ble_ready          = 0;
     ctx->connected          = 0;
     ctx->active             = 0;
     ctx->comms_miss_count   = 0;
@@ -197,12 +260,32 @@ void udisplay_on_disconnect(udisplay_t* ctx)
     rx_reset(ctx);
 }
 
+void udisplay_set_timer(udisplay_t* ctx, udisplay_timer_start_fn start,
+                        udisplay_timer_stop_fn stop)
+{
+    ctx->cfg.timer_start = start;
+    ctx->cfg.timer_stop  = stop;
+}
+
+void udisplay_timer_expired(udisplay_t* ctx)
+{
+    /* The timer's only user is the HELLO retry; anything else is a stale
+     * expiry that raced timer_stop. */
+    if (ble_hello_pending(ctx)) ble_hello_attempt(ctx);
+}
+
 int udisplay_ble_feed(udisplay_t* ctx, const uint8_t* att_payload, uint16_t len)
 {
     ble_rx_status_t status = ble_rx_feed(&ctx->rx.ble_rx, att_payload, len);
     if (status == BLE_RX_DONE) {
-        udisplay_on_message(ctx, ctx->rx.ble_rx.buf, ctx->rx.ble_rx.len);
+        int rc = 0;
+        if (ctx->rx.ble_rx.flags == UDISPLAY_BLE_FLAGS_CONTROL) {
+            rc = ble_on_control(ctx, ctx->rx.ble_rx.buf, ctx->rx.ble_rx.len);
+        } else {
+            udisplay_on_message(ctx, ctx->rx.ble_rx.buf, ctx->rx.ble_rx.len);
+        }
         ble_rx_reset(&ctx->rx.ble_rx);
+        return rc;
     } else if (status == BLE_RX_ERROR) {
         ble_rx_reset(&ctx->rx.ble_rx);
         return -1;
@@ -345,19 +428,27 @@ void udisplay_on_message(udisplay_t* ctx, const uint8_t* msg, uint16_t len)
 }
 
 /*
- * Single miss-count watchdog covering both connection phases:
+ * Single miss-count watchdog covering every connection phase:
+ *   - BLE HELLO (connected=1, ble_ready=0): resets when the HELLO echo
+ *     arrives (see ble_on_control) — a client that never echoes is dropped.
  *   - BOOTSTRAP (connected=1, active=0): resets on HANDSHAKE_ACK,
  *     CLIENT_READY, CHUNK_HEADER_REQUEST, CHUNK_REQUEST (see
  *     udisplay_on_message) — any sign the client is still bootstrapping.
  *   - ACTIVE (connected=1, active=1): resets only on HEARTBEAT echo,
  *     unchanged from the original post-active-only watchdog.
- * connected/active are mutually exclusive per connection, so one counter
- * and one threshold (UDISPLAY_HB_MISS_MAX) serve both phases.
+ * The phases are sequential within a connection, so one counter and one
+ * threshold (UDISPLAY_HB_MISS_MAX) serve them all.
  */
 void udisplay_heartbeat(udisplay_t* ctx)
 {
-    uint16_t n = proto_heartbeat(ctx->msg_buf, UDISPLAY_MAX_MSG_SIZE);
-    do_send_always(ctx, ctx->msg_buf, n);
+    if (ble_hello_pending(ctx)) {
+        /* Protocol not started yet: no HEARTBEAT. Without a timer this is
+         * the HELLO retry; the watchdog below still counts the miss. */
+        if (!ctx->cfg.timer_start) ble_send_hello(ctx);
+    } else {
+        uint16_t n = proto_heartbeat(ctx->msg_buf, UDISPLAY_MAX_MSG_SIZE);
+        do_send_always(ctx, ctx->msg_buf, n);
+    }
 
     if (ctx->connected && ctx->comms_miss_count < UDISPLAY_HB_MISS_MAX) {
         if (++ctx->comms_miss_count == UDISPLAY_HB_MISS_MAX) {

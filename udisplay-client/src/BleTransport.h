@@ -24,6 +24,10 @@
  * Proto::bleFeed() and emitted as messageReceived(). A framing error is a
  * link error: the transport reports it and disconnects.
  *
+ * Transport control messages (first-fragment flags=0x01) are handled here and
+ * never emitted: the device's HELLO readiness probe is echoed straight back,
+ * and the device starts the protocol (HANDSHAKE) once the echo arrives.
+ *
  * connected() is emitted only once the Data characteristic's CCCD write
  * (0x0002, indications on) is confirmed: indication delivery is part of the
  * transport contract, not an optional setup step. A missing CCCD or a failed
@@ -65,6 +69,7 @@ private slots:
 
 private:
     void failLink(const QString& reason);
+    void sendFramed(const QByteArray& msg, uint8_t flags);
 
     static const QBluetoothUuid kUDisplaySvcUuid;
     static const QBluetoothUuid kCtrlCharUuid;

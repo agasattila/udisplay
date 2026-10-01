@@ -561,6 +561,11 @@ static void transport_send_cb(const uint8_t* d, uint16_t n, void*)
     g_transport_sent.push_back({ std::vector<uint8_t>(d, d + n) });
 }
 
+/* Client echo of a HELLO: single fragment, flags=CONTROL, payload=HELLO. */
+static const uint8_t kHelloEcho[7] = { 0x00u, 0x00u, 0x00u, 0x01u, 0x00u,
+                                       UDISPLAY_BLE_FLAGS_CONTROL,
+                                       UDISPLAY_BLE_CTRL_HELLO };
+
 class TransportTest : public ::testing::Test {
 protected:
     udisplay_t ctx_{};
@@ -599,6 +604,15 @@ protected:
         uint8_t cr = 0x02u;
         udisplay_on_message(&ctx_, &cr, 1u);   /* CLIENT_READY → active=1 */
     }
+
+    /* BLE connect + HELLO echo: leaves only the protocol's output (HANDSHAKE
+     * fragments) in g_transport_sent. */
+    void ble_connect_ready()
+    {
+        udisplay_on_connect(&ctx_);
+        g_transport_sent.clear();
+        ASSERT_EQ(udisplay_feed(&ctx_, kHelloEcho, sizeof(kHelloEcho)), 0);
+    }
 };
 
 /* 1: HANDSHAKE on BLE transport arrives as v2.2 fragmented ATT notifications */
@@ -606,7 +620,7 @@ TEST_F(TransportTest, Ble_Handshake_IsFragmented)
 {
     auto cfg = ble_cfg();   /* MTU=0 → clamps to default (20), first_cap=14, cont_cap=17 */
     udisplay_init(&ctx_, &cfg);
-    udisplay_on_connect(&ctx_);
+    ble_connect_ready();
 
     /* 39 bytes at mtu=20: first 14 + cont 17 + cont 8 = 3 fragments */
     ASSERT_EQ(g_transport_sent.size(), 3u);
@@ -627,7 +641,7 @@ TEST_F(TransportTest, Ble_StateUpdate_HasFlagByte)
 {
     auto cfg = ble_cfg();
     udisplay_init(&ctx_, &cfg);
-    udisplay_on_connect(&ctx_);
+    ble_connect_ready();
     g_transport_sent.clear();
     make_active();
 
@@ -645,7 +659,7 @@ TEST_F(TransportTest, Ble_FragmentCount_MatchesMtu)
     /* mtu=10: first_cap=4, cont_cap=7 → 1 + ceil((39-4)/7) = 6 fragments */
     auto cfg = ble_cfg(10u);
     udisplay_init(&ctx_, &cfg);
-    udisplay_on_connect(&ctx_);
+    ble_connect_ready();
 
     ASSERT_EQ(g_transport_sent.size(), 6u);
     /* All but last are full ATT payload (10 bytes) */
@@ -698,7 +712,7 @@ TEST_F(TransportTest, Ble_SetMtu_UpdatesFragmentSize)
 {
     auto cfg = ble_cfg();   /* default mtu=20: 3 frags for 39-byte HANDSHAKE */
     udisplay_init(&ctx_, &cfg);
-    udisplay_on_connect(&ctx_);
+    ble_connect_ready();
     size_t frags_small_mtu = g_transport_sent.size();
     ASSERT_GT(frags_small_mtu, 1u);   /* must be fragmented */
 
@@ -707,7 +721,7 @@ TEST_F(TransportTest, Ble_SetMtu_UpdatesFragmentSize)
 
     /* mtu=45: first_cap=39 → HANDSHAKE (39 bytes) fits in exactly 1 fragment */
     udisplay_ble_set_mtu(&ctx_, 45u);
-    udisplay_on_connect(&ctx_);
+    ble_connect_ready();
 
     ASSERT_EQ(g_transport_sent.size(), 1u);
     /* Single fragment: v2.2 offset = 0x0000 */
@@ -720,7 +734,7 @@ TEST_F(TransportTest, Ble_ZeroMtuConfig_ClampsToDefault)
 {
     auto cfg = ble_cfg(0u);   /* explicit zero → must clamp to mtu=20 */
     udisplay_init(&ctx_, &cfg);
-    udisplay_on_connect(&ctx_);    /* must not loop or crash */
+    ble_connect_ready();    /* must not loop or crash */
 
     ASSERT_FALSE(g_transport_sent.empty());
     /* Same fragment count as explicit mtu=20: 1 + ceil((39-14)/17) = 3 */
@@ -802,7 +816,7 @@ TEST_F(TransportTest, Feed_Ble_RoutesThroughBleReassembly)
 {
     auto cfg = ble_cfg(45u);   /* mtu=45: HANDSHAKE fits in 1 fragment */
     udisplay_init(&ctx_, &cfg);
-    udisplay_on_connect(&ctx_);
+    ble_connect_ready();
     g_transport_sent.clear();
 
     /* Client subscribes and completes bootstrap out of band for this test;
@@ -843,7 +857,7 @@ TEST_F(TransportTest, Feed_Ble_ValidFragmentsReturnZero)
 {
     auto cfg = ble_cfg(45u);
     udisplay_init(&ctx_, &cfg);
-    udisplay_on_connect(&ctx_);
+    ble_connect_ready();
 
     uint8_t single[7] = { 0x00u, 0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x02u };
     EXPECT_EQ(udisplay_feed(&ctx_, single, sizeof(single)), 0);
@@ -860,10 +874,10 @@ TEST_F(TransportTest, Feed_Ble_FramingViolationsReturnMinusOne)
 {
     auto cfg = ble_cfg(45u);
     udisplay_init(&ctx_, &cfg);
-    udisplay_on_connect(&ctx_);
+    ble_connect_ready();
 
-    /* flags != 0 */
-    uint8_t badFlags[7] = { 0x00u, 0x00u, 0x00u, 0x01u, 0x00u, 0x01u, 0x02u };
+    /* flags other than DATA (0x00) / CONTROL (0x01) */
+    uint8_t badFlags[7] = { 0x00u, 0x00u, 0x00u, 0x01u, 0x00u, 0x02u, 0x02u };
     EXPECT_EQ(udisplay_feed(&ctx_, badFlags, sizeof(badFlags)), -1);
 
     /* declared length 1025 > UDISPLAY_MAX_MSG_SIZE */
@@ -905,7 +919,7 @@ TEST_F(TransportTest, Feed_Ble_HugeOffsetContinuationIsError)
 {
     auto cfg = ble_cfg(45u);
     udisplay_init(&ctx_, &cfg);
-    udisplay_on_connect(&ctx_);
+    ble_connect_ready();
 
     uint8_t first[8] = { 0x00u, 0x00u, 0x07u, 0x06u, 0x00u, 0x00u, 0x02u, 0x00u };
     EXPECT_EQ(udisplay_feed(&ctx_, first, sizeof(first)), 0);
@@ -935,7 +949,7 @@ TEST_F(TransportTest, Ble_SetMtu_RejectsOverCapacity)
     EXPECT_EQ(udisplay_ble_set_mtu(&ctx_, 518u), 0) << "one byte over the 517-byte fragment buffer";
 
     /* Prior value (45) must be retained: HANDSHAKE still fits in exactly 1 fragment */
-    udisplay_on_connect(&ctx_);
+    ble_connect_ready();
     ASSERT_EQ(g_transport_sent.size(), 1u);
 }
 
@@ -955,4 +969,230 @@ TEST_F(TransportTest, Ble_SetMtu_RejectsTooSmall)
     udisplay_init(&ctx_, &cfg);
 
     EXPECT_EQ(udisplay_ble_set_mtu(&ctx_, 6u), 0);
+}
+
+/* ── BLE transport readiness: HELLO (issue #45) ──────────────────────────── */
+
+static std::vector<uint32_t> g_timer_starts;
+static int g_timer_stops = 0;
+
+static void timer_start_cb(udisplay_t*, uint32_t delay_ms) { g_timer_starts.push_back(delay_ms); }
+static void timer_stop_cb(udisplay_t*) { ++g_timer_stops; }
+
+/* Single first fragment, any packet_id: length=1, flags=CONTROL, HELLO. */
+static bool is_hello(const Sent& s)
+{
+    return s.data.size() == 7u && s.data[0] == 0x00u && s.data[1] == 0x00u
+        && s.data[3] == 0x01u && s.data[4] == 0x00u
+        && s.data[5] == UDISPLAY_BLE_FLAGS_CONTROL
+        && s.data[6] == UDISPLAY_BLE_CTRL_HELLO;
+}
+
+class BleHelloTest : public TransportTest {
+protected:
+    void SetUp() override
+    {
+        TransportTest::SetUp();
+        g_timer_starts.clear();
+        g_timer_stops = 0;
+        g_error_calls = 0;
+    }
+
+    void init_ble(bool with_timer, uint16_t mtu = 45u)
+    {
+        auto cfg = ble_cfg(mtu);   /* mtu=45: HANDSHAKE fits in 1 fragment */
+        cfg.on_comms_error = on_comms_error;
+        if (with_timer) {
+            cfg.timer_start = timer_start_cb;
+            cfg.timer_stop  = timer_stop_cb;
+        }
+        udisplay_init(&ctx_, &cfg);
+    }
+
+    int echo_hello()
+    {
+        return udisplay_feed(&ctx_, kHelloEcho, sizeof(kHelloEcho));
+    }
+};
+
+TEST_F(BleHelloTest, Connect_SendsHelloNotHandshake_AndArmsTimer)
+{
+    init_ble(true);
+    udisplay_on_connect(&ctx_);
+
+    ASSERT_EQ(g_transport_sent.size(), 1u);
+    EXPECT_TRUE(is_hello(g_transport_sent[0]));
+    EXPECT_EQ(g_transport_sent[0].data[2], 0x00u);   /* first message: packet_id 0 */
+    ASSERT_EQ(g_timer_starts.size(), 1u);
+    EXPECT_EQ(g_timer_starts[0], UDISPLAY_BLE_HELLO_INTERVAL_MS);
+}
+
+TEST_F(BleHelloTest, TimerExpiry_ResendsHelloAndRearms)
+{
+    init_ble(true);
+    udisplay_on_connect(&ctx_);
+    udisplay_timer_expired(&ctx_);
+    udisplay_timer_expired(&ctx_);
+
+    ASSERT_EQ(g_transport_sent.size(), 3u);
+    for (size_t i = 0; i < 3; ++i) {
+        EXPECT_TRUE(is_hello(g_transport_sent[i])) << i;
+        EXPECT_EQ(g_transport_sent[i].data[2], (uint8_t)i) << "packet_id advances per HELLO";
+    }
+    EXPECT_EQ(g_timer_starts.size(), 3u);
+}
+
+TEST_F(BleHelloTest, Echo_StopsTimerAndSendsHandshake)
+{
+    init_ble(true);
+    udisplay_on_connect(&ctx_);
+    g_transport_sent.clear();
+
+    EXPECT_EQ(echo_hello(), 0);
+
+    EXPECT_EQ(g_timer_stops, 1);
+    ASSERT_EQ(g_transport_sent.size(), 1u);
+    const auto& f = g_transport_sent[0].data;
+    EXPECT_EQ(f[5], UDISPLAY_BLE_FLAGS_DATA);
+    EXPECT_EQ(f[6], 0x00u);                            /* MSG_HANDSHAKE */
+    EXPECT_EQ(f[3] | (f[4] << 8), (int)kHandshakeSize);
+    EXPECT_EQ(f[2], 0x01u);                            /* after HELLO's packet_id 0 */
+}
+
+TEST_F(BleHelloTest, LateEchoes_AreIgnored)
+{
+    init_ble(true);
+    udisplay_on_connect(&ctx_);
+    udisplay_timer_expired(&ctx_);   /* two HELLOs in flight */
+    ASSERT_EQ(echo_hello(), 0);
+    g_transport_sent.clear();
+
+    EXPECT_EQ(echo_hello(), 0);      /* echo of the second HELLO */
+    EXPECT_TRUE(g_transport_sent.empty()) << "no second HANDSHAKE";
+    EXPECT_EQ(g_timer_stops, 1);
+
+    udisplay_timer_expired(&ctx_);   /* stale expiry racing the stop */
+    EXPECT_TRUE(g_transport_sent.empty());
+}
+
+TEST_F(BleHelloTest, ProtocolTrafficIsHeldUntilReady)
+{
+    init_ble(true);
+    udisplay_on_connect(&ctx_);
+    g_transport_sent.clear();
+
+    make_active();                              /* even if a client jumped ahead */
+    udisplay_send_float(&ctx_, 0x10u, 1.0f);
+    uint8_t chunk_req[3] = { 0x20u, 0x00u, 0x00u };
+    udisplay_on_message(&ctx_, chunk_req, sizeof(chunk_req));
+
+    EXPECT_TRUE(g_transport_sent.empty());
+}
+
+TEST_F(BleHelloTest, Heartbeat_BeforeReady_SendsNoHeartbeat_WithTimer)
+{
+    init_ble(true);
+    udisplay_on_connect(&ctx_);
+    g_transport_sent.clear();
+
+    udisplay_heartbeat(&ctx_);
+    EXPECT_TRUE(g_transport_sent.empty()) << "timer drives the retry; no HEARTBEAT yet";
+}
+
+TEST_F(BleHelloTest, NoTimer_HeartbeatRetriesHello)
+{
+    init_ble(false);
+    udisplay_on_connect(&ctx_);
+    ASSERT_EQ(g_transport_sent.size(), 1u);
+    g_transport_sent.clear();
+
+    udisplay_heartbeat(&ctx_);
+    ASSERT_EQ(g_transport_sent.size(), 1u);
+    EXPECT_TRUE(is_hello(g_transport_sent[0]));
+
+    g_transport_sent.clear();
+    ASSERT_EQ(echo_hello(), 0);
+    ASSERT_EQ(g_transport_sent.size(), 1u);
+    EXPECT_EQ(g_transport_sent[0].data[6], 0x00u);   /* HANDSHAKE */
+}
+
+TEST_F(BleHelloTest, NeverEchoed_WatchdogFires)
+{
+    init_ble(true);
+    udisplay_on_connect(&ctx_);
+    for (unsigned i = 0; i < UDISPLAY_HB_MISS_MAX; ++i) udisplay_heartbeat(&ctx_);
+    EXPECT_EQ(g_error_calls, 1);
+}
+
+TEST_F(BleHelloTest, Echo_ResetsWatchdog)
+{
+    init_ble(true);
+    udisplay_on_connect(&ctx_);
+    for (unsigned i = 0; i + 1 < UDISPLAY_HB_MISS_MAX; ++i) udisplay_heartbeat(&ctx_);
+    ASSERT_EQ(echo_hello(), 0);
+    udisplay_heartbeat(&ctx_);
+    EXPECT_EQ(g_error_calls, 0);
+}
+
+TEST_F(BleHelloTest, Disconnect_StopsTimer)
+{
+    init_ble(true);
+    udisplay_on_connect(&ctx_);
+    udisplay_on_disconnect(&ctx_);
+    EXPECT_EQ(g_timer_stops, 1);
+
+    g_transport_sent.clear();
+    udisplay_timer_expired(&ctx_);
+    EXPECT_TRUE(g_transport_sent.empty());
+}
+
+TEST_F(BleHelloTest, Reconnect_RunsReadinessAgain)
+{
+    init_ble(true);
+    udisplay_on_connect(&ctx_);
+    ASSERT_EQ(echo_hello(), 0);
+    udisplay_on_disconnect(&ctx_);
+    g_transport_sent.clear();
+
+    udisplay_on_connect(&ctx_);
+    ASSERT_EQ(g_transport_sent.size(), 1u);
+    EXPECT_TRUE(is_hello(g_transport_sent[0]));
+    EXPECT_EQ(g_transport_sent[0].data[2], 0x00u);   /* packet_id reset per connection */
+}
+
+TEST_F(BleHelloTest, MalformedControl_IsLinkError)
+{
+    init_ble(true);
+    udisplay_on_connect(&ctx_);
+
+    uint8_t unknown[7] = { 0x00u, 0x00u, 0x00u, 0x01u, 0x00u,
+                           UDISPLAY_BLE_FLAGS_CONTROL, 0x7Fu };
+    EXPECT_EQ(udisplay_feed(&ctx_, unknown, sizeof(unknown)), -1);
+
+    uint8_t too_long[8] = { 0x00u, 0x00u, 0x01u, 0x02u, 0x00u,
+                            UDISPLAY_BLE_FLAGS_CONTROL, UDISPLAY_BLE_CTRL_HELLO, 0x00u };
+    EXPECT_EQ(udisplay_feed(&ctx_, too_long, sizeof(too_long)), -1);
+}
+
+TEST_F(BleHelloTest, SetTimerAfterInit_IsUsed)
+{
+    init_ble(false);
+    udisplay_set_timer(&ctx_, timer_start_cb, timer_stop_cb);
+    udisplay_on_connect(&ctx_);
+    EXPECT_EQ(g_timer_starts.size(), 1u);
+    ASSERT_EQ(echo_hello(), 0);
+    EXPECT_EQ(g_timer_stops, 1);
+}
+
+TEST_F(BleHelloTest, Tcp_IsUnaffected)
+{
+    auto cfg = tcp_cfg();
+    cfg.timer_start = timer_start_cb;
+    cfg.timer_stop  = timer_stop_cb;
+    udisplay_init(&ctx_, &cfg);
+    udisplay_on_connect(&ctx_);
+
+    ASSERT_EQ(g_transport_sent.size(), 1u);
+    EXPECT_EQ(g_transport_sent[0].data[2], 0x00u);   /* HANDSHAKE right away */
+    EXPECT_TRUE(g_timer_starts.empty());
 }

@@ -353,6 +353,36 @@ static void heartbeat_timer_cb(TimerHandle_t t)
     }
 }
 
+/* ── uDisplay timer (BLE HELLO readiness retries) ──────────────────────────
+ *
+ * After the client subscribes, the library sends a HELLO transport control
+ * message and waits for the client to echo it before sending HANDSHAKE: an
+ * indication the client's BLE stack confirmed can still be lost before it
+ * reaches the client application (seen on Linux/BlueZ right after
+ * subscribing). The library asks for a one-shot timer to retry the HELLO
+ * every UDISPLAY_BLE_HELLO_INTERVAL_MS.
+ *
+ * A NimBLE callout rather than a FreeRTOS timer: it fires in the NimBLE host
+ * task, the same task that delivers the client's echo (ctrl_access ->
+ * udisplay_feed), so a HELLO retry can never interleave with the HANDSHAKE
+ * the echo triggers — both use the instance's fragment buffer and packet_id. */
+static struct ble_npl_callout g_ud_callout;   /* initialised in app_main */
+
+static void ud_callout_cb(struct ble_npl_event* ev)
+{
+    udisplay_timer_expired(ui.ctx());
+}
+
+static void ud_timer_start(udisplay_t* ctx, uint32_t delay_ms)
+{
+    ble_npl_callout_reset(&g_ud_callout, ble_npl_time_ms_to_ticks32(delay_ms));
+}
+
+static void ud_timer_stop(udisplay_t* ctx)
+{
+    ble_npl_callout_stop(&g_ud_callout);
+}
+
 /* ── GATT characteristic access callbacks ────────────────────────────────── */
 
 static int ctrl_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -481,13 +511,14 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
         /* Fires on every CCCD write, including unsubscribe and, on some
          * stacks, a resubscribe mid-connection (e.g. after MTU
          * renegotiation). Gate on indicate-enable of the data characteristic,
-         * and only send HANDSHAKE once per connection — udisplay_on_connect()
+         * and only start the session once per connection — udisplay_on_connect()
          * resets BLE fragment/reassembly state, so firing it twice would
-         * corrupt an in-progress bootstrap. */
+         * corrupt an in-progress bootstrap. It sends HELLO first; HANDSHAKE
+         * follows once the client echoes it (see ud_timer_start above). */
         if (ev->subscribe.attr_handle == g_data_attr_handle &&
             ev->subscribe.cur_indicate && !g_handshake_sent) {
             g_handshake_sent = true;
-            ESP_LOGI(TAG, "client subscribed — sending HANDSHAKE");
+            ESP_LOGI(TAG, "client subscribed — sending HELLO, HANDSHAKE follows its echo");
             udisplay_on_connect(ui.ctx());
         }
         break;
@@ -556,9 +587,12 @@ extern "C" void app_main(void)
     g_tx_lock = xSemaphoreCreateMutexStatic(&g_tx_lock_buf);
 
     ui.init(send_cb, UDISPLAY_TRANSPORT_BLE);
+    udisplay_set_timer(ui.ctx(), ud_timer_start, ud_timer_stop);
     register_ui_handlers();
 
     nimble_port_init();
+    ble_npl_callout_init(&g_ud_callout, nimble_port_get_dflt_eventq(),
+                         ud_callout_cb, NULL);
     ble_svc_gap_init();
     ble_svc_gatt_init();
     ble_svc_gap_device_name_set("Demo05");

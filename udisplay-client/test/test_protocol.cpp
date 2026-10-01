@@ -564,16 +564,66 @@ private slots:
         QCOMPARE(out, msg);
     }
 
-    void bleUnframe_RejectNonZeroFlags()
+    void bleUnframe_RejectReservedFlags()
     {
-        /* First fragment with flags = 0x01 (reserved, must be 0x00) */
+        /* First fragment with flags = 0x02 (reserved: only 0x00/0x01 are defined) */
         QByteArray pkt(9, '\x00');
         pkt[3] = 0x05; /* length lo = 5 */
-        pkt[5] = 0x01; /* flags = 0x01 — invalid */
+        pkt[5] = 0x02; /* flags = 0x02 — invalid */
         Proto::BleRxState state{};
         QByteArray out;
-        QVERIFY(!Proto::bleUnframe(pkt, state, out));
+        QCOMPARE(Proto::bleFeed(pkt, state, out), Proto::BleRxResult::Error);
         QVERIFY(!state.active); /* state reset */
+    }
+
+    /* ── BLE transport control: HELLO readiness probe (issue #45) ──────────── */
+
+    void bleFeed_DeviceHello_IsControlNotProtocol()
+    {
+        /* As libudisplay sends it: offset 0, packet_id 0, length 1, flags CONTROL, HELLO */
+        const QByteArray hello = QByteArray::fromHex("00000001000101");
+        Proto::BleRxState state{};
+        QByteArray out;
+        QCOMPARE(Proto::bleFeed(hello, state, out), Proto::BleRxResult::Control);
+        QCOMPARE(out, QByteArray(1, char(Proto::BLE_CTRL_HELLO)));
+        QVERIFY(!Proto::bleUnframe(hello, state, out)); /* never a protocol message */
+    }
+
+    void bleFeed_ControlAcrossFragments_IsControl()
+    {
+        uint8_t packetId = 0xFF;
+        const QByteArray msg = QByteArray::fromHex("0102030405");
+        auto packets = Proto::bleFrame(msg, 8, packetId, Proto::BLE_FLAGS_CONTROL);
+        QCOMPARE(packets.size(), 2);
+        Proto::BleRxState state{};
+        QByteArray out;
+        QCOMPARE(Proto::bleFeed(packets[0], state, out), Proto::BleRxResult::More);
+        QCOMPARE(Proto::bleFeed(packets[1], state, out), Proto::BleRxResult::Control);
+        QCOMPARE(out, msg);
+
+        /* flags do not leak into the next (data) message */
+        auto data = Proto::bleFrame(msg, 20, packetId);
+        QCOMPARE(Proto::bleFeed(data[0], state, out), Proto::BleRxResult::Done);
+    }
+
+    void bleControlReply_EchoesHello()
+    {
+        QByteArray reply;
+        QVERIFY(Proto::bleControlReply(QByteArray(1, char(Proto::BLE_CTRL_HELLO)), reply));
+        QCOMPARE(reply, QByteArray(1, char(Proto::BLE_CTRL_HELLO)));
+
+        uint8_t packetId = 0x06; /* client's own counter, not the device's */
+        auto packets = Proto::bleFrame(reply, 20, packetId, Proto::BLE_FLAGS_CONTROL);
+        QCOMPARE(packets.size(), 1);
+        QCOMPARE(packets[0], QByteArray::fromHex("00000701000101"));
+    }
+
+    void bleControlReply_RejectsUnknownOrMalformed()
+    {
+        QByteArray reply;
+        QVERIFY(!Proto::bleControlReply(QByteArray(1, '\x7F'), reply));
+        QVERIFY(!Proto::bleControlReply(QByteArray::fromHex("0100"), reply));
+        QVERIFY(!Proto::bleControlReply(QByteArray(), reply));
     }
 
     void bleUnframe_RejectLengthOverMax()
@@ -661,8 +711,8 @@ private slots:
 
         /* too short for any header */
         QCOMPARE(Proto::bleFeed(QByteArray(2, '\0'), state, out), Proto::BleRxResult::Error);
-        /* flags != 0 */
-        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("000000010001" "02"), state, out),
+        /* reserved flags (only 0x00 data / 0x01 control are defined) */
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("000000010002" "02"), state, out),
                  Proto::BleRxResult::Error);
         /* length 1025 */
         QCOMPARE(Proto::bleFeed(QByteArray::fromHex("000000010400" "02"), state, out),
@@ -701,7 +751,7 @@ private slots:
         QCOMPARE(Proto::bleFeed(QByteArray::fromHex("000007060000" "0200"), state, out),
                  Proto::BleRxResult::More);
         /* a bad first fragment aborts the in-flight message */
-        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("00000001000102"), state, out),
+        QCOMPARE(Proto::bleFeed(QByteArray::fromHex("00000001000202"), state, out),
                  Proto::BleRxResult::Error);
         /* so a continuation of the old message is now an orphan */
         QCOMPARE(Proto::bleFeed(QByteArray::fromHex("0200070000"), state, out),

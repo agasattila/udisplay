@@ -90,7 +90,8 @@ Consequences for implementers:
 [u16 offset=0  ]  byte position in original message (always 0x0000 for first)
 [u8  packet_id ]  increments for each new message; wraps 255 → 0; independent per transmitter
 [u16 length    ]  total byte count of the original (unframed) message
-[u8  flags     ]  reserved; MUST be 0x00; receiver rejects first fragment with flags ≠ 0x00
+[u8  flags     ]  0x00 = data (uDisplay protocol message), 0x01 = control (transport control message);
+                  any other value is reserved and rejected
 [N×  u8 payload]  first N bytes of the message (as many as fit in the ATT packet)
 ```
 
@@ -114,7 +115,8 @@ Header sizes: first fragment = 6 bytes; continuation fragment = 3 bytes. Minimum
 | Condition | Action |
 |---|---|
 | Fragment shorter than its header (fewer than 3 bytes, or a first fragment under 6 bytes) | Link error |
-| `flags ≠ 0x00` in first fragment | Link error |
+| `flags` other than `0x00` (data) or `0x01` (control) in first fragment | Link error |
+| Control message that is not a known control code (see below) | Link error |
 | `length > 1024` (`UDISPLAY_MAX_MSG_SIZE`) in first fragment | Link error |
 | First fragment payload larger than its declared `length` | Link error |
 | Continuation fragment with no message in flight | Link error |
@@ -124,9 +126,29 @@ Header sizes: first fragment = 6 bytes; continuation fragment = 3 bytes. Minimum
 
 Implementations MUST compute the accumulated size in a type wider than `u16` (`offset` can be up to `0xFFFF`), so that `offset + payload_len` cannot wrap and slip past the bounds check.
 
-A fragment with `offset = 0` always starts a fresh reassembly, discarding any previously accumulated bytes for an incomplete message (this is not an error). The `flags` byte stays reserved (MUST be 0) as a forward-compatibility hook: do not reuse or repurpose it.
+A fragment with `offset = 0` always starts a fresh reassembly, discarding any previously accumulated bytes for an incomplete message (this is not an error). The `flags` value of the first fragment applies to the whole message (continuations carry no flags). Values other than `0x00`/`0x01` stay reserved as a forward-compatibility hook.
 
 **Connection reset:** Both `packet_id` counters reset to 0 on BLE disconnect and reconnect. The first fragment of the first message after reconnect will have `offset = 0, packet_id = 0`; the receiver accepts it unconditionally.
+
+**Transport control messages (`flags = 0x01`).** A control message belongs to the BLE transport, not to the uDisplay protocol: it is reassembled like any other message but never passed to the protocol layer. Its first payload byte is the control code; control messages share the transmitter's `packet_id` counter with data messages.
+
+| Code | Name | Payload | Direction |
+|---|---|---|---|
+| `0x01` | `HELLO` | `[u8 0x01]` (length = 1) | device → client, echoed client → device |
+
+Any other code, or a `HELLO` whose length is not 1, is a link error.
+
+**Transport readiness (HELLO).** An ATT confirmation only proves that the peer's host stack received an indication, not that the application did. On Linux/BlueZ an indication that arrives right after the client subscribes can be confirmed and still never reach the application, so a `HANDSHAKE` sent at that moment could be lost. The protocol therefore does not start until the device has proved the application-level path works in both directions:
+
+1. Once the client has subscribed to `data` indications, the device sends `HELLO` and repeats it every **100 ms** (`UDISPLAY_BLE_HELLO_INTERVAL_MS`) until an echo arrives.
+2. The client echoes every `HELLO` it receives, unchanged, as a control message on `control` (with its own `packet_id`). It does nothing else with it and needs no state of its own for this.
+3. The first echo makes the transport ready: the device stops retrying and sends `HANDSHAKE`. Echoes of `HELLO`s that were still in flight arrive later and are ignored.
+
+Until the transport is ready, the device sends no protocol messages, `HEARTBEAT` included. Its comms watchdog still runs: a client that never echoes is dropped after `UDISPLAY_HB_MISS_MAX` heartbeat periods, like a stalled bootstrap. A new connection runs the readiness check again.
+
+Example, device's first message of a connection: `00 00 00 01 00 01 01` (offset 0, packet_id 0, length 1, flags = control, `HELLO`).
+
+Compatibility: a client that predates control messages treats `flags = 0x01` as a link error and disconnects, so this requires an updated client. An updated client still works with older firmware, which never sends `HELLO` and starts with `HANDSHAKE`.
 
 ---
 
@@ -134,7 +156,7 @@ A fragment with `offset = 0` always starts a fresh reassembly, discarding any pr
 
 | Value | Name | Direction | Description |
 |---|---|---|---|
-| `0x00` | `HANDSHAKE` | device → client | Sent immediately after client connects |
+| `0x00` | `HANDSHAKE` | device → client | Sent immediately after client connects (BLE: once the HELLO readiness check passed) |
 | `0x01` | `HANDSHAKE_ACK` | client → device | Client confirms compatible protocol version |
 | `0x02` | `CLIENT_READY` | client → device | Client signals bootstrap complete; device enters active state |
 | `0x10` | `CHUNK_HEADER_REQUEST` | client → device | Request header (hash + length) for one chunk |
@@ -508,6 +530,8 @@ The device maintains a two-flag state machine per connection, with an optional `
 connected=0, active=0                ← initial / disconnected
        │
        │ on_connect()
+       │   BLE only: sends HELLO, retries every 100 ms; nothing else is sent
+       │   until the client's echo arrives (ble_ready=1), then:
        │   auth_algo=NONE   → sends HANDSHAKE(flags=0x00)
        │   auth_algo=HMAC_SHA256 → sends HANDSHAKE(flags=0x01, salt), sets awaiting_auth_ack=1
        ▼
@@ -548,6 +572,7 @@ connected=0, active=0                ← disconnected (active always reset)
 - STATE_UPDATE pushes are blocked (`active=0`).
 - Incoming EVENT messages are silently dropped.
 - **Bootstrap-stall watchdog:** if the client connects but never progresses (no `HANDSHAKE_ACK`, `CLIENT_READY`, `CHUNK_HEADER_REQUEST`, or `CHUNK_REQUEST` arrives) for `UDISPLAY_HB_MISS_MAX` consecutive heartbeats, `on_comms_error` fires and the device gives up on the connection — the same recovery path as the post-active heartbeat-miss watchdog below, just triggered earlier. This shares one counter (`comms_miss_count`) and one threshold with the ACTIVE-state watchdog, since a connection is never in both states at once.
+- On BLE, the watchdog also covers the HELLO readiness check: before the client echoes a `HELLO`, `udisplay_heartbeat()` sends no `HEARTBEAT` but still counts a miss.
 - On BLE transport specifically, this watchdog only starts counting once the counted connection begins (`on_connect()` is called) — see the demo05 firmware notes below for the narrower window between radio-level connect and BLE indication subscribe, which this watchdog does not cover (firmware-level concern, not a library state).
 
 **In ACTIVE state:**
@@ -804,3 +829,4 @@ are the real-hardware showpieces.
 | v2.2 | 2026-05-17 | BLE GATT framing redesign. Replaced 1-byte `frag_flags` scheme with offset+packet_id framing: first fragment carries `[u16 offset=0][u8 packet_id][u16 length][u8 flags]`; continuations carry `[u16 offset][u8 packet_id]`. Completion detected by `offset + frag_payload_size == length`. `control` characteristic upgraded from WRITE_NO_RESPONSE to WRITE_WITH_RESPONSE (ATT-level delivery confirmation). Both characteristics use BLE framing (not data-only as previously stated — `HANDSHAKE_ACK(auth)` is 35 bytes and requires fragmentation at min MTU). `packet_id` counters are independent per transmitter and reset to 0 on reconnect. Explicit error rules added for flags, length cap (1024 bytes), offset gaps, wrong offsets, unexpected packet_id, and over-completion. No PROTO_VERSION bump — BLE framing is implemented in the client's BleTransport, not yet deployed as of this changelog entry. |
 | v2.3 | 2026-07-27 | `dpad` split out of `button-group` into its own v1 layout container (`section`/`row`/`grid`/`dpad`) — `button-group`'s `layout: dpad` removed (grid-only now); a dpad's children are ordinary `button` widgets carrying a `position` (`"top"`\|`"right"`\|`"bottom"`\|`"left"`\|`"center"`). No wire-format change — dpad carries no widget ID and sends no protocol messages of its own; each child button sends its own independent `button_press`/`button_release`/`button_click` events, same as any standalone button. No PROTO_VERSION bump. |
 | v2.4 | 2026-09-25 | `button-group` exclusive selection implemented (issue #41): firmware selects an item with STATE_UPDATE(group widget_id, `uint8`, item widget_id), `0` = none. No wire-format change: reuses the existing STATE_UPDATE and `uint8` value type. No PROTO_VERSION bump. |
+| v2.5 | 2026-09-30 | BLE transport readiness check (issue #45). First-fragment `flags` now defined: `0x00` = data, `0x01` = transport control; other values stay reserved. New control message `HELLO` (`0x01`): the device repeats it every 100 ms after the client subscribes and sends `HANDSHAKE` only after the client echoes it, because an ATT-confirmed indication can still be lost before it reaches the client application. libudisplay: optional host timer (`timer_start`/`timer_stop` in `udisplay_config_t`, `udisplay_timer_expired()`, `udisplay_set_timer()`); without one, the HELLO is retried from `udisplay_heartbeat()`. BLE only; no PROTO_VERSION bump. Older clients reject `flags = 0x01`, so devices on this version need an updated client. |
