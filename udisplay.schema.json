@@ -50,7 +50,7 @@
     },
 
     "widgetMap": {
-      "description": "Named widget or container map. Names become C macro suffixes. Rendered in declaration order. Names must be globally unique across all container scopes.",
+      "description": "Named widget or container map. Names become C macro suffixes. Rendered in declaration order. A widget's ID path is the chain of keys from the top level (section.row.leaf), so names only need to be unique among siblings.",
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/widgetOrContainer" },
       "propertyNames": {
@@ -514,7 +514,7 @@
     },
 
     "sectionContainer": {
-      "description": "Named collapsible group container. Gets its own widget ID (for SET_PROPERTY); children get widget IDs as if they were top-level (section name excluded from their ID paths). Requires capabilities: [layout-v2]. `style:` (see the `styleProp` $def) colors this section's own header/border chrome AND cascades to children that don't set their own `style:`.",
+      "description": "Named collapsible group container. Gets its own widget ID (for SET_PROPERTY); the section name is a segment of its children's ID paths (section.child). Requires capabilities: [layout-v2]. `style:` (see the `styleProp` $def) colors this section's own header/border chrome AND cascades to children that don't set their own `style:`.",
       "type": "object",
       "required": ["type", "widgets"],
       "additionalProperties": false,
@@ -538,7 +538,7 @@
     },
 
     "rowContainer": {
-      "description": "Horizontal layout container. Children are laid out left-to-right with optional flex weights. Container name excluded from child ID paths. Requires capabilities: [layout-v2].",
+      "description": "Horizontal layout container. Children are laid out left-to-right with optional flex weights. The container name is a segment of its children's ID paths (row.child). Requires capabilities: [layout-v2].",
       "type": "object",
       "required": ["type", "widgets"],
       "additionalProperties": false,
@@ -552,7 +552,7 @@
     },
 
     "gridContainer": {
-      "description": "Grid layout container. Children are placed left-to-right, wrapping at `columns` items per row. Container name excluded from child ID paths. Requires capabilities: [layout-v2].",
+      "description": "Grid layout container. Children are placed left-to-right, wrapping at `columns` items per row. The container name is a segment of its children's ID paths (grid.child). Requires capabilities: [layout-v2].",
       "type": "object",
       "required": ["type", "columns", "widgets"],
       "additionalProperties": false,
@@ -581,7 +581,7 @@
     },
 
     "dpadWidget": {
-      "description": "Directional pad container. Classic 5-position directional pad (cross shape), laid out from `button` children — each must declare a `position` (top/right/bottom/left/center); at least 1 required. Container name excluded from child ID paths, matching `section`/`row`/`grid`. Requires capabilities: [layout-v2].",
+      "description": "Directional pad container. Classic 5-position directional pad (cross shape), laid out from `button` children — each must declare a `position` (top/right/bottom/left/center); at least 1 required. The container name is a segment of its children's ID paths (dpad.button), matching `section`/`row`/`grid`. Requires capabilities: [layout-v2].",
       "type": "object",
       "required": ["type", "widgets"],
       "additionalProperties": false,

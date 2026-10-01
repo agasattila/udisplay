@@ -633,36 +633,41 @@ Widget IDs are assigned by `udisplay-gen build` at code generation time (ID sche
    widget gets one: leaves, containers (`section`/`row`/`grid`/`dpad`),
    decorations (`label`/`separator`), `button` face children and
    `button-group` items. `dropdown` items are options, not widgets, and get none.
-   - A top-level widget's path is its key (`rate`).
-   - Containers are **transparent to their children's paths**: a container's
-     own key is never a segment of a child's path. The container itself gets
-     a path like any widget at its position (`advanced`), and its children
-     keep the prefix the container was reached with (`rate`, not `advanced.rate`).
-   - `button` face children and `button-group` items are prefixed by their
-     parent's path (`relay1.relay1_status`, `mode_sel.ac`). A `row`/`grid`
-     on a button face gets `btn.face_row`, and its own children stay
-     `btn.icon` (container transparency again).
+   - A top-level widget's path is its key (`advanced`).
+   - Every other widget's path is its parent's path plus its own key:
+     **container keys are namespaces** for their descendants. A slider
+     `rate` in a row `tuning` of section `advanced` is
+     `advanced.tuning.rate`. The same applies to `button` face children
+     (`relay1.relay1_status`, and `btn.face_row.icon` for a row on a button
+     face) and `button-group` items (`mode_sel.ac`).
+   - Keys only need to be unique among their siblings, which YAML already
+     guarantees: `boiler.temp` and `tank.temp` are two different widgets.
 2. Sort all paths alphabetically and assign `widget_id` starting at **0x10**,
    incrementing by 1 in sorted order. Two widgets resolving to the same path
-   (e.g. a section `advanced` and a slider `advanced` in another section) are
-   an error in both codegen and the client.
+   (only possible with a `.` inside a key, which the schema rejects) are an
+   error in both codegen and the client.
 3. The mapping is embedded in the generated `udisplay_ui.h`:
    ```c
-   #define WIDGET_ID_ADVANCED  0x10   // a section — addressable too
-   #define WIDGET_ID_MODE      0x11
-   #define WIDGET_ID_RATE      0x12
-   // relay1.relay1_status is a child widget — also gets its own ID
-   #define WIDGET_ID_RELAY1    0x13
-   #define WIDGET_ID_RELAY1_STATUS 0x14
+   #define WIDGET_ID_ADVANCED             0x10   // a section — addressable too
+   #define WIDGET_ID_ADVANCED_TUNING      0x11   // a row in it
+   #define WIDGET_ID_ADVANCED_TUNING_RATE 0x12   // advanced.tuning.rate
+   #define WIDGET_ID_MODE                 0x13
+   // relay1.relay1_status is a button face child — also gets its own ID
+   #define WIDGET_ID_RELAY1               0x14
+   #define WIDGET_ID_RELAY1_STATUS        0x15
    ```
-   The C++ and MicroPython backends expose every widget, containers included,
-   as a member with `set_property()` / `reset_property()`.
+   Paths that normalize to the same C name (`advanced_tuning` next to
+   `advanced.tuning`) are rejected at codegen. The C++ and MicroPython
+   backends nest the same way: every widget is a member of its parent
+   (`ui.advanced.tuning.rate.set(2.5)`), containers included, with
+   `set_property()` / `reset_property()`.
 4. Maximum 240 widgets per device (0x10–0xFF) — containers and decorations count.
 
 The Qt client derives the same mapping by parsing the YAML blob (same sort order). Both sides use `widget_id` as the sole identifier in all STATE_UPDATE, EVENT, SET_PROPERTY and RESET_PROPERTY messages.
 
 **Pre-0x05 firmware.** Before proto 0x05 containers and decorations got no
-ID, so the numbering of any YAML containing them differs. The client
+ID and container keys were not part of their children's paths, so the
+numbering of any YAML containing a container differs. The client
 implements only the current scheme: regenerate firmware built with an older
 `udisplay-gen`, and build it against the `libudisplay` from the same release.
 
@@ -861,4 +866,4 @@ are the real-hardware showpieces.
 | v2.3 | 2026-07-27 | `dpad` split out of `button-group` into its own v1 layout container (`section`/`row`/`grid`/`dpad`) — `button-group`'s `layout: dpad` removed (grid-only now); a dpad's children are ordinary `button` widgets carrying a `position` (`"top"`\|`"right"`\|`"bottom"`\|`"left"`\|`"center"`). No wire-format change — dpad carries no widget ID and sends no protocol messages of its own; each child button sends its own independent `button_press`/`button_release`/`button_click` events, same as any standalone button. No PROTO_VERSION bump. |
 | v2.4 | 2026-09-25 | `button-group` exclusive selection implemented (issue #41): firmware selects an item with STATE_UPDATE(group widget_id, `uint8`, item widget_id), `0` = none. No wire-format change: reuses the existing STATE_UPDATE and `uint8` value type. No PROTO_VERSION bump. |
 | v2.5 | 2026-09-30 | BLE transport readiness check (issue #45). First-fragment `flags` now defined: `0x00` = data, `0x01` = transport control; other values stay reserved. New control message `HELLO` (`0x01`): the device repeats it every 100 ms after the client subscribes and sends `HANDSHAKE` only after the client echoes it, because an ATT-confirmed indication can still be lost before it reaches the client application. libudisplay: optional host timer (`timer_start`/`timer_stop` in `udisplay_config_t`, `udisplay_timer_expired()`, `udisplay_set_timer()`); without one, the HELLO is retried from `udisplay_heartbeat()`. BLE only; no PROTO_VERSION bump. Older clients reject `flags = 0x01`, so devices on this version need an updated client. |
-| v2.6 | 2026-10-01 | Every widget gets a `widget_id` (issue #43): containers (`section`/`row`/`grid`/`dpad`) and decorations (`label`/`separator`) now take an ID slot under their own key, while staying transparent to their children's ID paths. SET_PROPERTY/RESET_PROPERTY can target any widget; `ENABLED`/`VISIBLE` on a container apply to its subtree. IDs shift relative to the old leaf-only scheme, so PROTO_VERSION bumped to 0x05: older clients reject v5 devices with the existing "Update the app" error. Firmware generated before 0x05 must be regenerated — the client has no leaf-only fallback (pre-release, no compatibility shim). No message-format change. |
+| v2.6 | 2026-10-01 | Every widget gets a `widget_id` (issue #43): containers (`section`/`row`/`grid`/`dpad`) and decorations (`label`/`separator`) now take an ID slot, and every container key is a segment of its descendants' ID paths (`section.row.leaf`), so widget keys only need to be unique among siblings. SET_PROPERTY/RESET_PROPERTY can target any widget; `ENABLED`/`VISIBLE` on a container apply to its subtree. IDs shift relative to the old leaf-only scheme, so PROTO_VERSION bumped to 0x05: older clients reject v5 devices with the existing "Update the app" error. Firmware generated before 0x05 must be regenerated — the client has no leaf-only fallback (pre-release, no compatibility shim). No message-format change. |

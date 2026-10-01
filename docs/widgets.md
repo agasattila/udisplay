@@ -88,15 +88,17 @@ widgets:
   enable_toggle:  # → WIDGET_ID_ENABLE_TOGGLE = 0x10u  (alphabetical: e)
 ```
 
-Child widgets (button LEDs, button-group items) are addressed as `parent.child` and
-sorted into the same alphabetical namespace.
+Every child widget is addressed by the chain of keys from the top level,
+`parent.child` (a slider `rate` in section `advanced` is `advanced.rate` →
+`WIDGET_ID_ADVANCED_RATE`; a button LED `power_btn.power_led`; a button-group item
+`mode_sel.fast`), and sorted into the same alphabetical namespace.
 
 **Every widget gets an ID** (protocol 0x05+) — containers (`section`, `row`, `grid`,
 `dpad`) and decorations (`label`, `separator`) too — so firmware can change any
 widget's runtime properties (`ENABLED`, `VISIBLE`, ...) with `udisplay_set_property()`.
-Containers take a slot under their own key but stay transparent to their children's
-paths (see [`section`](#section)). Widget names must therefore be unique across all
-container scopes, container and label names included.
+Every container is a namespace for its children (see [`section`](#section)), so widget
+names only need to be unique among their siblings: `boiler.temp` and `tank.temp` are
+two different widgets.
 
 ### Validation
 
@@ -384,7 +386,7 @@ Firmware wires up only the handlers it needs. Unused handlers stay NULL and are 
 | `type` | `"button"` | yes | — | |
 | `label` | string | no | — | Text on the button face. Max 32 chars. |
 | `shape` | `"rect"` \| `"circle"` \| `"square"` | no | `"rect"` | `"circle"` for icon/action buttons; `"square"` for gamepad-style layouts. |
-| `widgets` | object | no | — | Named child widgets — `led`, `rgbled`, `display`, `label`, or a nested `row`/`grid` of those (see note above). Every child (at any depth) gets a `parent.child` ID path; `led`/`rgbled`/`display` children also get a setter. `label` children get an ID but no setter (same as a standalone `label`); a nested `row`/`grid` gets its own `parent.<row>` ID but is transparent to its children's paths (same as a top-level container). |
+| `widgets` | object | no | — | Named child widgets — `led`, `rgbled`, `display`, `label`, or a nested `row`/`grid` of those (see note above). Every child (at any depth) gets a `parent.child` ID path; `led`/`rgbled`/`display` children also get a setter. `label` children get an ID but no setter (same as a standalone `label`); a nested `row`/`grid` gets its own `parent.<row>` ID and is a namespace for its own children (`parent.<row>.<child>`, same as a top-level container). |
 | `style` | string | no | — | References a named theme from the top-level `style:` block (see [Global Stylesheet](#global-stylesheet)). Colors the button's own face (fill/label via the theme's `button`/`button_text` tokens) and cascades to face children with no `style:` of their own (see [Container-level style cascading](#per-widget-style-reference)). |
 
 Button color is **not** a free-form per-widget attribute. It comes from the
@@ -450,11 +452,12 @@ power_btn:
           type: led
 ```
 
-`face` (the grid container) is transparent to its children's ID paths, same as a
-top-level `row`/`grid` — the generated header still produces `WIDGET_ID_POWER_BTN_POWER_LED`
-and `set_power_btn_power_led(udisplay_t* ctx, uint8_t v)`, with `face` contributing no path
-segment of its own. `face` itself gets `WIDGET_ID_POWER_BTN_FACE`, and `power_label` gets
-`WIDGET_ID_POWER_BTN_POWER_LABEL` (ID only, no setter — same as any standalone `label`).
+`face` (the grid container) is a path segment of its children, same as a top-level
+`row`/`grid`: the generated header produces `WIDGET_ID_POWER_BTN_FACE_POWER_LED` and
+`set_power_btn_face_power_led(udisplay_t* ctx, uint8_t v)` (C++:
+`ui.power_btn.face.power_led.set(...)`). `face` itself gets `WIDGET_ID_POWER_BTN_FACE`,
+and `power_label` gets `WIDGET_ID_POWER_BTN_FACE_POWER_LABEL` (ID only, no setter — same
+as any standalone `label`).
 
 **Generated C API:**
 
@@ -485,8 +488,9 @@ static const udisplay_ui_handlers_t g_handlers = {
 **Generated C++ API:**
 
 A button with no `widgets:` face is a plain `ButtonWidget` member; a button that
-declares a face (like `power_btn` above) gets a derived class with one member per
-`led`/`rgbled`/`display` descendant instead (flattened, same ID rule as C). Lambda
+declares a face (like `power_btn` above) gets a derived class of `ButtonWidget` with one
+member per face child, nested the same way as the ID path (`ui.power_btn.face.power_led`
+for the grid example above). Lambda
 handlers require `--lang cpp --modern` — the plain `--lang cpp` build stores handlers
 as raw function pointers, which a capturing lambda can't convert to.
 
@@ -1130,10 +1134,10 @@ divider_1:
 Named collapsible group container. Renders a header bar with an optional label, with
 children displayed vertically below it (collapsible by the user if `collapsible: true`).
 
-The section name is **excluded** from child widget ID paths. A child named `rate` inside
-a section named `advanced` gets ID path `rate` → `WIDGET_ID_RATE`, not `WIDGET_ID_ADVANCED_RATE`.
-The section itself gets its own ID, `WIDGET_ID_ADVANCED`. `udisplay-gen validate`
-enforces globally unique widget names (containers and labels included) across all scopes.
+The section name is a **namespace** for its children: a child named `rate` inside a
+section named `advanced` gets ID path `advanced.rate` → `WIDGET_ID_ADVANCED_RATE`. The
+section itself gets its own ID, `WIDGET_ID_ADVANCED`. Widget names only need to be unique
+among siblings, so two sections can each have a `rate`.
 
 **Capability token:** `layout-v2` — reserved for future use, see
 [capabilities field](#capabilities-field). Omit `capabilities:` for now; the widget
@@ -1170,20 +1174,23 @@ advanced:
 
 In the generated header this produces:
 - `WIDGET_ID_ADVANCED` (the section)
-- `WIDGET_ID_RATE_SLIDER` (not `WIDGET_ID_ADVANCED_RATE_SLIDER`)
-- `set_rate_slider(udisplay_t* ctx, float v)` and `on_rate_slider_change(float value)` as normal
+- `WIDGET_ID_ADVANCED_RATE_SLIDER`
+- `set_advanced_rate_slider(udisplay_t* ctx, float v)` and
+  `on_advanced_rate_slider_change(float value)`
 
-**Generated C++ API:** a plain `Widget advanced;` member (`advanced.set_property(...)`,
-`advanced.reset_property(...)`, `advanced.id()`) — same ID-flattening rule applies.
-Children still become normal members of the generated `udisplay_ui::UDisplay` class
-(e.g. `SliderWidget rate_slider;`), not nested under the section member.
+**Generated C++ API:** an `AdvancedWidget advanced;` member (a generated `Widget`
+subclass: `advanced.set_property(...)`, `advanced.reset_property(...)`, `advanced.id()`)
+holding the children as its own members: `ui.advanced.rate_slider.set(2.5f)`. A
+container with no children is a plain `Widget`. MicroPython nests the same way
+(`ui.advanced.rate_slider.set(2.5)`).
 
 ---
 
 ### `row`
 
 Horizontal layout container. Children are rendered side-by-side left-to-right.
-Gets its own widget ID (for SET_PROPERTY); the row name is excluded from child ID paths.
+Gets its own widget ID (for SET_PROPERTY); the row name is a segment of its children's
+ID paths (`<row>.<child>`).
 
 Each child can declare a `flex: N` integer weight (N ≥ 1). Children with `flex` fill
 remaining horizontal space proportionally. Children without `flex` use their implicit
@@ -1235,17 +1242,16 @@ controls_row:
 **Generated C API:** `WIDGET_ID_<NAME>` for the row itself (SET_PROPERTY only — no
 setter, no handler). Children get their own API entries.
 
-**Generated C++ API:** a plain `Widget <name>;` member for the row itself. Children
-still become normal members of the generated `udisplay_ui::UDisplay` class, not nested
-under the row member.
+**Generated C++ API:** a generated `Widget` subclass member for the row, with the
+children as its members (`ui.<row>.<child>`), same as [`section`](#section).
 
 ---
 
 ### `grid`
 
 Grid layout container. Children are placed left-to-right, wrapping to a new row every
-`columns` items. Gets its own widget ID (for SET_PROPERTY); the grid name is excluded
-from child ID paths.
+`columns` items. Gets its own widget ID (for SET_PROPERTY); the grid name is a segment
+of its children's ID paths (`<grid>.<child>`).
 
 **Capability token:** `layout-v2` — reserved for future use, see
 [capabilities field](#capabilities-field). Omit `capabilities:` for now; the widget
@@ -1290,17 +1296,16 @@ button_grid:
 **Generated C API:** `WIDGET_ID_<NAME>` for the grid itself (SET_PROPERTY only — no
 setter, no handler). Children get their own API entries.
 
-**Generated C++ API:** a plain `Widget <name>;` member for the grid itself. Children
-still become normal members of the generated `udisplay_ui::UDisplay` class, not nested
-under the grid member.
+**Generated C++ API:** a generated `Widget` subclass member for the grid, with the
+children as its members (`ui.<grid>.<child>`), same as [`section`](#section).
 
 ---
 
 ### `dpad`
 
 Directional pad container. Classic 5-position directional pad (cross shape). Gets its
-own widget ID (for SET_PROPERTY — e.g. disable the whole pad). The dpad name is excluded
-from child ID paths — same transparent-container behavior as `section`/`row`/`grid`.
+own widget ID (for SET_PROPERTY — e.g. disable the whole pad). The dpad name is a
+segment of its buttons' ID paths (`<dpad>.<button>`), same as `section`/`row`/`grid`.
 
 Unlike `button-group`, a dpad has no group-level state, selection, or setter — it's
 structurally a container, not a stateful items-group (see
@@ -1359,9 +1364,9 @@ direction:
 **Generated C API:** `WIDGET_ID_<NAME>` for the dpad itself (SET_PROPERTY only). Each
 child button gets its own API entries, same as a standalone [`button`](#button).
 
-**Generated C++ API:** a plain `Widget <name>;` member for the dpad itself. Children
-still become normal members of the generated `udisplay_ui::UDisplay` class, not nested
-under the dpad member.
+**Generated C++ API:** a generated `Widget` subclass member for the dpad, with the
+child buttons as its members (`ui.<dpad>.<button>.on_click = ...`), same as
+[`section`](#section).
 
 ---
 

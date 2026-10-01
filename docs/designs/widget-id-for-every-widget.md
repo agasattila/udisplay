@@ -20,6 +20,17 @@ Standard Properties table (docs/protocol.md), but a firmware author cannot
 target a container or a label with `SET_PROPERTY` / `RESET_PROPERTY` because
 there is no ID to send. The YAML model and the runtime property model disagree.
 
+> **Revision (PR #44 review, 2026-10-01): Approach B replaces Approach A.**
+> Container keys are now segments of their descendants' ID paths
+> (`container1.container2.leaf`). Approach A's transparent containers were
+> carried over from the leaf-only design. Once every container has an ID
+> and its own member in the generated API, keys work naturally as
+> namespaces, and they only need to be unique among siblings. Approach B
+> was rejected for renaming existing `WIDGET_ID_*` names and firmware
+> members, but that cost goes away with no public release (see OV1).
+> Sections below that describe transparency are kept for history. The
+> implemented design is in "Revision: hierarchical paths" at the end.
+
 ## Premises
 
 1. Addressability is a property of *every* widget, not of interactive widgets.
@@ -39,7 +50,7 @@ there is no ID to send. The YAML model and the runtime property model disagree.
 
 ## Approaches Considered
 
-### Approach A: Container gets its own path, children stay transparent (chosen)
+### Approach A: Container gets its own path, children stay transparent (first implementation, superseded)
 A container/decoration's ID path is `<transparent prefix>.<own key>`, exactly
 like a leaf at the same position. Its children's paths are unchanged (the
 container's key is still *not* a segment of a child's path).
@@ -49,11 +60,15 @@ container's key is still *not* a segment of a child's path).
   in another section). Caught by the existing duplicate-path check in both
   derivations, with a clear error. None of the demos collide.
 
-### Approach B: Hierarchical paths (container names become path segments)
+### Approach B: Hierarchical paths (container names become path segments) (chosen in PR review)
 Every child's path includes its containers (`advanced.rate`).
-- Rejected: renames nearly every existing `WIDGET_ID_*`, breaks every
+- First rejected: renames nearly every existing `WIDGET_ID_*`, breaks every
   firmware sketch, and contradicts the documented "containers are
-  ID-transparent" naming rule for zero functional gain.
+  ID-transparent" naming rule.
+- Chosen in the PR #44 review: there is no released firmware to break, the
+  demos are regenerated with the change, and local key scopes make YAML
+  authoring natural (`boiler.temp` and `tank.temp`). The cross-scope
+  name-collision error class disappears.
 
 ### Approach C: Containers only, decorations stay ID-less
 - Rejected: the issue explicitly says every widget; keeping a second
@@ -295,3 +310,33 @@ fires on a property change.
 VERDICT: ENG CLEARED (plan updated with every accepted finding; implement as written)
 
 NO UNRESOLVED DECISIONS
+
+## Revision: hierarchical paths (PR #44 review)
+
+- **ID paths.** `widget_ids._collect()` and `YamlParser.cpp
+  collectPathsRecursive()` prefix every child with its parent's path. There
+  is no container special case left, so `isContainer()` and the client's
+  `idPrefix` threading are removed (closes TODO-037). The duplicate-path
+  check stays as a guard: only a key containing `.` (schema-invalid) can
+  trigger it now.
+- **validate.** The global name-uniqueness check is removed. YAML already
+  makes sibling keys unique.
+- **C.** Names follow the path: `WIDGET_ID_ADVANCED_RATE`,
+  `set_advanced_rate()`, `on_advanced_rate_change`. Paths that normalize to
+  the same C name (`advanced_rate` next to `advanced.rate`) are rejected,
+  as before. The C++ backend now runs the same check, since its class names
+  normalize the same way.
+- **C++.** Every widget with children (container, button face,
+  button-group) gets a generated class named after its path
+  (`AdvancedWidget`, `PanelPowerBtnWidget : public ButtonWidget`). Its
+  children are members, so access follows the path:
+  `ui.advanced.rate.set(...)`. Classes are emitted children-first and take
+  `(ctx, id)`; child IDs are baked into the constructor. Reserved-name
+  checks apply per parent class.
+- **MicroPython.** Containers are `ContainerWidget` (a `Widget` without
+  `__slots__`), and children are attached as attributes in YAML declaration
+  order: `ui.advanced.rate`. Event dispatch walks the whole tree.
+- **Order.** Sub-members and button-group `Item`/`_items` follow YAML
+  declaration order instead of alphabetical order.
+- **Fixtures.** The golden `widget_id_fixtures` are regenerated, with a new
+  `namespaced_keys` fixture that reuses one key in several containers.
