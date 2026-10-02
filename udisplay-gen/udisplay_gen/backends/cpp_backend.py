@@ -9,10 +9,10 @@ import re
 from typing import List
 
 from ..merkle import CHUNK_SIZE
-from ..widget_ids import collect_dropdown_items
+from ..widget_ids import collect_dropdown_items, walk, widget_tree
 from . import BuildContext, OutputFile
 from ._shared import (
-    _hex_rows, _HEADER_COMMENT,
+    _hex_rows, _HEADER_COMMENT, widget_id_macro_collisions,
     _config_fields, _config_sequential_assignment,
     _ns_validate, _ns_fn,
 )
@@ -20,6 +20,7 @@ from ._shared import (
 
 def generate(ctx: BuildContext) -> List[OutputFile]:
     _ns_validate(ctx.namespace)
+    _validate_cpp_identifiers(ctx)
     return [
         OutputFile("udisplay_ui.hpp", _generate_header_cpp(ctx)),
         OutputFile("udisplay_ui.bin", ctx.blob),
@@ -34,35 +35,76 @@ def _cpp_class_name(key: str) -> str:
     return "".join(p.capitalize() for p in parts if p) + "Widget"
 
 
-def _cpp_ordered_toplevel(widgets_yaml: dict, widget_types: dict) -> list:
-    """Return top-level widget paths in YAML declaration order (containers transparent)."""
-    result: list = []
-    container_types = {"section", "row", "grid"}
-    no_id_types = {"label", "separator"}
-    for key, widget in widgets_yaml.items():
-        if not isinstance(widget, dict):
-            continue
-        wtype = widget.get("type", "")
-        if wtype in no_id_types:
-            continue
-        if wtype in container_types:
-            for child_path in _cpp_ordered_toplevel(widget.get("widgets", {}), widget_types):
-                if child_path not in result:
-                    result.append(child_path)
-            continue
-        if key in widget_types:
-            result.append(key)
-    return result
+
+# UDisplay's own fixed members — a widget member with one of these names
+# would not compile (or would silently shadow the method).
+_UDISPLAY_RESERVED_NAMES = frozenset({
+    "UDisplay", "_ctx", "init", "feed", "ble_set_mtu", "tcp_frame", "ctx",
+    "on_client_ready", "on_comms_error", "_dispatch", "_on_ready", "_on_comms_error",
+})
+
+# Every generated widget class derives from Widget — a sub-member must not
+# shadow its public API or protected state.
+_WIDGET_RESERVED_NAMES = frozenset({"Widget", "_ctx", "_id", "id", "set_property", "reset_property"})
+_BUTTON_RESERVED_NAMES = _WIDGET_RESERVED_NAMES | {"on_press", "on_release", "on_click"}
+
+_CPP_KEYWORDS = frozenset("""
+alignas alignof and and_eq asm auto bitand bitor bool break case catch char
+char8_t char16_t char32_t class compl concept const consteval constexpr
+constinit const_cast continue co_await co_return co_yield decltype default
+delete do double dynamic_cast else enum explicit export extern false float
+for friend goto if inline int long mutable namespace new noexcept not not_eq
+nullptr operator or or_eq private protected public register reinterpret_cast
+requires return short signed sizeof static static_assert static_cast struct
+switch template this thread_local throw true try typedef typeid typename
+union unsigned using virtual void volatile wchar_t while xor xor_eq
+""".split())
 
 
-def _cpp_sub_members(path: str, widget_types: dict, widget_ids: dict) -> list:
-    """Return [(sub_key, type_str, widget_id)] for sub-members, alphabetical order."""
-    prefix = path + "."
-    return [
-        (sub_path[len(prefix):], widget_types[sub_path], widget_ids[sub_path])
-        for sub_path in sorted(widget_ids)
-        if sub_path.startswith(prefix)
-    ]
+def _cpp_child_reserved_names(type_str: str) -> frozenset:
+    """Names a child member of a widget of this type must not take: the
+    generated class derives from Widget (and ButtonWidget for a button)."""
+    if type_str == "button":
+        return _BUTTON_RESERVED_NAMES
+    if type_str == "button-group":
+        return _WIDGET_RESERVED_NAMES | {"Item", "set", "clear"}
+    return _WIDGET_RESERVED_NAMES
+
+
+def _validate_cpp_identifiers(ctx: BuildContext) -> None:
+    """Reject widget names that would produce a non-compiling (or silently
+    shadowing) C++ header: C++ keywords, names colliding with UDisplay's or
+    the parent class's own members, and paths that normalize to the same
+    generated class name (`a_b` and `a.b` are both `ABWidget`). Every widget
+    is a member (issue #43): top-level widgets of UDisplay, every other
+    widget of its parent's generated class. Raises ValueError listing every
+    violation."""
+    widget_types = ctx.widget_types or {}
+    errors: list = []
+
+    def check(name: str, reserved: frozenset, where: str) -> None:
+        if name in _CPP_KEYWORDS:
+            errors.append(f"{where}: '{name}' is a C++ keyword")
+        elif name in reserved:
+            errors.append(
+                f"{where}: '{name}' collides with a member of the generated C++ API"
+            )
+
+    tree = widget_tree(ctx.widgets_yaml or {})
+    for node in tree:
+        check(node.key, _UDISPLAY_RESERVED_NAMES, f"widget '{node.path}'")
+    for node in walk(tree):
+        reserved = _cpp_child_reserved_names(widget_types.get(node.path, ""))
+        for child in node.children:
+            check(child.key, reserved, f"widget '{child.path}'")
+
+    errors += widget_id_macro_collisions(ctx.widget_ids)
+
+    if errors:
+        raise ValueError(
+            "Cannot generate valid C++ code from this YAML:\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
 
 
 def _cpp_base_classes(variant: str) -> list:
@@ -80,11 +122,18 @@ def _cpp_base_classes(variant: str) -> list:
     lines = [
         "/* -- Widget base classes ---------------------------------------------------- */",
         "",
+        "/* Every widget -- containers (section/row/grid/dpad) and decorations",
+        " * (label/separator) included -- has a widget ID, so every widget can take",
+        " * runtime properties (UDISPLAY_PROP_ENABLED, UDISPLAY_PROP_VISIBLE, ...). */",
         "class Widget {",
+        "public:",
+        "    Widget(udisplay_t* ctx, uint8_t id) : _ctx(ctx), _id(id) {}",
+        "    uint8_t id() const { return _id; }",
+        "    void set_property(uint8_t property_id, uint8_t value) { udisplay_set_property(_ctx, _id, property_id, value); }",
+        "    void reset_property(uint8_t property_id) { udisplay_reset_property(_ctx, _id, property_id); }",
         "protected:",
         "    udisplay_t* _ctx;",
         "    uint8_t _id;",
-        "    Widget(udisplay_t* ctx, uint8_t id) : _ctx(ctx), _id(id) {}",
         "    friend class UDisplay;",
         "};",
         "",
@@ -151,11 +200,17 @@ def _cpp_base_classes(variant: str) -> list:
 
 
 def _cpp_generated_classes(
+    tree: list,
     widget_types: dict,
     widget_ids: dict,
     dropdown_items: dict,
     variant: str,
 ) -> list:
+    """A generated class for every widget with children (containers, button
+    faces, button-groups) and every dropdown. Children are members named by
+    their own key, so access follows the ID path (`ui.settings.rate`).
+    Emitted children-first: a member's class must be complete before the
+    class that holds it."""
     def handler(sig: str) -> str:
         name, _, rest = sig.partition("(")
         args = rest.rstrip(")")
@@ -168,74 +223,16 @@ def _cpp_generated_classes(
         return f"    std::function<void({arg_types})> {name};"
 
     lines: list = []
-    header_emitted = False
 
-    for path in sorted(widget_types):
-        if "." in path:
-            continue
-        type_str = widget_types[path]
+    def emit(node) -> None:
+        nonlocal lines
+        for child in node.children:
+            emit(child)
+        type_str = widget_types.get(node.path, "")
+        cn = _cpp_class_name(node.path)
 
-        if type_str == "button":
-            sub = _cpp_sub_members(path, widget_types, widget_ids)
-            if not sub:
-                continue
-            if not header_emitted:
-                lines += ["", "/* -- Generated per-widget derived classes ----------------------------------- */", ""]
-                header_emitted = True
-            cn = _cpp_class_name(path)
-            lines += [f"class {cn} : public Widget {{", "public:",
-                      handler("on_press()"), handler("on_release()"), handler("on_click()")]
-            for sub_key, _, _ in sub:
-                lines.append(f"    LedWidget {sub_key};")
-            params = ["udisplay_t* ctx", "uint8_t id"] + [f"uint8_t {sk}_id" for sk, _, _ in sub]
-            inits = ["Widget(ctx, id)"] + [f"{sk}(ctx, {sk}_id)" for sk, _, _ in sub]
-            lines += [
-                f"    {cn}({', '.join(params)})",
-                f"        : {', '.join(inits)} {{}}",
-                "};",
-                "",
-            ]
-
-        elif type_str == "button-group":
-            sub = _cpp_sub_members(path, widget_types, widget_ids)
-            if not header_emitted:
-                lines += ["", "/* -- Generated per-widget derived classes ----------------------------------- */", ""]
-                header_emitted = True
-            cn = _cpp_class_name(path)
-            # Exclusive selection is device-authoritative: an item press only
-            # fires that item's handlers; firmware confirms via set(), which
-            # pushes STATE_UPDATE(group, uint8 item widget ID). Item values
-            # ARE the items' widget IDs; clear() sends 0 (reserved, no item).
-            lines += [
-                f"class {cn} : public Widget {{",
-                "public:",
-                "    enum class Item : uint8_t {",
-            ]
-            for idx, (sub_key, _, sw) in enumerate(sub):
-                comma = "," if idx < len(sub) - 1 else ""
-                lines.append(f"        {sub_key} = 0x{sw:02X}u{comma}")
-            lines += [
-                "    };",
-                "    void set(Item v) { udisplay_send_uint8(_ctx, _id, static_cast<uint8_t>(v)); }",
-                "    void clear()     { udisplay_send_uint8(_ctx, _id, 0u); }",
-            ]
-            for sub_key, _, _ in sub:
-                lines.append(f"    ButtonItem {sub_key};")
-            params = ["udisplay_t* ctx", "uint8_t group_id"] + [f"uint8_t {sk}_id" for sk, _, _ in sub]
-            inits = ["Widget(ctx, group_id)"] + [f"{sk}(ctx, {sk}_id)" for sk, _, _ in sub]
-            lines += [
-                f"    {cn}({', '.join(params)})",
-                f"        : {', '.join(inits)} {{}}",
-                "};",
-                "",
-            ]
-
-        elif type_str == "dropdown":
-            items = dropdown_items.get(path, [])
-            if not header_emitted:
-                lines += ["", "/* -- Generated per-widget derived classes ----------------------------------- */", ""]
-                header_emitted = True
-            cn = _cpp_class_name(path)
+        if type_str == "dropdown":
+            items = dropdown_items.get(node.path, [])
             lines += [
                 f"class {cn} : public OutputWidget<uint8_t> {{",
                 "    using OutputWidget::OutputWidget;",
@@ -252,48 +249,84 @@ def _cpp_generated_classes(
                 "};",
                 "",
             ]
+            return
 
+        if not _cpp_has_class(node, type_str):
+            return
+
+        base = "ButtonWidget" if type_str == "button" else "Widget"
+        lines += [f"class {cn} : public {base} {{", "public:"]
+        if type_str == "button-group":
+            # Exclusive selection is device-authoritative: an item press only
+            # fires that item's handlers; firmware confirms via set(), which
+            # pushes STATE_UPDATE(group, uint8 item widget ID). Item values
+            # ARE the items' widget IDs; clear() sends 0 (reserved, no item).
+            lines.append("    enum class Item : uint8_t {")
+            for idx, child in enumerate(node.children):
+                comma = "," if idx < len(node.children) - 1 else ""
+                lines.append(f"        {child.key} = 0x{widget_ids[child.path]:02X}u{comma}")
+            lines += [
+                "    };",
+                "    void set(Item v) { udisplay_send_uint8(_ctx, _id, static_cast<uint8_t>(v)); }",
+                "    void clear()     { udisplay_send_uint8(_ctx, _id, 0u); }",
+            ]
+        for child in node.children:
+            child_type = _cpp_member_type(child, widget_types.get(child.path, ""))
+            lines.append(f"    {child_type} {child.key};")
+        inits = [f"{base}(ctx, id)"] + [
+            f"{child.key}(ctx, 0x{widget_ids[child.path]:02X}u)" for child in node.children
+        ]
+        lines += [
+            f"    {cn}(udisplay_t* ctx, uint8_t id)",
+            f"        : {', '.join(inits)} {{}}",
+            "};",
+            "",
+        ]
+
+    for node in tree:
+        emit(node)
+    if lines:
+        lines = ["", "/* -- Generated per-widget derived classes ----------------------------------- */", ""] + lines
     return lines
 
 
-def _cpp_member_type(path: str, type_str: str, widget_types: dict, widget_ids: dict) -> str:
-    type_map = {
-        "display": "DisplayWidget",
-        "led":     "LedWidget",
-        "rgbled":  "RgbLedWidget",
-        "toggle":  "ToggleWidget",
-        "slider":  "SliderWidget",
-        "text-rw": "TextRwWidget",
-        "text-ro": "TextRoWidget",
-    }
-    if type_str in type_map:
-        return type_map[type_str]
-    if type_str == "button":
-        if _cpp_sub_members(path, widget_types, widget_ids):
-            return _cpp_class_name(path)
-        return "ButtonWidget"
-    if type_str in ("button-group", "dropdown"):
-        return _cpp_class_name(path)
-    return "Widget"
+# Widget types with a fixed (non-generated) C++ class. A widget with children
+# gets a generated class; anything else (a childless container, a
+# decoration) is a plain `Widget`.
+_CPP_LEAF_CLASS = {
+    "display": "DisplayWidget",
+    "led":     "LedWidget",
+    "rgbled":  "RgbLedWidget",
+    "toggle":  "ToggleWidget",
+    "slider":  "SliderWidget",
+    "text-rw": "TextRwWidget",
+    "text-ro": "TextRoWidget",
+    "button":  "ButtonWidget",
+    "button-group-item": "ButtonItem",
+}
 
 
-def _cpp_ctor_args(path: str, type_str: str, widget_ids: dict, widget_types: dict) -> str:
-    wid = widget_ids[path]
-    if type_str in ("button", "button-group"):
-        sub = _cpp_sub_members(path, widget_types, widget_ids)
-        sub_ids = "".join(f", 0x{sw:02X}u" for _, _, sw in sub)
-        return f"&_ctx, 0x{wid:02X}u{sub_ids}"
-    return f"&_ctx, 0x{wid:02X}u"
+def _cpp_has_class(node, type_str: str) -> bool:
+    """Whether _cpp_generated_classes emits a class for this widget."""
+    return bool(node.children) or type_str in ("button-group", "dropdown")
+
+
+def _cpp_member_type(node, type_str: str) -> str:
+    if _cpp_has_class(node, type_str):
+        return _cpp_class_name(node.path)
+    return _CPP_LEAF_CLASS.get(type_str, "Widget")
 
 
 def _cpp_dispatch_cases(
-    ordered: list,
+    nodes: list,
     widget_types: dict,
     widget_ids: dict,
-    dropdown_items: dict,
 ) -> list:
+    """One `case` per widget that raises events, at any depth. The member
+    expression is the ID path itself (`self->settings.rate`)."""
     lines: list = []
-    for path in ordered:
+    for node in nodes:
+        path = node.path
         type_str = widget_types.get(path, "")
         wid = widget_ids.get(path)
         if wid is None:
@@ -310,7 +343,7 @@ def _cpp_dispatch_cases(
                 f"        if (self->{path}.on_change) self->{path}.on_change(ev->slider_value);",
                 "        break;",
             ]
-        elif type_str == "button":
+        elif type_str in ("button", "button-group-item"):
             lines += [
                 f"    case 0x{wid:02X}u:",
                 "        switch (ev->event_type) {",
@@ -334,22 +367,6 @@ def _cpp_dispatch_cases(
                 f"        if (self->{path}.on_change) self->{path}.on_change(static_cast<{cn}::Option>(ev->selection_index));",
                 "        break;",
             ]
-        for sub_path in sorted(widget_ids):
-            if not sub_path.startswith(path + "."):
-                continue
-            sub_key = sub_path[len(path) + 1:]
-            if widget_types.get(sub_path) == "button-group-item":
-                sw = widget_ids[sub_path]
-                lines += [
-                    f"    case 0x{sw:02X}u:",
-                    "        switch (ev->event_type) {",
-                    f"            case UDISPLAY_EVENT_BUTTON_PRESS:   if (self->{path}.{sub_key}.on_press)   self->{path}.{sub_key}.on_press();   break;",
-                    f"            case UDISPLAY_EVENT_BUTTON_RELEASE: if (self->{path}.{sub_key}.on_release) self->{path}.{sub_key}.on_release(); break;",
-                    f"            case UDISPLAY_EVENT_BUTTON_CLICK:   if (self->{path}.{sub_key}.on_click)   self->{path}.{sub_key}.on_click();   break;",
-                    "            default: break;",
-                    "        }",
-                    "        break;",
-                ]
     return lines
 
 
@@ -368,7 +385,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
 
     n = math.ceil(len(blob) / CHUNK_SIZE)
     dropdown_items = collect_dropdown_items(widgets_yaml)
-    ordered = _cpp_ordered_toplevel(widgets_yaml, widget_types)
+    tree = widget_tree(widgets_yaml)
 
     lines = [
         _HEADER_COMMENT.format(source=source, root_hex=root.hex(), version=version),
@@ -428,7 +445,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
     ]
 
     lines.extend(_cpp_base_classes(variant))
-    lines.extend(_cpp_generated_classes(widget_types, widget_ids, dropdown_items, variant))
+    lines.extend(_cpp_generated_classes(tree, widget_types, widget_ids, dropdown_items, variant))
 
     lines += [
         "",
@@ -445,10 +462,9 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         "public:",
     ]
 
-    for path in ordered:
-        type_str = widget_types.get(path, "")
-        cpp_type = _cpp_member_type(path, type_str, widget_types, widget_ids)
-        lines.append(f"    {cpp_type} {path};")
+    for node in tree:
+        cpp_type = _cpp_member_type(node, widget_types.get(node.path, ""))
+        lines.append(f"    {cpp_type} {node.key};")
 
     lines.append("")
     if variant == "safe":
@@ -459,11 +475,9 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         lines.append("    std::function<void()> on_comms_error;")
     lines.append("")
     lines.append("    UDisplay()")
-    for i, path in enumerate(ordered):
-        type_str = widget_types.get(path, "")
-        args = _cpp_ctor_args(path, type_str, widget_ids, widget_types)
+    for i, node in enumerate(tree):
         prefix = "        : " if i == 0 else "        , "
-        lines.append(f"{prefix}{path}({args})")
+        lines.append(f"{prefix}{node.key}(&_ctx, 0x{widget_ids[node.path]:02X}u)")
     lines += [
         "    {}",
         "",
@@ -537,7 +551,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         "    UDisplay* self = static_cast<UDisplay*>(ud);",
     ]
 
-    dispatch = _cpp_dispatch_cases(ordered, widget_types, widget_ids, dropdown_items)
+    dispatch = _cpp_dispatch_cases(walk(tree), widget_types, widget_ids)
     if dispatch:
         lines.append("    switch (ev->widget_id) {")
         lines.extend(dispatch)

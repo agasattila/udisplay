@@ -45,6 +45,9 @@ class TestWidgetIdGoldenFixtures : public QObject
 
 private slots:
 
+    /* Must match udisplay-gen's assign() on the same fixtures
+     * (udisplay-gen/tests/test_vectors.py). Every row gets a non-zero ID
+     * (issue #43: every widget is addressable). */
     void fixtures_match_golden_ids()
     {
         QFile f(QStringLiteral(UDISPLAY_PROTOCOL_VECTORS_JSON));
@@ -67,6 +70,10 @@ private slots:
             QString name, version;
             QVERIFY2(p.parse(yamlBytes, widgets, name, version),
                      qPrintable(fixtureName + ": " + p.errorString()));
+
+            for (const auto& w : widgets)
+                QVERIFY2(w.widgetId != 0,
+                         qPrintable(fixtureName + ": widget '" + w.keyPath + "' has no ID"));
 
             QMap<QString, uint8_t> actual;
             collectIds(widgets, actual);

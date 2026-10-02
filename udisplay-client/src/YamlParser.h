@@ -5,7 +5,8 @@
  * Parse a decompressed uDisplay YAML blob into a list of WidgetDef.
  *
  * Widget ID assignment matches udisplay-gen exactly:
- *   1. Collect all key paths (top-level, button children, button-group items).
+ *   1. Collect all key paths — every widget, containers and decorations
+ *      included (issue #43).
  *   2. Sort alphabetically.
  *   3. Assign IDs 0x10, 0x11, ... in sort order.
  *

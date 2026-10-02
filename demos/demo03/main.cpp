@@ -29,7 +29,7 @@ static UDisplay ui;
 
 static float  g_base_rate_hz = 1.0f;
 static float  g_multiplier   = 1.0f;
-static ModeSelWidget::Item g_mode = ModeSelWidget::Item::slow;   /* confirmed mode_sel item */
+static GridBtnGrpModeSelWidget::Item g_mode = GridBtnGrpModeSelWidget::Item::slow;   /* confirmed mode_sel item */
 static int    g_enabled      = 1;
 static int    g_power_on     = 0;
 static double g_sim_time     = 0.0;
@@ -70,20 +70,20 @@ static void on_tick(double dt_sec)
     if (!g_initial_sent) {
         g_initial_sent = 1;
         ui.rate_slider.set(g_base_rate_hz);
-        ui.enable_toggle.set((bool)g_enabled);
-        ui.power_btn.power_led.set((bool)g_power_on);
-        ui.mode_sel.set(g_mode);
+        ui.row_temp.enable_toggle.set((bool)g_enabled);
+        ui.row1.power_btn.power_led.set((bool)g_power_on);
+        ui.grid_btn_grp.mode_sel.set(g_mode);
     }
 
     /* temp_display: 20 + 5·sin(t) °C */
     if (g_enabled) {
         float temp = 20.0f + 5.0f * static_cast<float>(std::sin(g_sim_time));
-        ui.temp_display.set(temp);
+        ui.row_temp.temp_display.set(temp);
     }
 
     /* status_led: toggle every 3 ticks */
     if (g_tick % 3 == 0)
-        ui.status_led.set((bool)((g_tick / 3) % 2));
+        ui.grid_btn_grp.status_led.set((bool)((g_tick / 3) % 2));
 }
 
 static void on_connect()
@@ -114,17 +114,17 @@ int main(int argc, char* argv[])
     ui.init(demo_tcp_send, UDISPLAY_TRANSPORT_TCP);
 
     /* Lambda event handlers — the defining feature of the --modern variant */
-    ui.power_btn.on_press = []() {
+    ui.row1.power_btn.on_press = []() {
         g_power_on = !g_power_on;
-        ui.power_btn.power_led.set((bool)g_power_on);
+        ui.row1.power_btn.power_led.set((bool)g_power_on);
         printf("[EVENT] power_btn  → power_led %s\n", g_power_on ? "ON" : "OFF");
     };
 
     /* button-group selection is device-authoritative: a press only reports
      * the tap; mode_sel.set() confirms it (its STATE_UPDATE moves the ring). */
-    ui.mode_sel.fast.on_press  = []() { g_multiplier = 2.0f; g_mode = ModeSelWidget::Item::fast;  ui.mode_sel.set(g_mode); printf("[EVENT] mode_sel   → fast (2×)\n"); };
-    ui.mode_sel.slow.on_press  = []() { g_multiplier = 1.0f; g_mode = ModeSelWidget::Item::slow;  ui.mode_sel.set(g_mode); printf("[EVENT] mode_sel   → slow (1×)\n"); };
-    ui.mode_sel.turbo.on_press = []() { g_multiplier = 0.5f; g_mode = ModeSelWidget::Item::turbo; ui.mode_sel.set(g_mode); printf("[EVENT] mode_sel   → turbo (0.5×)\n"); };
+    ui.grid_btn_grp.mode_sel.fast.on_press  = []() { g_multiplier = 2.0f; g_mode = GridBtnGrpModeSelWidget::Item::fast;  ui.grid_btn_grp.mode_sel.set(g_mode); printf("[EVENT] mode_sel   → fast (2×)\n"); };
+    ui.grid_btn_grp.mode_sel.slow.on_press  = []() { g_multiplier = 1.0f; g_mode = GridBtnGrpModeSelWidget::Item::slow;  ui.grid_btn_grp.mode_sel.set(g_mode); printf("[EVENT] mode_sel   → slow (1×)\n"); };
+    ui.grid_btn_grp.mode_sel.turbo.on_press = []() { g_multiplier = 0.5f; g_mode = GridBtnGrpModeSelWidget::Item::turbo; ui.grid_btn_grp.mode_sel.set(g_mode); printf("[EVENT] mode_sel   → turbo (0.5×)\n"); };
 
     ui.rate_slider.on_change = [](float v) {
         if (v < 0.1f)  v = 0.1f;
@@ -134,9 +134,9 @@ int main(int argc, char* argv[])
         printf("[EVENT] rate_slider→ %.2f Hz\n", g_base_rate_hz);
     };
 
-    ui.enable_toggle.on_change = [](bool state) {
+    ui.row_temp.enable_toggle.on_change = [](bool state) {
         g_enabled = state ? 1 : 0;
-        ui.enable_toggle.set((bool)g_enabled);
+        ui.row_temp.enable_toggle.set((bool)g_enabled);
         printf("[EVENT] enable     → %s\n", g_enabled ? "ON" : "OFF");
     };
 

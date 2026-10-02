@@ -291,6 +291,21 @@ private slots:
         QVERIFY(!failedSpy.at(0).at(0).toString().isEmpty());
     }
 
+    /* A device newer than this client (proto_version > PROTO_VERSION)
+     * fails cleanly with "Update the app" instead of mis-numbering widgets. */
+    void bootstrap_newerDevice_failsWithUpdateMessage()
+    {
+        MockTransport t;
+        BootstrapManager bm(&t);
+        QSignalSpy failedSpy(&bm, &BootstrapManager::failed);
+        t.simulateConnect();
+        QByteArray hs = makeHandshakeV4(fromHex(V1_ROOT), 1, 256);
+        hs[1] = static_cast<char>(Proto::PROTO_VERSION + 1);
+        t.injectMessage(hs);
+        QCOMPARE(failedSpy.count(), 1);
+        QVERIFY(failedSpy.at(0).at(0).toString().contains(QStringLiteral("Update the app")));
+    }
+
     void bootstrap_BadMerkleRoot()
     {
         MockTransport t;

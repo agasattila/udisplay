@@ -25,11 +25,8 @@ SUPPORTED_TYPES = [
     "section", "row", "grid", "dpad",
 ]
 
-# Container types — have a `widgets:` sub-map, excluded from widget ID assignment
-CONTAINER_TYPES = {"section", "row", "grid", "dpad"}
-
-# Decoration types — no widget ID, no protocol exchange
-DECORATION_TYPES = {"label", "separator"}
+# The container type set is shared with ID assignment (TODO-007).
+from .widget_ids import CONTAINER_TYPES  # noqa: E402
 
 # button-group item keys that would collide with the generated group's own
 # set()/clear() methods (C++ class members, Python attributes)
@@ -162,21 +159,18 @@ def _check_style_ref(style_ref: str | None, style_names: set[str],
 
 
 def _semantic_errors_in_map(widgets: dict, path_prefix: str,
-                            seen_names: set[str], style_names: set[str]) -> list[str]:
+                            style_names: set[str]) -> list[str]:
     """
     Recursive semantic check for a widget map.
     - slider min < max
     - dpad's button children must all have position
-    - leaf widget names globally unique across all container scopes
-      (scoped to CONTAINER_TYPES's transparent-prefix subtree — see the
-      `button` branch below for why a `button`'s own face children get a
-      FRESH local scope instead of sharing this one)
-    - style: names a declared stylesheet
-    - button face children and button-group items — previously invisible to
-      every check above (CONTAINER_TYPES never included button/button-group,
-      so this function never recursed into them) — now get the style check
-      too, closing a pre-existing gap independent of button's own style:
-      acceptance
+    - style: names a declared stylesheet (containers, button face children
+      and button-group items included)
+
+    Widget names need no uniqueness check beyond YAML's own: a widget's ID
+    path is the chain of keys from the top level (`section.row.leaf`), so
+    keys only have to be unique among siblings, which a YAML mapping already
+    guarantees.
     """
     errors: list[str] = []
 
@@ -200,34 +194,17 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
                         f"  {widget_path}: dpad requires `position` on every child "
                         f"button; missing: {', '.join(missing)}"
                     )
-            errors.extend(_semantic_errors_in_map(sub_widgets, widget_path, seen_names, style_names))
+            errors.extend(_semantic_errors_in_map(sub_widgets, widget_path, style_names))
             continue
 
         if wtype == "button":
-            # `button` is NOT a prefix-transparent container (widget_ids.py's
-            # assign() and YamlParser.cpp's collectPathsRecursive() both key
-            # identity on the full compound path, e.g. "button_a.icon" !=
-            # "button_b.icon") — unlike CONTAINER_TYPES, where a short key IS
-            # the full identity path. Recursing with the GLOBAL seen_names
-            # set would reject valid YAML where two different buttons each
-            # have a same-named face child (e.g. "icon") as a false
-            # duplicate. A fresh, button-local set still correctly catches
-            # the real collision case: two sibling containers *inside this
-            # same button's face* reusing a name.
             errors.extend(_semantic_errors_in_map(
-                widget.get("widgets", {}), widget_path, set(), style_names))
-            # Falls through (no early `continue`) to the seen_names check
-            # below for the button's OWN key, in the global/outer scope —
-            # exactly like every other non-container widget.
+                widget.get("widgets", {}), widget_path, style_names))
 
         if wtype == "button-group":
             # Items are hand-built (no `type:` key, per buttonGroupItem's
             # schema) and have no sub-widgets of their own to recurse into —
-            # just check each item's own style: ref. No name-uniqueness
-            # check is needed here: YAML mapping keys are already unique
-            # within one button-group, and different groups never share a
-            # path prefix (each gets its own "group_key.item_key"), so
-            # there's nothing for seen_names to usefully catch across items.
+            # just check each item's own style: ref.
             for item_key, item in widget.get("items", {}).items():
                 if not isinstance(item, dict):
                     continue
@@ -240,11 +217,6 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
                         f"button-group item name (generated C++/Python groups have "
                         f"`{item_key}()` methods); rename this item"
                     )
-            # Falls through to the seen_names check below for the group's
-            # OWN key, same as the button branch above.
-
-        if wtype in DECORATION_TYPES:
-            continue
 
         if wtype == "slider":
             mn, mx = widget.get("min"), widget.get("max")
@@ -252,14 +224,6 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
                 errors.append(
                     f"  {widget_path}: slider `min` ({mn}) must be less than `max` ({mx})"
                 )
-
-        if key in seen_names:
-            errors.append(
-                f"  {widget_path}: duplicate leaf name `{key}` — "
-                f"widget names must be globally unique across all container scopes"
-            )
-        else:
-            seen_names.add(key)
 
     return errors
 
@@ -269,16 +233,14 @@ def semantic_errors(doc: dict) -> list[str]:
     Semantic checks not expressible in JSON Schema:
     - slider min < max
     - dpad's button children must all have position
-    - leaf names globally unique across all container scopes
     - style: names a declared stylesheet
     """
-    seen: set[str] = set()
     # "default" is always implicitly valid, even with no style: block at all
     # — matches udisplay-client's YamlParser.cpp parseStyles(), which always
     # populates a "default" entry (from the style.default: block if present,
     # else hardcoded StyleToken C++ defaults).
     style_names = set(doc.get("style", {}).keys()) | {"default"}
-    return _semantic_errors_in_map(doc.get("widgets", {}), "", seen, style_names)
+    return _semantic_errors_in_map(doc.get("widgets", {}), "", style_names)
 
 
 def validate(doc: dict, schema: dict | None = None,

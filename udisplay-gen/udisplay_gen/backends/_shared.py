@@ -67,6 +67,23 @@ def _macro_name(key_path: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "_", key_path).upper()
 
 
+def widget_id_macro_collisions(widget_ids: dict) -> list:
+    """One error per group of widget paths (top-level and nested) that
+    normalize to the same WIDGET_ID_* name, e.g. `pump_rate` and a face child
+    `pump.rate` (TODO-056). Every backend that emits WIDGET_ID_* constants
+    must reject these: the later definition silently wins otherwise."""
+    by_macro: dict = {}
+    for path in widget_ids:
+        by_macro.setdefault(_macro_name(path), []).append(path)
+    return [
+        "widget name collision: "
+        + ", ".join(repr(p) for p in sorted(paths))
+        + f" all normalize to the same generated constant WIDGET_ID_{macro}"
+        for macro, paths in sorted(by_macro.items())
+        if len(paths) > 1
+    ]
+
+
 def _fn_suffix(key_path: str) -> str:
     """
     'fire_btn.status_led' -> 'fire_btn_status_led'
