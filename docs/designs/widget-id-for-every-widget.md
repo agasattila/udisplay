@@ -37,7 +37,9 @@ there is no ID to send. The YAML model and the runtime property model disagree.
    The issue asks for "every widget, including structural/container widgets",
    so `label` and `separator` get IDs too (a label is the obvious future target
    of a "label text" property, a separator of `VISIBLE`).
-2. Existing firmware code must keep compiling: every `WIDGET_ID_*` *name* that
+2. *(Superseded by Approach B: hierarchical paths intentionally rename
+   generated identifiers, and the demos are updated with the change.)*
+   Existing firmware code must keep compiling: every `WIDGET_ID_*` *name* that
    exists today keeps the same name, unless a container/decoration name now
    collides with a generated identifier (rejected at codegen with a clear
    error, see Eng Review OV4). Numeric values shift, and that is a wire
@@ -128,7 +130,10 @@ the rule.
   decorations, button-face rows, dpads).
 - `SET_PROPERTY(VISIBLE/ENABLED)` on a section/row hides/disables its subtree
   in the client (unit test on WidgetModel).
-- No existing `WIDGET_ID_*` name disappears in the demos' generated headers.
+- Generated names follow the hierarchical ID path (`WIDGET_ID_<PATH>`,
+  `set_<path>()`, `ui.<container>.<leaf>`), and every demo sketch is
+  regenerated and updated in the same change. No name compatibility with
+  pre-0x05 firmware is required (see Revision: hierarchical paths).
 - All three test suites green.
 
 ## The Assignment
