@@ -158,17 +158,32 @@ struct PathEntry {
     bool        isChild;
     std::string parentPath;
     std::string childKey;
+    std::string namePath;   /* generated firmware name, see below */
 };
+
+/* A section/row/grid is transparent to its children's generated firmware
+ * names unless it sets `namespace: true`; dpad, button-group and a button
+ * face always are namespaces (widget_ids.py, NAMESPACE_FLAG_TYPES). */
+static bool isTransparentContainer(const std::string& type, const YAML::Node& w)
+{
+    if (type != "section" && type != "row" && type != "grid")
+        return false;
+    bool flag = false;
+    const YAML::Node ns = w["namespace"];
+    return !(ns && ns.IsScalar() && YAML::convert<bool>::decode(ns, flag) && flag);
+}
 
 /* Mirrors widget_ids.py's _collect(). Every widget map entry gets a path
  * (issue #43): `<prefix>.<key>`, where the prefix is the parent widget's own
  * path. Every widget with `widgets:` (containers and button faces alike) is
  * a namespace for its children, so a path names the whole chain of keys from
  * the top level: `section.row.leaf`. A container's `namespace:` key does not
- * change this: it only shapes the identifiers udisplay-gen generates for
- * firmware, never the wire IDs. */
+ * change this: it only shapes each widget's name path (namePrefix), the
+ * identifier udisplay-gen generates for firmware, never the wire IDs.
+ * Entries are appended in YAML declaration order, parents first. */
 static void collectPathsRecursive(const YAML::Node& widgets,
                                   const std::string& prefix,
+                                  const std::string& namePrefix,
                                   std::vector<PathEntry>& entries)
 {
     for (auto it = widgets.begin(); it != widgets.end(); ++it) {
@@ -181,26 +196,64 @@ static void collectPathsRecursive(const YAML::Node& widgets,
             type = w["type"].as<std::string>();
 
         std::string path = prefix.empty() ? key : prefix + "." + key;
+        std::string namePath = namePrefix.empty() ? key : namePrefix + "." + key;
 
-        entries.push_back({ path, !prefix.empty(), prefix, key });
+        entries.push_back({ path, !prefix.empty(), prefix, key, namePath });
 
         if (w["widgets"] && w["widgets"].IsMap())
-            collectPathsRecursive(w["widgets"], path, entries);
+            collectPathsRecursive(w["widgets"], path,
+                                  isTransparentContainer(type, w) ? namePrefix : namePath,
+                                  entries);
 
         if (type == "button-group" && w["items"] && w["items"].IsMap()) {
             for (auto ii = w["items"].begin();
                  ii != w["items"].end(); ++ii) {
                 std::string itemKey = ii->first.as<std::string>();
-                entries.push_back({ path + "." + itemKey, true, path, itemKey });
+                entries.push_back({ path + "." + itemKey, true, path, itemKey,
+                                    namePath + "." + itemKey });
             }
         }
     }
 }
 
+/* The first name path two or more widgets share, as udisplay-gen
+ * validate's error text (widget_ids.py describe_name_collision()), or ""
+ * if every name is unique. "First" is by first occurrence in declaration
+ * order, matching validate's report order, so both tools name the same
+ * collision. `entries` must still be in declaration order. */
+static std::string firstNameCollision(const std::vector<PathEntry>& entries)
+{
+    std::map<std::string, std::vector<std::string>> byName;
+    std::vector<std::string> order;
+    for (const auto& e : entries) {
+        auto& paths = byName[e.namePath];
+        if (paths.empty()) order.push_back(e.namePath);
+        paths.push_back(e.path);
+    }
+    for (const auto& name : order) {
+        const auto& paths = byName[name];
+        if (paths.size() < 2) continue;
+        std::string msg;
+        for (const auto& p : paths)
+            msg += (msg.empty() ? "" : ", ") + std::string("widgets.") + p;
+        return msg + ": all named '" + name + "' in the generated firmware API; "
+               "rename one, or set `namespace: true` on a section/row/grid that "
+               "separates them";
+    }
+    return {};
+}
+
+/* Every widget's path in YAML declaration order (collectPathsRecursive());
+ * sortedPaths() orders them for ID assignment. */
 static std::vector<PathEntry> collectPaths(const YAML::Node& widgets)
 {
     std::vector<PathEntry> entries;
-    collectPathsRecursive(widgets, {}, entries);
+    collectPathsRecursive(widgets, {}, {}, entries);
+    return entries;
+}
+
+static std::vector<PathEntry> sortedPaths(std::vector<PathEntry> entries)
+{
     std::sort(entries.begin(), entries.end(),
               [](const PathEntry& a, const PathEntry& b) {
                   return a.path < b.path;
@@ -820,7 +873,8 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
     }
     const YAML::Node& widgets = doc["widgets"];
 
-    auto entries = collectPaths(widgets);
+    const auto declared = collectPaths(widgets);
+    auto entries = sortedPaths(declared);
     if (entries.size() > 240) {
         m_error = QStringLiteral("Too many widget paths (%1); maximum is 240")
                       .arg(static_cast<int>(entries.size()));
@@ -832,7 +886,7 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
      * container `a` with a child `b`) still could, and idMap[e.path] =
      * nextId++ below would then silently overwrite, cross-applying
      * STATE_UPDATE messages between two unrelated widgets. entries is
-     * sorted by path (see collectPaths()), so adjacent duplicates catch
+     * sorted by path (see sortedPaths()), so adjacent duplicates catch
      * every collision in one pass. */
     for (size_t i = 1; i < entries.size(); ++i) {
         if (entries[i].path == entries[i - 1].path) {
@@ -842,6 +896,16 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
                           .arg(qs(entries[i].path));
             return false;
         }
+    }
+    /* Duplicate generated names: two widgets udisplay-gen would emit under
+     * one WIDGET_ID_* / ui.<member> (the same key twice in one naming
+     * scope). Wire IDs would still be distinct, but this YAML can never be
+     * built into firmware, so reject it here too: design mode then catches
+     * it as early as `udisplay-gen validate` does. */
+    const std::string nameCollision = firstNameCollision(declared);
+    if (!nameCollision.empty()) {
+        m_error = qs(nameCollision);
+        return false;
     }
     std::map<std::string, uint8_t> idMap;
     uint8_t nextId = 0x10;

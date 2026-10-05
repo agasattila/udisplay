@@ -12,6 +12,7 @@
  * of the CTest working directory.
  */
 #include <QtTest>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -87,6 +88,36 @@ private slots:
                 QVERIFY2(actual.contains(path),
                          qPrintable(fixtureName + ": missing path '" + path + "'"));
                 QCOMPARE(actual.value(path), expectedId);
+            }
+        }
+    }
+
+    /* name_collision_fixtures: the same cases udisplay-gen's
+     * semantic_errors() checks (test_vectors.py). A YAML whose generated
+     * firmware names collide fails to parse with udisplay-gen's first
+     * error, verbatim; one without collisions parses. */
+    void nameCollisionFixtures_matchCodegen()
+    {
+        QFile f(QStringLiteral(UDISPLAY_PROTOCOL_VECTORS_JSON));
+        QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.errorString()));
+        const QJsonObject cases = QJsonDocument::fromJson(f.readAll()).object()
+            .value(QStringLiteral("name_collision_fixtures")).toObject()
+            .value(QStringLiteral("cases")).toObject();
+        QVERIFY2(!cases.isEmpty(), "name_collision_fixtures.cases must not be empty");
+
+        for (auto it = cases.begin(); it != cases.end(); ++it) {
+            const QJsonObject c = it.value().toObject();
+            const QJsonArray errors = c.value(QStringLiteral("errors")).toArray();
+            YamlParser p;
+            QList<WidgetDef> widgets;
+            QString name, version;
+            const bool ok = p.parse(c.value(QStringLiteral("yaml")).toString().toUtf8(),
+                                    widgets, name, version);
+            if (errors.isEmpty()) {
+                QVERIFY2(ok, qPrintable(it.key() + ": " + p.errorString()));
+            } else {
+                QVERIFY2(!ok, qPrintable(it.key() + ": parsed, expected a name collision"));
+                QCOMPARE(p.errorString(), errors.first().toString());
             }
         }
     }

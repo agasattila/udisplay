@@ -258,6 +258,43 @@ private slots:
         QVERIFY(!dc.designErrorString().isEmpty());
     }
 
+    /* Two widgets that udisplay-gen would generate under one firmware
+     * name (the same key in two transparent rows) are rejected by design
+     * mode, with udisplay-gen validate's message, instead of rendering. */
+    void duplicate_generated_name_sets_design_error()
+    {
+        const char* yaml =
+            "device:\n"
+            "  name: dup names\n"
+            "widgets:\n"
+            "  row100:\n"
+            "    type: row\n"
+            "    namespace: false\n"
+            "    widgets:\n"
+            "      mylabel:\n"
+            "        type: label\n"
+            "        text: Hello1\n"
+            "  row200:\n"
+            "    type: row\n"
+            "    widgets:\n"
+            "      mylabel:\n"
+            "        type: label\n"
+            "        text: Hello2\n";
+
+        QTemporaryFile f;
+        const QString path = writeTempYaml(f, yaml);
+        QVERIFY(!path.isEmpty());
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+        QCOMPARE(dc.designErrorString(), QStringLiteral(
+            "widgets.row100.mylabel, widgets.row200.mylabel: all named 'mylabel' in "
+            "the generated firmware API; rename one, or set `namespace: true` on a "
+            "section/row/grid that separates them"));
+    }
+
     void invalid_yaml_does_not_crash()
     {
         const char* badYaml = ":\n  -\n    - bad\n  :\n";

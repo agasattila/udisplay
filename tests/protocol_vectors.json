@@ -132,8 +132,8 @@
       }
     },
     "namespaced_keys": {
-      "description": "v5 scheme: widget keys are local to their parent. The same key (temp, controls, enable) appears in several containers and at the top level; every occurrence gets its own ID because each container key is a path segment (boiler.controls.temp vs tank.temp vs temp).",
-      "yaml": "device:\n  name: namespaced keys fixture\nwidgets:\n  boiler:\n    type: section\n    label: Boiler\n    widgets:\n      temp:\n        type: display\n      controls:\n        type: row\n        widgets:\n          enable:\n            type: toggle\n          temp:\n            type: slider\n            min: 0\n            max: 100\n  tank:\n    type: section\n    label: Tank\n    widgets:\n      temp:\n        type: display\n      controls:\n        type: row\n        widgets:\n          enable:\n            type: toggle\n  temp:\n    type: display\n",
+      "description": "v5 scheme: widget keys are local to their parent. The same key (temp, controls, enable) appears in several containers and at the top level; every occurrence gets its own ID because each container key is a path segment (boiler.controls.temp vs tank.temp vs temp). Every container that reuses a key below it sets `namespace: true`, so the reused keys are distinct generated names too; the flag changes no ID.",
+      "yaml": "device:\n  name: namespaced keys fixture\nwidgets:\n  boiler:\n    type: section\n    namespace: true\n    label: Boiler\n    widgets:\n      temp:\n        type: display\n      controls:\n        type: row\n        namespace: true\n        widgets:\n          enable:\n            type: toggle\n          temp:\n            type: slider\n            min: 0\n            max: 100\n  tank:\n    type: section\n    namespace: true\n    label: Tank\n    widgets:\n      temp:\n        type: display\n      controls:\n        type: row\n        namespace: true\n        widgets:\n          enable:\n            type: toggle\n  temp:\n    type: display\n",
       "widget_ids": {
         "boiler": "0x10",
         "boiler.controls": "0x11",
@@ -456,6 +456,23 @@
       },
       "bytes": "07 00 30 10 01 c3 f5 48 40",
       "total_bytes": 9
+    }
+  },
+  "name_collision_fixtures": {
+    "description": "Golden fixtures for generated-name collisions, checked by udisplay-gen's semantic_errors() and udisplay-client's YamlParser::parse(). A section/row/grid is transparent to its children's generated names unless it sets `namespace: true`; dpad, button-group and button faces always are namespaces. `errors` lists every collision udisplay-gen reports, in order; the client rejects the YAML with errors[0] as its error string. An empty list means both must accept it.",
+    "cases": {
+      "transparent_rows_and_mixed_levels": {
+        "yaml": "device:\n  name: \"My Device\"\nstyle:\n  insane:\n    text: \"#F0d4aa\"\n    button_text: \"#F00000\"\n    button: \"#00F000\"\n    accent: \"#F00000\"\nwidgets:\n  row100:\n    type: row\n    namespace: false\n    widgets:\n      mylabel:\n        type: label\n        text: Hello1\n      mylabel2:\n        type: label\n        text: Hello2\n      mybutton:\n        type: button\n        style: insane\n        label: \"Hello\"\n  row200:\n    type: row\n    widgets:\n      mylabel:\n        type: label\n        text: Hello1\n      mylabel2:\n        type: label\n        text: Hello2\n  mybutton:\n    type: button\n    style: insane\n    label: \"Hello\"\n    widgets:\n      mylabel:\n        align: center\n        type: label\n        text: Hello\n      mylabel2:\n        align: center\n        type: label\n        text: World!\n        style: default\n",
+        "errors": [
+          "widgets.row100.mylabel, widgets.row200.mylabel: all named 'mylabel' in the generated firmware API; rename one, or set `namespace: true` on a section/row/grid that separates them",
+          "widgets.row100.mylabel2, widgets.row200.mylabel2: all named 'mylabel2' in the generated firmware API; rename one, or set `namespace: true` on a section/row/grid that separates them",
+          "widgets.row100.mybutton, widgets.mybutton: all named 'mybutton' in the generated firmware API; rename one, or set `namespace: true` on a section/row/grid that separates them"
+        ]
+      },
+      "namespaces_and_compound_widgets": {
+        "yaml": "device:\n  name: name paths ok\nwidgets:\n  indoor:\n    type: section\n    namespace: true\n    widgets:\n      temp:\n        type: display\n      controls:\n        type: row\n        widgets:\n          enable:\n            type: toggle\n  outdoor:\n    type: row\n    namespace: true\n    widgets:\n      temp:\n        type: display\n  enable_all:\n    type: toggle\n  nav_a:\n    type: dpad\n    widgets:\n      up:\n        type: button\n        position: top\n  nav_b:\n    type: dpad\n    widgets:\n      up:\n        type: button\n        position: top\n  g1:\n    type: button-group\n    items:\n      off:\n        label: Off\n  g2:\n    type: button-group\n    items:\n      off:\n        label: Off\n  b1:\n    type: button\n    label: B1\n    widgets:\n      icon:\n        type: led\n  b2:\n    type: button\n    label: B2\n    widgets:\n      icon:\n        type: led\n",
+        "errors": []
+      }
     }
   }
 }

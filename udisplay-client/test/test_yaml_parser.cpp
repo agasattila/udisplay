@@ -601,8 +601,10 @@ private slots:
         QCOMPARE(relay->widgetId, uint8_t(0x13));
     }
 
-    /* Keys are local to their parent: a section `advanced` and a toggle
-     * `advanced` in section `basic` are distinct paths with distinct IDs. */
+    /* Structural paths are local to their parent: a section `advanced` and
+     * a toggle `advanced` in section `basic` are distinct paths with
+     * distinct IDs. (`basic` must be a namespace, or both would be named
+     * `advanced` in the generated firmware API.) */
     void containerNameReusedByLeafInAnotherSection_parses()
     {
         const char* yaml =
@@ -614,6 +616,7 @@ private slots:
             "        type: toggle\n"
             "  basic:\n"
             "    type: section\n"
+            "    namespace: true\n"
             "    widgets:\n"
             "      advanced:\n"
             "        type: toggle\n";
@@ -2824,7 +2827,8 @@ private slots:
 
     /* Two sibling containers inside ONE button face, each with a
      * same-named leaf: each container's key is a segment of its child's
-     * path ("btn.left.x" vs "btn.right.x"), so both get their own ID. */
+     * path ("btn.left.x" vs "btn.right.x"), so both get their own ID.
+     * (The grids set `namespace: true` so the generated names differ too.) */
     void sameLeafName_inSiblingFaceContainers_getsDistinctIds()
     {
         const char* yaml =
@@ -2835,12 +2839,14 @@ private slots:
             "      left:\n"
             "        type: grid\n"
             "        columns: 1\n"
+            "        namespace: true\n"
             "        widgets:\n"
             "          x:\n"
             "            type: led\n"
             "      right:\n"
             "        type: grid\n"
             "        columns: 1\n"
+            "        namespace: true\n"
             "        widgets:\n"
             "          x:\n"
             "            type: led\n";
@@ -2861,11 +2867,13 @@ private slots:
             "widgets:\n"
             "  left:\n"
             "    type: row\n"
+            "    namespace: true\n"
             "    widgets:\n"
             "      x:\n"
             "        type: toggle\n"
             "  right:\n"
             "    type: row\n"
+            "    namespace: true\n"
             "    widgets:\n"
             "      x:\n"
             "        type: toggle\n";
@@ -2923,6 +2931,7 @@ private slots:
                 "            type: display\n"
                 "  outdoor:\n"
                 "    type: section\n"
+                "    namespace: true\n"
                 "    widgets:\n"
                 "      temperature:\n"
                 "        type: display\n")

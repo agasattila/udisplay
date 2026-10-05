@@ -408,8 +408,11 @@ nav.up                        ──►   nav.up                (dpad: always a 
   therefore clash; this tradeoff is accepted (eng review D8). `validate.py`
   reports a clash with both YAML locations and suggests renaming one of
   them, or setting `namespace: true` on a section/row/grid that separates
-  them. The client does not need this check, because structural paths are
-  always unique.
+  them. *(Revised 2026-10-05:)* `YamlParser.cpp` also derives name paths
+  and rejects the same collisions with the same message, in every mode, so
+  `--design` catches them while editing. Shared `name_collision_fixtures`
+  in `tests/protocol_vectors.json` keep the two rules in sync. This
+  reverses the earlier "the client does not need this check".
 - **C.** Names are the name path joined with `_` (`WIDGET_ID_TEMP_DISPLAY`,
   `WIDGET_ID_INDOOR_TEMPERATURE`, `WIDGET_ID_NAV_UP`), each bound to its
   structural-path ID. Handler struct fields follow the same rule. The
