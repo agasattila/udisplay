@@ -30,6 +30,11 @@ there is no ID to send. The YAML model and the runtime property model disagree.
 > members, but that cost goes away with no public release (see OV1).
 > Sections below that describe transparency are kept for history. The
 > implemented design is in "Revision: hierarchical paths" at the end.
+>
+> **Revision 2 (PR #44 review, 2026-10-02):** hierarchy is opt-in per
+> section/row/grid (`namespace: true`, default false; dpad, button-group
+> and button faces are always namespaces), so layout moves do not
+> rename firmware APIs. See "Revision 2: opt-in namespaces".
 
 ## Premises
 
@@ -345,3 +350,143 @@ NO UNRESOLVED DECISIONS
   declaration order instead of alphabetical order.
 - **Fixtures.** The golden `widget_id_fixtures` are regenerated, with a new
   `namespaced_keys` fixture that reuses one key in several containers.
+
+## Revision 2: opt-in namespaces (PR #44 review, 2026-10-02)
+
+Review 5396283701 found that hierarchical paths make firmware depend on
+layout: moving `temp_display` into `row_temp` turns `ui.temp_display` into
+`ui.row_temp.temp_display`. The review proposed keeping short names (C++
+root aliases, flat C names) for keys that are *globally unique*. Office
+hours and the eng review (2026-10-05) kept the goal and changed the
+mechanism.
+
+**Rejected: uniqueness-inferred short names (the review as written).** A
+widget's name would depend on the whole tree. Adding `outdoor.temperature`
+would rename `WIDGET_ID_TEMPERATURE` to `WIDGET_ID_INDOOR_TEMPERATURE` and
+remove `ui.temperature`, even though the indoor widget never moved. C and
+C++ would also follow different rules. **Rejected: per-widget `name:` pin.**
+Every widget left unpinned would still rename when it moves.
+**Rejected: wire IDs follow the naming rule too.** The reviewer asked for
+stable *source names*. Wire IDs are regenerated on both sides from the same
+YAML, so making them stable would add a client parser rewrite and new
+fixtures for a guarantee nobody needs (eng review, outside voice).
+
+**Chosen: an explicit `namespace:` flag on section/row/grid (default
+`false`); compound widgets are always namespaces; only generated names
+change.**
+
+```
+YAML key path (structural)          name path (generated API)
+main.row_temp.temp_display    ──►   temp_display          (main, row_temp transparent)
+indoor.temperature            ──►   indoor.temperature    (indoor: namespace: true)
+nav.up                        ──►   nav.up                (dpad: always a namespace)
+       │
+       └──► wire ID: alphabetical by structural path (unchanged from Revision 1)
+```
+
+- **Flag.** `section`, `row` and `grid` accept `namespace: true|false`,
+  default `false`. Compound widgets are always namespaces and take no flag:
+  `dpad` (its buttons), `button-group` (its items) and a `button` with face
+  children. Their children usually reuse the same keys from one instance to
+  the next (`up`, `off`), so two of them must be able to coexist.
+- **Wire IDs: unchanged.** IDs stay alphabetical by the full structural
+  path (`section.row.leaf`), exactly as in "Revision: hierarchical paths".
+  `YamlParser.cpp`'s ID derivation, the golden `widget_id_fixtures` and the
+  BLOB format do not change. The client only has to accept the `namespace`
+  key. Wire IDs may change when a widget moves; both sides regenerate them,
+  and firmware never spells them out.
+- **Name path.** A widget's generated name comes from the keys of its
+  *namespace* ancestors plus its own key. Transparent containers add no
+  segment. Moving a widget between existing transparent containers changes
+  no C, C++ or MicroPython identifier. Moving it across a namespace boundary
+  does rename it, because that is a change in meaning.
+- **Uniqueness (codegen only).** Name paths must be unique: keys must be
+  unique within a namespace scope (the root, or one namespace widget,
+  down to the next namespace widget). A transparent container's own key
+  also lives in that scope, since it is addressable
+  (`ui.controls.set_visible`). Two rows named `controls` in one scope
+  therefore clash; this tradeoff is accepted (eng review D8). `validate.py`
+  reports a clash with both YAML locations and suggests renaming one of
+  them, or setting `namespace: true` on a section/row/grid that separates
+  them. The client does not need this check, because structural paths are
+  always unique.
+- **C.** Names are the name path joined with `_` (`WIDGET_ID_TEMP_DISPLAY`,
+  `WIDGET_ID_INDOOR_TEMPERATURE`, `WIDGET_ID_NAV_UP`), each bound to its
+  structural-path ID. Handler struct fields follow the same rule. The
+  normalized-name collision check stays and runs on name paths.
+- **C++ / MicroPython.** Members follow the name path. A transparent
+  container is still a member of its enclosing scope
+  (`ui.row_temp.set_visible(false)`), and its children are inlined into
+  that same scope (`ui.temp_display`). A namespace widget gets a generated
+  class that holds its children (`ui.indoor.temperature`, `ui.nav.up`,
+  `ui.mode_sel.slow`, `ui.power_btn.icon`). For compound widgets, layout
+  children and naming children are the same, so the button-group `Item`
+  enum and `set()`/`clear()` stay as they are. One name per widget, and no
+  aliases.
+- **Schema/docs.** Add `namespace` (boolean, default false) to the
+  section, row and grid schemas only. Update widgets.md and the naming part
+  of protocol.md § Widget ID Assignment (the wire rule there is unchanged).
+  Demos go back to flat names unless a demo needs a namespace.
+- **Compatibility.** PR #44 is unmerged and already moves to proto 0x05,
+  and there are no released peers, so there is no transition to manage.
+
+**Implementation notes (eng review, 2026-10-05).**
+- **One rule in codegen (3A).** `WidgetNode` gains `type`, `name_path` and
+  `transparent`; `path` stays the structural path. `_collect`,
+  `collect_types` and `collect_dropdown_items` become walks over
+  `widget_tree()`, so the naming rule lives in exactly one function.
+- **Naming scope (5A).** A `scope_members(node)` helper next to
+  `widget_tree()` inlines the children of transparent containers. C++ class
+  generation, MicroPython attribute attachment, and both backends'
+  reserved-name checks use it.
+- **Two paths in codegen (4A, narrowed by D7).** Structural path for wire
+  IDs and error locations, name path for identifiers. The client keeps
+  `keyPath` as it is.
+- **Client hardening (2A, narrowed by D7).** The client's derivation rule
+  does not change, but a missing `idMap` entry becomes a parse error
+  instead of a silent `widgetId = 0`.
+
+**Tests.**
+1. Layout independence: the same leaf at the top level, inside an existing
+   row, a grid and a transparent section produces identical C names, C++
+   members and MicroPython attributes. Wire IDs are not asserted to be
+   equal.
+2. Namespaces: `indoor`/`outdoor` with `namespace: true`, each holding
+   `temperature`, and two dpads that both contain `up`, produce
+   `WIDGET_ID_INDOOR_TEMPERATURE` / `ui.indoor.temperature` and
+   `ui.nav_a.up` / `ui.nav_b.up`, and there is no `ui.temperature`.
+3. A duplicate name path (the same key in two transparent rows in one
+   scope, and two transparent rows with the same key) is rejected by
+   `validate.py`; the message names both YAML locations.
+4. Golden `widget_id_fixtures` are unchanged; the existing client/codegen
+   parity tests still pass. Add codegen fixtures that map YAML to name
+   paths.
+5. Extend `test_generated_compiles.py` YAML with a flagged section, a
+   transparent row holding a button-group, and two dpads.
+6. Reserved names follow the naming scope: a leaf named like a root member
+   inside a transparent top-level row is rejected (C++ and MicroPython), and
+   a leaf named `id` there is accepted.
+7. MicroPython: a handler on a leaf inlined from a transparent row still
+   fires (dispatch walks the whole tree).
+8. Client: parses a YAML that uses `namespace:` and produces the same
+   widget IDs as without it, and no widget has `widgetId == 0`. (The
+   missing-`idMap`-entry parse error in `widgetIdFor()` has no test: the
+   collect and build walks can't be made to disagree without a test seam.)
+9. Schema: `namespace` is accepted on section/row/grid, rejected on
+   dpad/button/button-group, and a non-boolean value is rejected.
+10. Rule edges: a namespaced section inside a namespaced section
+    (`a.b.leaf`); a transparent row inside a namespaced section (`a.leaf`);
+    moving a widget *across* a namespace boundary does rename it.
+
+**NOT in scope.** Stable wire IDs across moves (not needed, D7). Hiding
+transparent containers from the API (rejected, D8). A `namespace:` flag on
+dpad/button/button-group (they are always namespaces). Uniqueness-inferred
+aliases (rejected in office hours).
+
+**Implementation tasks (eng review 2, 2026-10-05).**
+- [x] T1 (P1) widget_ids.py: `WidgetNode` gains `type`/`name_path`/`transparent`; derive `_collect`/`collect_types`/`collect_dropdown_items` from `widget_tree()`; add `scope_members()`. Verify: `cd udisplay-gen && python3 -m pytest tests/`
+- [x] T2 (P1) validate.py: duplicate-name-path check naming both YAML locations (test 3).
+- [x] T3 (P1) C / C++ / MicroPython backends: identifiers from `name_path`, members via `scope_members()`, IDs still keyed by structural path; reserved checks per scope (tests 1, 2, 5, 6, 7).
+- [x] T4 (P1) schema: `namespace` boolean on section/row/grid only (test 9).
+- [x] T5 (P2) YamlParser.cpp: accept `namespace`; a missing `idMap` entry becomes a parse error (test 8). Verify: client CTest.
+- [x] T6 (P2) demos back to flat names; docs: widgets.md, protocol.md naming section.
