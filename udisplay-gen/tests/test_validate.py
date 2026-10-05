@@ -953,11 +953,13 @@ def test_label_align_and_text_align_together():
     assert validate(doc, SCHEMA) == []
 
 
-# ── Semantic: widget names are local to their parent ────────────────────────────────────────────
+# ── Semantic: generated names are unique per naming scope ───────────────────────────────────────
+# A section/row/grid is transparent to generated names unless it sets
+# `namespace: true` (widget_ids.py), so keys must be unique per naming scope.
 
-def test_leaf_name_reused_inside_a_section_valid():
-    """Keys are local to their parent: a top-level `relay` and a `relay` in
-    section `grp` are `relay` and `grp.relay`."""
+def test_leaf_name_reused_inside_a_section_rejected():
+    """A top-level `relay` and a `relay` in transparent section `grp` would
+    both be WIDGET_ID_RELAY / ui.relay."""
     doc = {
         "device": {"name": "x"},
         "widgets": {
@@ -968,10 +970,30 @@ def test_leaf_name_reused_inside_a_section_valid():
             },
         },
     }
+    errs = semantic_errors(doc)
+    assert errs == [
+        "  widgets.relay, widgets.grp.relay: all named 'relay' in the generated "
+        "firmware API; rename one, or set `namespace: true` on a section/row/grid "
+        "that separates them"
+    ]
+
+
+def test_leaf_name_reused_inside_a_namespaced_section_valid():
+    """With `namespace: true` they are `relay` and `grp.relay`."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "relay": {"type": "toggle", "label": "Relay"},
+            "grp": {
+                "type": "section", "namespace": True,
+                "widgets": {"relay": {"type": "toggle", "label": "Relay2"}},
+            },
+        },
+    }
     assert semantic_errors(doc) == []
 
 
-def test_same_leaf_name_in_two_sections_valid():
+def test_same_leaf_name_in_two_sections_rejected():
     doc = {
         "device": {"name": "x"},
         "widgets": {
@@ -983,6 +1005,61 @@ def test_same_leaf_name_in_two_sections_valid():
                 "type": "section",
                 "widgets": {"volt": {"type": "display", "label": "V2"}},
             },
+        },
+    }
+    errs = semantic_errors(doc)
+    assert len(errs) == 1 and "widgets.sec_a.volt, widgets.sec_b.volt" in errs[0]
+
+
+def test_same_leaf_name_in_two_namespaced_sections_valid():
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "sec_a": {
+                "type": "section", "namespace": True,
+                "widgets": {"volt": {"type": "display", "label": "V"}},
+            },
+            "sec_b": {
+                "type": "row", "namespace": True,
+                "widgets": {"volt": {"type": "display", "label": "V2"}},
+            },
+        },
+    }
+    assert semantic_errors(doc) == []
+
+
+def test_two_transparent_containers_with_the_same_key_rejected():
+    """A transparent container is addressable (ui.controls.set_visible), so
+    its own key takes a name in its scope too."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "a": {"type": "section", "namespace": True, "widgets": {
+                "controls": {"type": "row", "widgets": {"x": {"type": "led"}}}}},
+            "controls": {"type": "grid", "columns": 1,
+                         "widgets": {"y": {"type": "led"}}},
+            "b": {"type": "section", "widgets": {
+                "controls": {"type": "row", "widgets": {"z": {"type": "led"}}}}},
+        },
+    }
+    errs = semantic_errors(doc)
+    assert len(errs) == 1
+    assert "widgets.controls, widgets.b.controls" in errs[0]
+
+
+def test_compound_widget_children_are_always_namespaced():
+    """dpad buttons, button-group items and face children reuse keys freely."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "nav_a": {"type": "dpad", "widgets": {
+                "up": {"type": "button", "position": "top"}}},
+            "nav_b": {"type": "dpad", "widgets": {
+                "up": {"type": "button", "position": "top"}}},
+            "g1": {"type": "button-group", "items": {"off": {"label": "Off"}}},
+            "g2": {"type": "button-group", "items": {"off": {"label": "Off"}}},
+            "b1": {"type": "button", "widgets": {"icon": {"type": "led"}}},
+            "b2": {"type": "button", "widgets": {"icon": {"type": "led"}}},
         },
     }
     assert semantic_errors(doc) == []

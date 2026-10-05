@@ -26,7 +26,9 @@ SUPPORTED_TYPES = [
 ]
 
 # The container type set is shared with ID assignment (TODO-007).
-from .widget_ids import CONTAINER_TYPES  # noqa: E402
+from .widget_ids import (  # noqa: E402
+    CONTAINER_TYPES, describe_name_collision, name_path_collisions,
+)
 
 # button-group item keys that would collide with the generated group's own
 # set()/clear() methods (C++ class members, Python attributes)
@@ -167,10 +169,8 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
     - style: names a declared stylesheet (containers, button face children
       and button-group items included)
 
-    Widget names need no uniqueness check beyond YAML's own: a widget's ID
-    path is the chain of keys from the top level (`section.row.leaf`), so
-    keys only have to be unique among siblings, which a YAML mapping already
-    guarantees.
+    Generated-name uniqueness is checked once for the whole tree in
+    semantic_errors(), not per map.
     """
     errors: list[str] = []
 
@@ -234,13 +234,21 @@ def semantic_errors(doc: dict) -> list[str]:
     - slider min < max
     - dpad's button children must all have position
     - style: names a declared stylesheet
+    - every widget has a distinct name path: a key appears once per naming
+      scope (widget_ids.py), so two `temp` widgets in two transparent rows
+      would share WIDGET_ID_TEMP / ui.temp
     """
     # "default" is always implicitly valid, even with no style: block at all
     # — matches udisplay-client's YamlParser.cpp parseStyles(), which always
     # populates a "default" entry (from the style.default: block if present,
     # else hardcoded StyleToken C++ defaults).
     style_names = set(doc.get("style", {}).keys()) | {"default"}
-    return _semantic_errors_in_map(doc.get("widgets", {}), "", style_names)
+    widgets = doc.get("widgets", {})
+    errors = _semantic_errors_in_map(widgets, "", style_names)
+    if isinstance(widgets, dict):
+        errors += [f"  {describe_name_collision(name, paths)}"
+                   for name, paths in name_path_collisions(widgets)]
+    return errors
 
 
 def validate(doc: dict, schema: dict | None = None,

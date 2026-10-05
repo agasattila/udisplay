@@ -30,6 +30,20 @@ static void diag(Diags& diags, Severity sev,
     diags.append({sev, qs(key), QString::fromLatin1(field), msg});
 }
 
+/* The widget ID collectPaths() assigned to a path. Every build site asks
+ * for a path that walk numbered, so a miss means the two walks disagree;
+ * a 0 ID would silently drop every STATE_UPDATE for that widget, so it is
+ * a fatal diagnostic instead. */
+static uint8_t widgetIdFor(const std::map<std::string, uint8_t>& idMap,
+                           const std::string& path, Diags& diags)
+{
+    auto it = idMap.find(path);
+    if (it != idMap.end()) return it->second;
+    diag(diags, Severity::Error, path, "widgetId",
+         QStringLiteral("internal error: no widget ID assigned to this path"));
+    return 0;
+}
+
 /* Returns true if v is a member of the constexpr array. */
 template <typename Array>
 static bool inEnum(const QString& v, const Array& allowed)
@@ -150,7 +164,9 @@ struct PathEntry {
  * (issue #43): `<prefix>.<key>`, where the prefix is the parent widget's own
  * path. Every widget with `widgets:` (containers and button faces alike) is
  * a namespace for its children, so a path names the whole chain of keys from
- * the top level: `section.row.leaf`. */
+ * the top level: `section.row.leaf`. A container's `namespace:` key does not
+ * change this: it only shapes the identifiers udisplay-gen generates for
+ * firmware, never the wire IDs. */
 static void collectPathsRecursive(const YAML::Node& widgets,
                                   const std::string& prefix,
                                   std::vector<PathEntry>& entries)
@@ -498,7 +514,7 @@ static int buildWidget(const std::string& key,
                  ci != node["widgets"].end(); ++ci) {
                 std::string ck = ci->first.as<std::string>();
                 std::string cp = key + "." + ck;
-                uint8_t cid = idMap.count(cp) ? idMap.at(cp) : 0;
+                uint8_t cid = widgetIdFor(idMap, cp, diags);
                 int idx = buildWidget(cp, ci->second, cid, idMap, myRow, out, diags);
                 out[idx].flex  = parseFlex(ci->second, key, diags);
                 out[idx].align = parseAlign(ci->second, key, "align", kRowGridAligns, diags);
@@ -532,7 +548,7 @@ static int buildWidget(const std::string& key,
                  * buildWidget(), which requires a `type:` key. */
                 WidgetDef item;
                 item.keyPath  = qs(ip);
-                item.widgetId = idMap.count(ip) ? idMap.at(ip) : 0;
+                item.widgetId = widgetIdFor(idMap, ip, diags);
                 item.type     = WidgetType::Button;
                 item.label    = nodeStr(ii->second, "label");
                 item.parentId = myRow;
@@ -569,7 +585,7 @@ static int buildWidget(const std::string& key,
                  * buildWidget() (they always carry an explicit `type:` in
                  * YAML, e.g. `type: button`). */
                 std::string idPath = key + "." + ik;
-                uint8_t cid = idMap.count(idPath) ? idMap.at(idPath) : 0;
+                uint8_t cid = widgetIdFor(idMap, idPath, diags);
                 int idx = buildWidget(idPath, ii->second, cid, idMap, myRow, out, diags);
                 out[idx].props[QStringLiteral("position")] = nodeStr(ii->second, "position");
             }
@@ -591,7 +607,7 @@ static int buildWidget(const std::string& key,
                  ci != node["widgets"].end(); ++ci) {
                 std::string ck = ci->first.as<std::string>();
                 std::string idPath = key + "." + ck;
-                uint8_t cid = idMap.count(idPath) ? idMap.at(idPath) : 0;
+                uint8_t cid = widgetIdFor(idMap, idPath, diags);
                 int idx = buildWidget(idPath, ci->second, cid, idMap, myRow, out, diags);
                 out[idx].flex  = parseFlex(ci->second, ck, diags);
                 out[idx].align = parseAlign(ci->second, ck, "align", kRowGridAligns, diags);
@@ -637,7 +653,7 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
         if (type == "section") {
             WidgetDef s;
             s.keyPath  = qs(key);
-            s.widgetId = idMap.count(key) ? idMap.at(key) : 0;
+            s.widgetId = widgetIdFor(idMap, key, diags);
             s.type     = WidgetType::Section;
             s.label    = nodeStr(node, "label");
             bool collapsible = false;
@@ -656,11 +672,11 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
              * a top-level widget reads its flex weight) — matches original
              * behavior, which never parsed flex for a top-level row/grid
              * either. */
-            uint8_t wid = idMap.count(key) ? idMap.at(key) : 0;
+            uint8_t wid = widgetIdFor(idMap, key, diags);
             buildWidget(key, node, wid, idMap, parentId, out, diags);
 
         } else {
-            uint8_t wid = idMap.count(key) ? idMap.at(key) : 0;
+            uint8_t wid = widgetIdFor(idMap, key, diags);
             int idx = buildWidget(key, node, wid, idMap, parentId, out, diags);
             out[idx].flex = parseFlex(node, key, diags);
         }

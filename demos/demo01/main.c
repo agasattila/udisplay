@@ -35,7 +35,7 @@ static udisplay_t g_ctx; /* single instance — this demo has one TCP connection
 
 static float  g_base_rate_hz = 1.0f;
 static float  g_multiplier   = 1.0f;
-static uint8_t g_mode        = WIDGET_ID_GRID_BTN_GRP_MODE_SEL_SLOW;   /* confirmed mode_sel item */
+static uint8_t g_mode        = WIDGET_ID_MODE_SEL_SLOW;   /* confirmed mode_sel item */
 static int    g_enabled      = 1;
 static int    g_power_on     = 0;
 static double g_sim_time     = 0.0;
@@ -54,7 +54,7 @@ static void temp_display()
     /* temp_display: 20 + 5·sin(t) °C */
     if (g_enabled) {
         float temp = 20.0f + 5.0f * (float)sin(g_sim_time);
-        set_row_temp_temp_display(&g_ctx, temp);
+        set_temp_display(&g_ctx, temp);
     }
 }
 
@@ -64,34 +64,34 @@ static void temp_display()
 static void handle_client_ready(void)
 {
     printf("[EVENT] client_ready\n");
-    set_row_temp_enable_toggle(&g_ctx, (uint8_t)g_enabled);
+    set_enable_toggle(&g_ctx, (uint8_t)g_enabled);
     temp_display();
-    set_row1_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
+    set_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
     set_rate_slider(&g_ctx, g_base_rate_hz);
     set_text_input(&g_ctx, "", 0);
-    set_grid_btn_grp_mode_sel(&g_ctx, g_mode);
+    set_mode_sel(&g_ctx, g_mode);
 }
 
 static void handle_power_btn(void)
 {
     g_power_on = !g_power_on;
-    set_row1_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
+    set_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
     printf("[EVENT] power_btn  → power_led %s\n", g_power_on ? "ON" : "OFF");
 }
 
 /* button-group selection is device-authoritative: a press only reports the
- * tap; the firmware confirms it with set_grid_btn_grp_mode_sel(), whose STATE_UPDATE is
+ * tap; the firmware confirms it with set_mode_sel(), whose STATE_UPDATE is
  * what moves the selection ring on the client. */
 static void select_mode(uint8_t item_id, float multiplier)
 {
     g_mode       = item_id;
     g_multiplier = multiplier;
-    set_grid_btn_grp_mode_sel(&g_ctx, g_mode);
+    set_mode_sel(&g_ctx, g_mode);
 }
 
-static void handle_mode_sel_fast(void)  { select_mode(WIDGET_ID_GRID_BTN_GRP_MODE_SEL_FAST,  2.0f); printf("[EVENT] mode_sel   → fast (2×)\n"); }
-static void handle_mode_sel_slow(void)  { select_mode(WIDGET_ID_GRID_BTN_GRP_MODE_SEL_SLOW,  1.0f); printf("[EVENT] mode_sel   → slow (1×)\n"); }
-static void handle_mode_sel_turbo(void) { select_mode(WIDGET_ID_GRID_BTN_GRP_MODE_SEL_TURBO, 5.0f); printf("[EVENT] mode_sel   → turbo (5.0×)\n"); }
+static void handle_mode_sel_fast(void)  { select_mode(WIDGET_ID_MODE_SEL_FAST,  2.0f); printf("[EVENT] mode_sel   → fast (2×)\n"); }
+static void handle_mode_sel_slow(void)  { select_mode(WIDGET_ID_MODE_SEL_SLOW,  1.0f); printf("[EVENT] mode_sel   → slow (1×)\n"); }
+static void handle_mode_sel_turbo(void) { select_mode(WIDGET_ID_MODE_SEL_TURBO, 5.0f); printf("[EVENT] mode_sel   → turbo (5.0×)\n"); }
 
 static void handle_rate_slider(float v)
 {
@@ -105,7 +105,7 @@ static void handle_rate_slider(float v)
 static void handle_enable_toggle(uint8_t state)
 {
     g_enabled = state ? 1 : 0;
-    set_row_temp_enable_toggle(&g_ctx, (uint8_t)g_enabled);
+    set_enable_toggle(&g_ctx, (uint8_t)g_enabled);
     printf("[EVENT] enable     → %s\n", g_enabled ? "ON" : "OFF");
 }
 
@@ -119,14 +119,14 @@ static void handle_text_input(const char* str, uint8_t len)
 }
 
 static const udisplay_ui_handlers_t g_handlers = {
-    .on_client_ready                      = handle_client_ready,
-    .on_row_temp_enable_toggle_change     = handle_enable_toggle,
-    .on_grid_btn_grp_mode_sel_fast_press  = handle_mode_sel_fast,
-    .on_grid_btn_grp_mode_sel_slow_press  = handle_mode_sel_slow,
-    .on_grid_btn_grp_mode_sel_turbo_press = handle_mode_sel_turbo,
-    .on_row1_power_btn_press              = handle_power_btn,
-    .on_rate_slider_change                = handle_rate_slider,
-    .on_text_input_submit                 = handle_text_input,
+    .on_client_ready         = handle_client_ready,
+    .on_enable_toggle_change = handle_enable_toggle,
+    .on_mode_sel_fast_press  = handle_mode_sel_fast,
+    .on_mode_sel_slow_press  = handle_mode_sel_slow,
+    .on_mode_sel_turbo_press = handle_mode_sel_turbo,
+    .on_power_btn_press      = handle_power_btn,
+    .on_rate_slider_change   = handle_rate_slider,
+    .on_text_input_submit    = handle_text_input,
 };
 
 /* ── demo_tcp hooks ──────────────────────────────────────────────────────── */
@@ -160,9 +160,9 @@ static void on_tick(double dt_sec)
     if (!g_initial_sent) {
         g_initial_sent = 1;
         set_rate_slider(&g_ctx, g_base_rate_hz);
-        set_row_temp_enable_toggle(&g_ctx, (uint8_t)g_enabled);
-        set_row1_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
-        set_grid_btn_grp_mode_sel(&g_ctx, g_mode);
+        set_enable_toggle(&g_ctx, (uint8_t)g_enabled);
+        set_power_btn_power_led(&g_ctx, (uint8_t)g_power_on);
+        set_mode_sel(&g_ctx, g_mode);
     }
 
     /* temp_display */
@@ -171,7 +171,7 @@ static void on_tick(double dt_sec)
     /* status_led: toggle every 3 ticks */
     if (g_tick % 3 == 0) {
         uint8_t led = (uint8_t)((g_tick / 3) % 2);
-        set_grid_btn_grp_status_led(&g_ctx, led);
+        set_status_led(&g_ctx, led);
     }
 }
 

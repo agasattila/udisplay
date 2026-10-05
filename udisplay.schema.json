@@ -50,7 +50,7 @@
     },
 
     "widgetMap": {
-      "description": "Named widget or container map. Names become C macro suffixes. Rendered in declaration order. A widget's ID path is the chain of keys from the top level (section.row.leaf), so names only need to be unique among siblings.",
+      "description": "Named widget or container map. Names become C macro suffixes. Rendered in declaration order. A widget's generated firmware name (WIDGET_ID_*, ui.<member>) is its key, prefixed by the keys of its namespace ancestors only: a section/row/grid adds no prefix unless it sets `namespace: true`, while dpad, button-group and a button's face always do. Names must be unique within each such naming scope (enforced by udisplay-gen's semantic validation). Wire IDs are numbered by the full key chain (section.row.leaf) regardless.",
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/widgetOrContainer" },
       "propertyNames": {
@@ -84,6 +84,12 @@
     "widget": {
       "description": "Alias for widgetOrContainer — preserved for backward compatibility.",
       "$ref": "#/$defs/widgetOrContainer"
+    },
+
+    "namespaceProp": {
+      "description": "Whether this container is a namespace for the generated firmware names of its children (ui.<container>.<child>, WIDGET_ID_<CONTAINER>_<CHILD>). Default false: the container is transparent, so its children are named as if they sat directly in the enclosing scope, and moving a widget between transparent containers changes no firmware identifier. The container itself is always addressable either way. Has no effect on wire IDs.",
+      "type": "boolean",
+      "default": false
     },
 
     "flexProp": {
@@ -228,6 +234,7 @@
       "properties": {
         "type": { "const": "row" },
         "widgets": { "$ref": "#/$defs/buttonFaceWidgetMap" },
+        "namespace": { "$ref": "#/$defs/namespaceProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
       }
@@ -246,6 +253,7 @@
           "minimum": 1
         },
         "widgets": { "$ref": "#/$defs/buttonFaceWidgetMap" },
+        "namespace": { "$ref": "#/$defs/namespaceProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
       }
@@ -514,7 +522,7 @@
     },
 
     "sectionContainer": {
-      "description": "Named collapsible group container. Gets its own widget ID (for SET_PROPERTY); the section name is a segment of its children's ID paths (section.child). Requires capabilities: [layout-v2]. `style:` (see the `styleProp` $def) colors this section's own header/border chrome AND cascades to children that don't set their own `style:`.",
+      "description": "Named collapsible group container. Gets its own widget ID (for SET_PROPERTY); a namespace for its children's generated names only with `namespace: true`. Requires capabilities: [layout-v2]. `style:` (see the `styleProp` $def) colors this section's own header/border chrome AND cascades to children that don't set their own `style:`.",
       "type": "object",
       "required": ["type", "widgets"],
       "additionalProperties": false,
@@ -531,6 +539,7 @@
           "default": false
         },
         "widgets": { "$ref": "#/$defs/widgetMap" },
+        "namespace": { "$ref": "#/$defs/namespaceProp" },
         "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
@@ -538,13 +547,14 @@
     },
 
     "rowContainer": {
-      "description": "Horizontal layout container. Children are laid out left-to-right with optional flex weights. The container name is a segment of its children's ID paths (row.child). Requires capabilities: [layout-v2].",
+      "description": "Horizontal layout container. Children are laid out left-to-right with optional flex weights. A namespace for its children's generated names only with `namespace: true`. Requires capabilities: [layout-v2].",
       "type": "object",
       "required": ["type", "widgets"],
       "additionalProperties": false,
       "properties": {
         "type": { "const": "row" },
         "widgets": { "$ref": "#/$defs/widgetMap" },
+        "namespace": { "$ref": "#/$defs/namespaceProp" },
         "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
@@ -552,7 +562,7 @@
     },
 
     "gridContainer": {
-      "description": "Grid layout container. Children are placed left-to-right, wrapping at `columns` items per row. The container name is a segment of its children's ID paths (grid.child). Requires capabilities: [layout-v2].",
+      "description": "Grid layout container. Children are placed left-to-right, wrapping at `columns` items per row. A namespace for its children's generated names only with `namespace: true`. Requires capabilities: [layout-v2].",
       "type": "object",
       "required": ["type", "columns", "widgets"],
       "additionalProperties": false,
@@ -564,6 +574,7 @@
           "minimum": 1
         },
         "widgets": { "$ref": "#/$defs/widgetMap" },
+        "namespace": { "$ref": "#/$defs/namespaceProp" },
         "style": { "$ref": "#/$defs/styleProp" },
         "flex": { "$ref": "#/$defs/flexProp" },
         "align": { "$ref": "#/$defs/alignProp" }
@@ -581,7 +592,7 @@
     },
 
     "dpadWidget": {
-      "description": "Directional pad container. Classic 5-position directional pad (cross shape), laid out from `button` children — each must declare a `position` (top/right/bottom/left/center); at least 1 required. The container name is a segment of its children's ID paths (dpad.button), matching `section`/`row`/`grid`. Requires capabilities: [layout-v2].",
+      "description": "Directional pad container. Classic 5-position directional pad (cross shape), laid out from `button` children — each must declare a `position` (top/right/bottom/left/center); at least 1 required. Always a namespace for its buttons' generated names (ui.dpad.button), so two dpads can reuse button keys. Requires capabilities: [layout-v2].",
       "type": "object",
       "required": ["type", "widgets"],
       "additionalProperties": false,

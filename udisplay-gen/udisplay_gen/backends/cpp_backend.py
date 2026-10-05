@@ -9,10 +9,10 @@ import re
 from typing import List
 
 from ..merkle import CHUNK_SIZE
-from ..widget_ids import collect_dropdown_items, walk, widget_tree
+from ..widget_ids import collect_dropdown_items, scope_members, walk, widget_tree
 from . import BuildContext, OutputFile
 from ._shared import (
-    _hex_rows, _HEADER_COMMENT, widget_id_macro_collisions,
+    _hex_rows, _HEADER_COMMENT, widget_name_errors,
     _config_fields, _config_sequential_assignment,
     _ns_validate, _ns_fn,
 )
@@ -76,10 +76,9 @@ def _validate_cpp_identifiers(ctx: BuildContext) -> None:
     shadowing) C++ header: C++ keywords, names colliding with UDisplay's or
     the parent class's own members, and paths that normalize to the same
     generated class name (`a_b` and `a.b` are both `ABWidget`). Every widget
-    is a member (issue #43): top-level widgets of UDisplay, every other
-    widget of its parent's generated class. Raises ValueError listing every
-    violation."""
-    widget_types = ctx.widget_types or {}
+    is a member (issue #43) of its naming scope's class: UDisplay for the
+    top-level scope, a namespace widget's generated class otherwise
+    (scope_members()). Raises ValueError listing every violation."""
     errors: list = []
 
     def check(name: str, reserved: frozenset, where: str) -> None:
@@ -91,14 +90,16 @@ def _validate_cpp_identifiers(ctx: BuildContext) -> None:
             )
 
     tree = widget_tree(ctx.widgets_yaml or {})
-    for node in tree:
+    for node in scope_members(tree):
         check(node.key, _UDISPLAY_RESERVED_NAMES, f"widget '{node.path}'")
     for node in walk(tree):
-        reserved = _cpp_child_reserved_names(widget_types.get(node.path, ""))
-        for child in node.children:
+        if node.transparent:
+            continue
+        reserved = _cpp_child_reserved_names(node.type)
+        for child in scope_members(node.children):
             check(child.key, reserved, f"widget '{child.path}'")
 
-    errors += widget_id_macro_collisions(ctx.widget_ids)
+    errors += widget_name_errors(ctx.widget_ids, ctx.widgets_yaml)
 
     if errors:
         raise ValueError(
@@ -206,11 +207,13 @@ def _cpp_generated_classes(
     dropdown_items: dict,
     variant: str,
 ) -> list:
-    """A generated class for every widget with children (containers, button
-    faces, button-groups) and every dropdown. Children are members named by
-    their own key, so access follows the ID path (`ui.settings.rate`).
-    Emitted children-first: a member's class must be complete before the
-    class that holds it."""
+    """A generated class for every namespace widget with children (a
+    flagged section/row/grid, a dpad, a button face, a button-group) and
+    every dropdown, named after its name path. Its members are its naming
+    scope (scope_members()), so access follows the name path
+    (`ui.settings.rate`); a transparent container is a plain Widget whose
+    children are members of the enclosing scope. Emitted children-first: a
+    member's class must be complete before the class that holds it."""
     def handler(sig: str) -> str:
         name, _, rest = sig.partition("(")
         args = rest.rstrip(")")
@@ -229,7 +232,7 @@ def _cpp_generated_classes(
         for child in node.children:
             emit(child)
         type_str = widget_types.get(node.path, "")
-        cn = _cpp_class_name(node.path)
+        cn = _cpp_class_name(node.name_path)
 
         if type_str == "dropdown":
             items = dropdown_items.get(node.path, [])
@@ -270,11 +273,12 @@ def _cpp_generated_classes(
                 "    void set(Item v) { udisplay_send_uint8(_ctx, _id, static_cast<uint8_t>(v)); }",
                 "    void clear()     { udisplay_send_uint8(_ctx, _id, 0u); }",
             ]
-        for child in node.children:
+        members = scope_members(node.children)
+        for child in members:
             child_type = _cpp_member_type(child, widget_types.get(child.path, ""))
             lines.append(f"    {child_type} {child.key};")
         inits = [f"{base}(ctx, id)"] + [
-            f"{child.key}(ctx, 0x{widget_ids[child.path]:02X}u)" for child in node.children
+            f"{child.key}(ctx, 0x{widget_ids[child.path]:02X}u)" for child in members
         ]
         lines += [
             f"    {cn}(udisplay_t* ctx, uint8_t id)",
@@ -308,12 +312,12 @@ _CPP_LEAF_CLASS = {
 
 def _cpp_has_class(node, type_str: str) -> bool:
     """Whether _cpp_generated_classes emits a class for this widget."""
-    return bool(node.children) or type_str in ("button-group", "dropdown")
+    return (bool(node.children) and not node.transparent) or type_str in ("button-group", "dropdown")
 
 
 def _cpp_member_type(node, type_str: str) -> str:
     if _cpp_has_class(node, type_str):
-        return _cpp_class_name(node.path)
+        return _cpp_class_name(node.name_path)
     return _CPP_LEAF_CLASS.get(type_str, "Widget")
 
 
@@ -323,12 +327,12 @@ def _cpp_dispatch_cases(
     widget_ids: dict,
 ) -> list:
     """One `case` per widget that raises events, at any depth. The member
-    expression is the ID path itself (`self->settings.rate`)."""
+    expression is the name path itself (`self->settings.rate`)."""
     lines: list = []
     for node in nodes:
-        path = node.path
-        type_str = widget_types.get(path, "")
-        wid = widget_ids.get(path)
+        path = node.name_path
+        type_str = widget_types.get(node.path, "")
+        wid = widget_ids.get(node.path)
         if wid is None:
             continue
         if type_str == "toggle":
@@ -462,7 +466,8 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         "public:",
     ]
 
-    for node in tree:
+    top_members = scope_members(tree)
+    for node in top_members:
         cpp_type = _cpp_member_type(node, widget_types.get(node.path, ""))
         lines.append(f"    {cpp_type} {node.key};")
 
@@ -475,7 +480,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         lines.append("    std::function<void()> on_comms_error;")
     lines.append("")
     lines.append("    UDisplay()")
-    for i, node in enumerate(tree):
+    for i, node in enumerate(top_members):
         prefix = "        : " if i == 0 else "        , "
         lines.append(f"{prefix}{node.key}(&_ctx, 0x{widget_ids[node.path]:02X}u)")
     lines += [

@@ -66,7 +66,7 @@ _initial_sent = False
 def _temp_display_update(u):
     if _enabled:
         temp = 20.0 + 5.0 * math.sin(_sim_time)
-        u.row_temp.temp_display.set(temp)
+        u.temp_display.set(temp)
 
 
 def _make_ui(conn, comms_dead):
@@ -85,17 +85,17 @@ def _make_ui(conn, comms_dead):
 
     def on_client_ready():
         print("[EVENT] client_ready")
-        u.row_temp.enable_toggle.set(1 if _enabled else 0)
+        u.enable_toggle.set(1 if _enabled else 0)
         _temp_display_update(u)
-        u.row1.power_btn.power_led.set(1 if _power_on else 0)
+        u.power_btn.power_led.set(1 if _power_on else 0)
         u.rate_slider.set(_base_rate_hz)
         u.text_input.set("")
-        u.grid_btn_grp.mode_sel.set(getattr(u.grid_btn_grp.mode_sel, _mode))
+        u.mode_sel.set(getattr(u.mode_sel, _mode))
 
     def on_power_press():
         global _power_on
         _power_on = not _power_on
-        u.row1.power_btn.power_led.set(1 if _power_on else 0)
+        u.power_btn.power_led.set(1 if _power_on else 0)
         print("[EVENT] power_btn  -> power_led", "ON" if _power_on else "OFF")
 
     # button-group selection is device-authoritative: a press only reports
@@ -104,7 +104,7 @@ def _make_ui(conn, comms_dead):
         global _mode, _multiplier
         _mode = key
         _multiplier = multiplier
-        u.grid_btn_grp.mode_sel.set(getattr(u.grid_btn_grp.mode_sel, key))
+        u.mode_sel.set(getattr(u.mode_sel, key))
 
     def on_mode_fast():
         select_mode("fast", 2.0)
@@ -131,19 +131,19 @@ def _make_ui(conn, comms_dead):
     def on_enable_change(state):
         global _enabled
         _enabled = bool(state)
-        u.row_temp.enable_toggle.set(1 if _enabled else 0)
+        u.enable_toggle.set(1 if _enabled else 0)
         print("[EVENT] enable     ->", "ON" if _enabled else "OFF")
 
     def on_text_submit(text):
         print('[EVENT] text_input -> "%s"' % text)
 
     u.on_client_ready = on_client_ready
-    u.row1.power_btn.on_press = on_power_press
-    u.grid_btn_grp.mode_sel.fast.on_press = on_mode_fast
-    u.grid_btn_grp.mode_sel.slow.on_press = on_mode_slow
-    u.grid_btn_grp.mode_sel.turbo.on_press = on_mode_turbo
+    u.power_btn.on_press = on_power_press
+    u.mode_sel.fast.on_press = on_mode_fast
+    u.mode_sel.slow.on_press = on_mode_slow
+    u.mode_sel.turbo.on_press = on_mode_turbo
     u.rate_slider.on_change = on_rate_change
-    u.row_temp.enable_toggle.on_change = on_enable_change
+    u.enable_toggle.on_change = on_enable_change
     u.text_input.on_submit = on_text_submit
     return u
 
@@ -220,13 +220,13 @@ def _serve_one_connection(conn):
             if not _initial_sent:
                 _initial_sent = True
                 u.rate_slider.set(_base_rate_hz)
-                u.row_temp.enable_toggle.set(1 if _enabled else 0)
-                u.row1.power_btn.power_led.set(1 if _power_on else 0)
+                u.enable_toggle.set(1 if _enabled else 0)
+                u.power_btn.power_led.set(1 if _power_on else 0)
 
             _temp_display_update(u)
 
             if _tick % 3 == 0:
-                u.grid_btn_grp.status_led.set((_tick // 3) % 2)
+                u.status_led.set((_tick // 3) % 2)
     finally:
         u.on_disconnect()
 

@@ -75,7 +75,7 @@ static const char* TAG = "demo05";
  *                   led_strip_refresh()
  *
  * Both variants are physical-hardware-only — updating the uDisplay widget
- * (ui.sec0.row1.status_led.set()) stays a separate call at each call site (button
+ * (ui.status_led.set()) stays a separate call at each call site (button
  * click, boot, BLE disconnect); led_init()/led_set() know nothing about the
  * widget layer. */
 #if CONFIG_DEMO05_LED_IS_WS2812
@@ -319,15 +319,15 @@ static void send_cb(const uint8_t* data, uint16_t len, void* ud)
 
 static void register_ui_handlers(void)
 {
-    ui.sec0.row1.push_btn.on_click = []() {
+    ui.push_btn.on_click = []() {
         g_led ^= 1u;
-        ui.sec0.row1.status_led.set((bool)g_led);
+        ui.status_led.set((bool)g_led);
         led_set((bool)g_led);
         ESP_LOGI(TAG, "button click → LED %s", g_led ? "ON" : "OFF");
     };
 
     ui.on_client_ready = []() {
-        ui.sec0.row1.status_led.set((bool)g_led);
+        ui.status_led.set((bool)g_led);
         ESP_LOGI(TAG, "client ready → LED %s", g_led ? "ON" : "OFF");
     };
 

@@ -13,7 +13,7 @@ from . import BuildContext, OutputFile
 from ._shared import (
     _macro_name, _fn_suffix,
     _setter_for_type, _setter_arg_names, _handler_for_type,
-    _hex_rows, _HEADER_COMMENT, widget_id_macro_collisions,
+    _hex_rows, _HEADER_COMMENT, widget_name_errors, widget_names,
     _config_fields, _config_designated_initializer,
     _ns_validate, _ns_macro, _ns_fn,
 )
@@ -21,7 +21,7 @@ from ._shared import (
 
 def generate(ctx: BuildContext) -> List[OutputFile]:
     _ns_validate(ctx.namespace)
-    errors = widget_id_macro_collisions(ctx.widget_ids)
+    errors = widget_name_errors(ctx.widget_ids, ctx.widgets_yaml)
     if errors:
         raise ValueError(
             "Cannot generate valid C code from this YAML:\n"
@@ -44,6 +44,7 @@ def _generate_header(ctx: BuildContext) -> str:
     widgets_yaml = ctx.widgets_yaml
     version      = ctx.version
     ns           = ctx.namespace
+    names        = widget_names(ctx.widget_ids, ctx.widgets_yaml)  # path -> name path
 
     n = math.ceil(len(blob) / CHUNK_SIZE)
     lines = [
@@ -61,7 +62,7 @@ def _generate_header(ctx: BuildContext) -> str:
         "/* -- Widget IDs ------------------------------------------------------------ */",
     ]
     for path, wid in sorted(widget_ids.items(), key=lambda kv: kv[1]):
-        macro = _ns_macro(ns, f"WIDGET_ID_{_macro_name(path)}")
+        macro = _ns_macro(ns, f"WIDGET_ID_{_macro_name(names[path])}")
         lines.append(f"#define {macro:<52} 0x{wid:02X}u")
 
     if widgets_yaml is not None:
@@ -73,7 +74,7 @@ def _generate_header(ctx: BuildContext) -> str:
             ]
             for dd_path in sorted(dropdown_items.keys()):
                 for idx, (item_key, _label) in enumerate(dropdown_items[dd_path]):
-                    macro = _ns_macro(ns, f"{_macro_name(dd_path)}_{_macro_name(item_key)}")
+                    macro = _ns_macro(ns, f"{_macro_name(names[dd_path])}_{_macro_name(item_key)}")
                     lines.append(f"#define {macro:<52} {idx}u")
 
     handlers_type = _ns_fn(ns, "udisplay_ui_handlers_t")
@@ -90,14 +91,14 @@ def _generate_header(ctx: BuildContext) -> str:
             if info is None:
                 continue
             arg_decl, send_fn = info
-            fn = f"{ns}_set_{_fn_suffix(path)}" if ns else f"set_{_fn_suffix(path)}"
-            macro = _ns_macro(ns, f"WIDGET_ID_{_macro_name(path)}")
+            fn = f"{ns}_set_{_fn_suffix(names[path])}" if ns else f"set_{_fn_suffix(names[path])}"
+            macro = _ns_macro(ns, f"WIDGET_ID_{_macro_name(names[path])}")
             body = f"{send_fn}(ctx, {macro}, {_setter_arg_names(arg_decl)});"
             setters.append(
                 f"static inline void {fn}(udisplay_t* ctx, {arg_decl}) {{ {body} }}"
             )
             if type_str == "button-group":
-                clear_fn = f"{ns}_clear_{_fn_suffix(path)}" if ns else f"clear_{_fn_suffix(path)}"
+                clear_fn = f"{ns}_clear_{_fn_suffix(names[path])}" if ns else f"clear_{_fn_suffix(names[path])}"
                 setters.append(
                     f"static inline void {clear_fn}(udisplay_t* ctx) {{ {send_fn}(ctx, {macro}, 0u); }}"
                 )
@@ -118,7 +119,7 @@ def _generate_header(ctx: BuildContext) -> str:
             if info is None:
                 continue
             for event_suffix, handler_args, _ in info:
-                fn = f"on_{_fn_suffix(path)}_{event_suffix}"
+                fn = f"on_{_fn_suffix(names[path])}_{event_suffix}"
                 handlers.append(f"    void (*{fn})({handler_args});")
 
         lines += [
@@ -197,6 +198,7 @@ def _generate_source(ctx: BuildContext) -> str:
     version      = ctx.version
     header_name  = "udisplay_ui.h"
     ns           = ctx.namespace
+    names        = widget_names(ctx.widget_ids, ctx.widgets_yaml)  # path -> name path
 
     n = math.ceil(len(blob) / CHUNK_SIZE)
 
@@ -304,8 +306,8 @@ def _generate_source(ctx: BuildContext) -> str:
         if handler_paths:
             lines.append("    switch (ev->widget_id) {")
             for path, _wid, _type_str, handlers_list in handler_paths:
-                suffix = _fn_suffix(path)
-                macro = _ns_macro(ns, f"WIDGET_ID_{_macro_name(path)}")
+                suffix = _fn_suffix(names[path])
+                macro = _ns_macro(ns, f"WIDGET_ID_{_macro_name(names[path])}")
                 lines.append(f"        case {macro}:")
                 if len(handlers_list) == 1:
                     event_suffix, _handler_args, dispatch_args = handlers_list[0]

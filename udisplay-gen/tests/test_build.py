@@ -959,10 +959,12 @@ def test_build_cli_layout(layout_yaml, tmp_path):
     result = runner.invoke(cli, ["build", str(layout_yaml), "-o", str(tmp_path)])
     assert result.exit_code == 0, result.output
     header = (tmp_path / "udisplay_ui.h").read_text()
-    # Children and containers both get ID macros (issue #43)
-    assert "WIDGET_ID_SENSORS_VOLT" in header
-    assert "WIDGET_ID_CONTROLS_RELAY" in header
+    # Children and containers both get ID macros (issue #43); unflagged
+    # containers add no segment to their children's names.
+    assert "WIDGET_ID_VOLT" in header
+    assert "WIDGET_ID_RELAY" in header
     assert "WIDGET_ID_SENSORS " in header
+    assert "WIDGET_ID_SENSORS_VOLT" not in header
     # ...but no typed setter/handler for a container itself
     assert "set_sensors(" not in header
     assert "on_sensors_" not in header  # displays only: no handlers at all

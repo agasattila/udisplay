@@ -22,8 +22,8 @@ import pathlib
 from typing import List
 
 from . import BuildContext, OutputFile
-from ._shared import _macro_name, widget_id_macro_collisions
-from ..widget_ids import CONTAINER_TYPES, walk, widget_tree
+from ._shared import _macro_name, widget_name_errors, widget_names
+from ..widget_ids import CONTAINER_TYPES, scope_members, walk, widget_tree
 
 _RUNTIME_SOURCE = pathlib.Path(__file__).parent.parent / "runtime" / "udisplay_runtime.py"
 
@@ -47,9 +47,10 @@ _WRAPPER_CLASS = {
 # definition silently overwrites the earlier one — see
 # _validate_python_identifiers() below.
 #
-# Top level: every top-level widget becomes `self.<key>` on the generated UI
-# class (_generate_ui_py below) — cross-reference against every fixed
-# attribute/method UI.__init__ and the class body assign there.
+# Top level: every member of the top-level naming scope (scope_members())
+# becomes `self.<key>` on the generated UI class (_generate_ui_py below) —
+# cross-reference against every fixed attribute/method UI.__init__ and the
+# class body assign there.
 _UI_RESERVED_NAMES = {
     "_device", "on_client_ready", "on_comms_error",
     "set_property", "reset_property",
@@ -58,7 +59,7 @@ _UI_RESERVED_NAMES = {
     "__init__", "self",
 }
 
-# Every other widget becomes `<parent>.<key>` on its parent's wrapper
+# Every other widget becomes `<namespace>.<key>` on its namespace's wrapper
 # (ContainerWidget, ButtonWidget, ButtonGroupWidget) — cross-reference
 # against that class's own body in _BASE_CLASSES (no __slots__, so any
 # attribute name is silently accepted, colliding or not).
@@ -82,8 +83,8 @@ def _validate_python_identifiers(ctx: BuildContext) -> None:
     Raises ValueError listing every violation found, not just the first,
     so one fix-and-rerun cycle catches everything."""
     widget_ids = ctx.widget_ids
-    widget_types = ctx.widget_types or {}
     widgets_yaml = ctx.widgets_yaml or {}
+    names = widget_names(widget_ids, widgets_yaml)
     errors: List[str] = []
 
     def check_segment(name: str, reserved: set, where: str) -> None:
@@ -99,22 +100,23 @@ def _validate_python_identifiers(ctx: BuildContext) -> None:
             )
 
     tree = widget_tree(widgets_yaml)
-    for node in tree:
+    for node in scope_members(tree):
         check_segment(node.key, _UI_RESERVED_NAMES, f"widget '{node.path}'")
     for node in walk(tree):
-        wtype = widget_types.get(node.path, "")
+        if node.transparent:
+            continue
         sub_reserved = (
-            _BUTTON_GROUP_RESERVED_NAMES if wtype == "button-group"
-            else _BUTTON_RESERVED_NAMES if wtype == "button"
+            _BUTTON_GROUP_RESERVED_NAMES if node.type == "button-group"
+            else _BUTTON_RESERVED_NAMES if node.type == "button"
             else _WIDGET_RESERVED_NAMES
         )
-        for child in node.children:
+        for child in scope_members(node.children):
             check_segment(child.key, sub_reserved, f"widget '{child.path}'")
 
-    # WIDGET_ID_* macro-name collisions (TODO-056) — every widget_ids key
-    # (top-level AND nested, since widget_ids is keyed by full dotted path)
-    # must normalize to a distinct constant name.
-    errors += widget_id_macro_collisions(widget_ids)
+    # Two widgets sharing one name path, and WIDGET_ID_* macro-name
+    # collisions (TODO-056): every name path must normalize to a distinct
+    # constant name.
+    errors += widget_name_errors(widget_ids, widgets_yaml)
 
     # Same mechanism, scoped per dropdown, for the <NAME>_OPTION_<item> constants.
     from ..widget_ids import collect_dropdown_items
@@ -130,7 +132,7 @@ def _validate_python_identifiers(ctx: BuildContext) -> None:
                     f"dropdown '{path}' item collision: "
                     + ", ".join(repr(k) for k in sorted(keys))
                     + f" all normalize to the same generated constant "
-                    f"{_macro_name(path)}_OPTION_{macro}"
+                    f"{_macro_name(names[path])}_OPTION_{macro}"
                 )
 
     if errors:
@@ -189,8 +191,10 @@ class Widget:
 
 
 class ContainerWidget(Widget):
-    # section/row/grid/dpad: a namespace for its children, which UI.__init__
-    # attaches as attributes (ui.settings.rate). No __slots__ for that.
+    # section/row/grid/dpad. A namespace container holds its children as
+    # attributes, attached by UI.__init__ (ui.settings.rate); a transparent
+    # one's children are attributes of the enclosing scope instead. No
+    # __slots__ for that.
     def __init__(self, device, widget_id):
         Widget.__init__(self, device, widget_id)
 
@@ -295,7 +299,7 @@ class ButtonGroupWidget(Widget):
 '''.lstrip("\n")
 
 
-def _py_dropdown_options(widgets_yaml: dict, widget_ids: dict) -> list:
+def _py_dropdown_options(widgets_yaml: dict, widget_ids: dict, names: dict) -> list:
     """Module-level '<DROPDOWN_NAME>_OPTION_<ITEM_KEY> = idx' constants for
     every dropdown's items, in declaration order. Scoped per-dropdown (like
     cpp_backend's nested enum) so two dropdowns can reuse the same item key."""
@@ -306,31 +310,33 @@ def _py_dropdown_options(widgets_yaml: dict, widget_ids: dict) -> list:
     for path, items in dropdown_items.items():
         if path not in widget_ids:
             continue
-        const_prefix = _macro_name(path)
+        const_prefix = _macro_name(names[path])
         for idx, (item_key, _label) in enumerate(items):
             lines.append(f"{const_prefix}_OPTION_{_macro_name(item_key)} = {idx}")
     return lines
 
 
 def _py_instantiate(node, widget_types: dict) -> list:
-    """UI.__init__ body lines constructing `self.<path>` and, recursively,
-    its children (`self.<path>.<child>`), in YAML declaration order."""
+    """UI.__init__ body lines constructing `self.<name path>` and,
+    recursively, its children, in YAML declaration order. A transparent
+    container's children land in its enclosing scope (`self.<key>`), a
+    namespace's under it (`self.<namespace>.<key>`)."""
     type_str = widget_types.get(node.path, "")
     if type_str in CONTAINER_TYPES:
         cls = "ContainerWidget"
     else:
         cls = _WRAPPER_CLASS.get(type_str, "Widget")
-    const = f"WIDGET_ID_{_macro_name(node.path)}"
-    lines = [f"        self.{node.path} = {cls}(self._device, {const})"]
+    const = f"WIDGET_ID_{_macro_name(node.name_path)}"
+    lines = [f"        self.{node.name_path} = {cls}(self._device, {const})"]
     for child in node.children:
         lines.extend(_py_instantiate(child, widget_types))
     if type_str == "button-group":
         # Trailing comma keeps a one-item group a tuple.
         item_consts = [
-            f"WIDGET_ID_{_macro_name(child.path)}" for child in node.children
+            f"WIDGET_ID_{_macro_name(child.name_path)}" for child in node.children
             if widget_types.get(child.path) == "button-group-item"
         ]
-        lines.append(f"        self.{node.path}._items = ({''.join(c + ', ' for c in item_consts).rstrip()})")
+        lines.append(f"        self.{node.name_path}._items = ({''.join(c + ', ' for c in item_consts).rstrip()})")
     return lines
 
 
@@ -344,9 +350,9 @@ def _py_dispatch_cases(nodes: list, widget_types: dict, widget_ids: dict) -> lis
         return "if" if not lines else "elif"
 
     for node in nodes:
-        path = node.path
-        type_str = widget_types.get(path, "")
-        if path not in widget_ids:
+        path = node.name_path
+        type_str = widget_types.get(node.path, "")
+        if node.path not in widget_ids:
             continue
         const = f"WIDGET_ID_{_macro_name(path)}"
 
@@ -428,10 +434,11 @@ def _generate_ui_py(ctx: BuildContext) -> str:
         "# ── Widget IDs ───────────────────────────────────────────────────────────",
     ]
 
-    for path in sorted(widget_ids):
-        lines.append(f"WIDGET_ID_{_macro_name(path)} = 0x{widget_ids[path]:02X}")
+    names = widget_names(widget_ids, widgets_yaml)
+    for path in sorted(widget_ids, key=lambda p: names[p]):
+        lines.append(f"WIDGET_ID_{_macro_name(names[path])} = 0x{widget_ids[path]:02X}")
 
-    dropdown_opts = _py_dropdown_options(widgets_yaml, widget_ids)
+    dropdown_opts = _py_dropdown_options(widgets_yaml, widget_ids, names)
     if dropdown_opts:
         lines.append("")
         lines.append("# ── Dropdown item indices ───────────────────────────────────────────────")

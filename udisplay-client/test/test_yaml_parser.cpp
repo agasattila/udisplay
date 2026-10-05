@@ -2902,6 +2902,49 @@ private slots:
         QVERIFY(p.errorString().contains(QStringLiteral("'a.b'")));
     }
 
+    /* `namespace:` only shapes udisplay-gen's generated identifiers: wire
+     * IDs stay alphabetical by the full structural path, so the same tree
+     * with and without the flags numbers every widget identically, and no
+     * widget is left with widget ID 0. */
+    void namespaceKey_doesNotChangeWidgetIds()
+    {
+        auto yamlWith = [](const char* ns) {
+            return QStringLiteral(
+                "widgets:\n"
+                "  indoor:\n"
+                "    type: section\n"
+                "%1"
+                "    widgets:\n"
+                "      temp_row:\n"
+                "        type: row\n"
+                "%2"
+                "        widgets:\n"
+                "          temperature:\n"
+                "            type: display\n"
+                "  outdoor:\n"
+                "    type: section\n"
+                "    widgets:\n"
+                "      temperature:\n"
+                "        type: display\n")
+                .arg(QString::fromLatin1(ns), QString::fromLatin1(ns).replace("    ", "        "))
+                .toUtf8();
+        };
+        YamlParser plain, flagged;
+        QList<WidgetDef> a, b;
+        QString name, version;
+        QVERIFY(plain.parse(yamlWith(""), a, name, version));
+        QVERIFY2(flagged.parse(yamlWith("    namespace: true\n"), b, name, version),
+                 qPrintable(flagged.errorString()));
+        QCOMPARE(a.size(), 5);
+        QCOMPARE(b.size(), a.size());
+        for (int i = 0; i < a.size(); ++i) {
+            QCOMPARE(b[i].keyPath,  a[i].keyPath);
+            QCOMPARE(b[i].widgetId, a[i].widgetId);
+            QVERIFY(a[i].widgetId != 0);
+        }
+        QCOMPARE(findByKey(b, "indoor.temp_row.temperature")->widgetId, uint8_t(0x12));
+    }
+
     /* Allowed face types (led/rgbled/display/label/row/grid) never trigger
      * the excluded-type warning — regression guard against false positives.
      * Also verifies ID sequencing survives recursion into a nested

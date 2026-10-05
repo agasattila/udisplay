@@ -97,6 +97,10 @@ widgets:
         label: AC
 """
 
+# The same tree with `panel` flagged as a namespace.
+NAMESPACED_PANEL_YAML = EVERY_WIDGET_YAML.replace(
+    "  panel:\n    type: section\n", "  panel:\n    type: section\n    namespace: true\n")
+
 EXPECTED_PATHS = {
     "panel", "panel.title", "panel.power_btn", "panel.power_btn.face_row",
     "panel.power_btn.face_row.icon", "panel.power_btn.face_row.caption",
@@ -209,20 +213,24 @@ class TestValidate:
     def test_every_widget_fixture_is_valid(self):
         assert semantic_errors(pyyaml.safe_load(EVERY_WIDGET_YAML)) == []
 
-    def test_container_name_reused_by_leaf_in_another_section_valid(self):
+    def test_container_name_reused_by_leaf_in_namespaced_section_valid(self):
         doc = {"widgets": {
             "advanced": {"type": "section", "widgets": {"x": {"type": "toggle"}}},
-            "basic": {"type": "section", "widgets": {"advanced": {"type": "slider",
-                                                                  "min": 0, "max": 1}}},
+            "basic": {"type": "section", "namespace": True,
+                      "widgets": {"advanced": {"type": "slider", "min": 0, "max": 1}}},
         }}
         assert semantic_errors(doc) == []
 
-    def test_label_in_row_named_like_top_level_leaf_valid(self):
+    def test_label_in_row_named_like_top_level_leaf_rejected(self):
+        """A transparent row adds no name segment: its `volt` and the
+        top-level `volt` would both be WIDGET_ID_VOLT / ui.volt."""
         doc = {"widgets": {
             "row1": {"type": "row", "widgets": {"volt": {"type": "label", "text": "V"}}},
             "volt": {"type": "display"},
         }}
-        assert semantic_errors(doc) == []
+        errs = semantic_errors(doc)
+        assert len(errs) == 1
+        assert "widgets.row1.volt, widgets.volt" in errs[0] and "'volt'" in errs[0]
 
     def test_same_face_child_name_in_two_buttons_still_allowed(self):
         doc = {"widgets": {
@@ -238,15 +246,16 @@ class TestCBackend:
     def test_macro_for_every_widget(self, tmp_path):
         header = (_build(tmp_path, "c") / "udisplay_ui.h").read_text()
         for macro in ("WIDGET_ID_PANEL", "WIDGET_ID_METERS", "WIDGET_ID_ZONE", "WIDGET_ID_PAD",
-                      "WIDGET_ID_PANEL_TITLE", "WIDGET_ID_ZONE_SEP",
-                      "WIDGET_ID_PANEL_POWER_BTN_FACE_ROW",
-                      "WIDGET_ID_PANEL_POWER_BTN_FACE_ROW_CAPTION",
-                      "WIDGET_ID_METERS_RATE", "WIDGET_ID_PAD_UP_BTN"):
+                      "WIDGET_ID_TITLE", "WIDGET_ID_SEP",
+                      "WIDGET_ID_POWER_BTN_FACE_ROW",
+                      "WIDGET_ID_POWER_BTN_CAPTION",
+                      "WIDGET_ID_RATE", "WIDGET_ID_PAD_UP_BTN",
+                      "WIDGET_ID_MODE_SEL_AC"):
             assert f"#define {macro} " in header, macro
 
     def test_no_typed_api_for_containers_or_decorations(self, tmp_path):
         header = (_build(tmp_path, "c") / "udisplay_ui.h").read_text()
-        for name in ("panel", "meters", "zone", "pad", "panel_title", "zone_sep"):
+        for name in ("panel", "meters", "zone", "pad", "title", "sep"):
             assert f"set_{name}(" not in header
             assert not re.search(rf"on_{name}_(press|release|click|change|submit)\b",
                                  header), name
@@ -258,14 +267,16 @@ class TestCppBackend:
     def _header(self, tmp_path, extra_args=()):
         return (_build(tmp_path, "cpp", extra_args=extra_args) / "udisplay_ui.hpp").read_text()
 
-    def test_containers_get_classes_holding_their_children(self, tmp_path):
-        """A container is a namespace: its own generated class, with its
-        children as members (ui.meters.rate)."""
+    def test_namespaces_get_classes_transparent_containers_do_not(self, tmp_path):
+        """A dpad is always a namespace: its own class, holding its children
+        (ui.pad.up_btn). An unflagged section/row/grid is a plain Widget
+        member whose children join the enclosing scope (ui.rate)."""
         header = self._header(tmp_path)
-        for cls, name in (("PanelWidget", "panel"), ("MetersWidget", "meters"),
-                          ("ZoneWidget", "zone"), ("PadWidget", "pad")):
-            assert f"class {cls} : public Widget {{" in header, cls
-            assert f"    {cls} {name};" in header, name
+        assert "class PadWidget : public Widget {" in header
+        assert "    PadWidget pad;" in header
+        for name in ("panel", "meters", "zone"):
+            assert f"    Widget {name};" in header, name
+            assert f"class {name.capitalize()}Widget " not in header, name
         assert "    SliderWidget rate;" in header
         assert "    ToggleWidget relay;" in header
 
@@ -283,24 +294,28 @@ class TestCppBackend:
 
     def test_face_sub_members_typed_by_their_own_type(self, tmp_path):
         """Regression (A3): every face child used to be emitted as LedWidget.
-        A face row is a namespace like any container."""
+        A button face is a namespace; a row on it is transparent, so its
+        children are members of the button (ui.power_btn.icon)."""
         header = self._header(tmp_path)
-        assert "class PanelPowerBtnWidget : public ButtonWidget {" in header
-        assert "    PanelPowerBtnFaceRowWidget face_row;" in header
+        assert "class PowerBtnWidget : public ButtonWidget {" in header
+        assert "    Widget face_row;" in header
         assert "    LedWidget icon;" in header
         assert "    RgbLedWidget status;" in header
         assert "    Widget caption;" in header
         assert "LedWidget caption;" not in header
 
-    def test_classes_emitted_before_their_users(self, tmp_path):
-        header = self._header(tmp_path)
-        assert (header.index("class PanelPowerBtnFaceRowWidget ")
-                < header.index("class PanelPowerBtnWidget ")
+    def test_classes_emitted_before_their_users(self):
+        text = NAMESPACED_PANEL_YAML
+        header = cpp_backend._generate_header_cpp(_ctx(text))
+        assert (header.index("class PanelPowerBtnWidget ")
                 < header.index("class PanelWidget "))
+        assert "    PanelPowerBtnWidget power_btn;" in header
+        assert "self->panel.power_btn.icon" not in header  # led: no events
+        assert "self->panel.power_btn.on_click()" in header
 
-    def test_nested_dispatch_uses_full_member_path(self, tmp_path):
+    def test_nested_dispatch_uses_name_path(self, tmp_path):
         header = self._header(tmp_path)
-        assert "self->meters.rate.on_change(ev->slider_value)" in header
+        assert "self->rate.on_change(ev->slider_value)" in header
         assert "self->pad.up_btn.on_click()" in header
         assert "self->mode_sel.ac.on_click()" in header
 
@@ -328,17 +343,32 @@ class TestCppBackend:
             cpp_backend.generate(_ctx(text))
 
     @pytest.mark.parametrize("name", ["set_property", "id"])
-    def test_container_child_shadowing_widget_api_rejected(self, name):
+    def test_namespace_child_shadowing_widget_api_rejected(self, name):
+        text = EVERY_WIDGET_YAML.replace("      up_btn:\n", f"      {name}:\n")
+        with pytest.raises(ValueError, match=f"'{name}' collides"):
+            cpp_backend.generate(_ctx(text))
+
+    @pytest.mark.parametrize("name", ["feed", "init"])
+    def test_transparent_container_child_checked_against_udisplay(self, name):
+        """A transparent row's children are UDisplay members (scope_members()),
+        so they must not shadow UDisplay's own API."""
         text = EVERY_WIDGET_YAML.replace("      amps:\n", f"      {name}:\n")
         with pytest.raises(ValueError, match=f"'{name}' collides"):
             cpp_backend.generate(_ctx(text))
 
+    def test_transparent_container_child_named_like_widget_api_accepted(self):
+        """...but not against Widget's: `id` inside a transparent row is a
+        UDisplay member, where it shadows nothing."""
+        text = EVERY_WIDGET_YAML.replace("      amps:\n", "      id:\n")
+        header = cpp_backend._generate_header_cpp(_ctx(text))
+        assert "    DisplayWidget id;" in header
+
     def test_class_name_collision_rejected(self):
-        """`meters_amps` and `meters.amps` would both be MetersAmpsWidget /
-        WIDGET_ID_METERS_AMPS."""
+        """`pad_up_btn` and `pad.up_btn` would both be PadUpBtnWidget /
+        WIDGET_ID_PAD_UP_BTN."""
         text = EVERY_WIDGET_YAML.replace(
-            "  zone:\n", "  meters_amps:\n    type: led\n  zone:\n")
-        with pytest.raises(ValueError, match="WIDGET_ID_METERS_AMPS"):
+            "  zone:\n", "  pad_up_btn:\n    type: led\n  zone:\n")
+        with pytest.raises(ValueError, match="WIDGET_ID_PAD_UP_BTN"):
             cpp_backend.generate(_ctx(text))
 
 
@@ -370,10 +400,12 @@ class TestGeneratedCompiles:
             "static udisplay_ui::UDisplay ui;\n"
             "void use() {\n"
             "    ui.panel.set_property(UDISPLAY_PROP_VISIBLE, 0);\n"
-            "    ui.panel.power_btn.face_row.caption.reset_property(UDISPLAY_PROP_VISIBLE);\n"
-            "    ui.panel.power_btn.status.set(0x00FF00u);\n"
+            "    ui.power_btn.face_row.reset_property(UDISPLAY_PROP_VISIBLE);\n"
+            "    ui.power_btn.caption.reset_property(UDISPLAY_PROP_VISIBLE);\n"
+            "    ui.power_btn.status.set(0x00FF00u);\n"
             "    ui.pad.up_btn.set_property(UDISPLAY_PROP_ENABLED, ui.pad.id());\n"
-            "    ui.meters.rate.set(1.0f);\n"
+            "    ui.meters.set_property(UDISPLAY_PROP_VISIBLE, 1);\n"
+            "    ui.rate.set(1.0f);\n"
             "    ui.mode_sel.set(udisplay_ui::ModeSelWidget::Item::ac);\n"
             "}\n")
         self._check("g++", tu, "-std=c++17")
@@ -387,11 +419,12 @@ class TestPythonBackend:
         for name in ("panel", "meters", "zone", "pad"):
             assert (f"self.{name} = ContainerWidget(self._device, "
                     f"WIDGET_ID_{name.upper()})") in ui_py
-        assert "self.panel.title = Widget(self._device, WIDGET_ID_PANEL_TITLE)" in ui_py
-        assert "self.zone.sep = Widget(self._device, WIDGET_ID_ZONE_SEP)" in ui_py
-        assert "self.panel.power_btn.face_row = ContainerWidget(" in ui_py
-        assert "self.panel.power_btn.face_row.caption = Widget(" in ui_py
-        assert "self.panel.power_btn.face_row.icon = LedWidget(" in ui_py
+        assert "self.title = Widget(self._device, WIDGET_ID_TITLE)" in ui_py
+        assert "self.sep = Widget(self._device, WIDGET_ID_SEP)" in ui_py
+        assert "self.power_btn = ButtonWidget(" in ui_py
+        assert "self.power_btn.face_row = ContainerWidget(" in ui_py
+        assert "self.power_btn.caption = Widget(" in ui_py
+        assert "self.power_btn.icon = LedWidget(" in ui_py
         assert "self.pad.up_btn = ButtonWidget(" in ui_py
 
     def test_set_property_on_container_sends_set_property(self, tmp_path):
@@ -411,24 +444,25 @@ class TestPythonBackend:
             sent.clear()
 
             u.panel.set_property(UDISPLAY_PROP_VISIBLE, 0)
-            u.panel.power_btn.face_row.caption.reset_property(UDISPLAY_PROP_VISIBLE)
-            u.zone.relay.set_property(UDISPLAY_PROP_ENABLED, 0)
+            u.power_btn.caption.reset_property(UDISPLAY_PROP_VISIBLE)
+            u.relay.set_property(UDISPLAY_PROP_ENABLED, 0)
             payloads = [tcp_unframe(m)[0] for m in sent]
             assert payloads == [
                 bytes([0x32, generated_ui.WIDGET_ID_PANEL, UDISPLAY_PROP_VISIBLE, 0]),
-                bytes([0x33, generated_ui.WIDGET_ID_PANEL_POWER_BTN_FACE_ROW_CAPTION,
+                bytes([0x33, generated_ui.WIDGET_ID_POWER_BTN_CAPTION,
                        UDISPLAY_PROP_VISIBLE]),
-                bytes([0x32, generated_ui.WIDGET_ID_ZONE_RELAY, UDISPLAY_PROP_ENABLED, 0]),
+                bytes([0x32, generated_ui.WIDGET_ID_RELAY, UDISPLAY_PROP_ENABLED, 0]),
             ]
             assert u.pad.id == generated_ui.WIDGET_ID_PAD
 
-            # Events reach nested members.
+            # Events reach namespace members and members inlined from a
+            # transparent row.
             clicks, rates = [], []
             u.pad.up_btn.on_click = lambda: clicks.append("up")
-            u.meters.rate.on_change = rates.append
+            u.rate.on_change = rates.append
             u._on_event(generated_ui.WIDGET_ID_PAD_UP_BTN,
                         generated_ui.UDISPLAY_EVENT_BUTTON_CLICK, None)
-            u._on_event(generated_ui.WIDGET_ID_METERS_RATE,
+            u._on_event(generated_ui.WIDGET_ID_RATE,
                         generated_ui.UDISPLAY_EVENT_SLIDER_CHANGE, 2.5)
             assert clicks == ["up"] and rates == [2.5]
         finally:
@@ -461,11 +495,11 @@ class TestCSetterParamFix:
         to forward an undeclared `v`. Text check so it fails fast even where
         the gcc compile test is skipped."""
         header = (_build(tmp_path, "c") / "udisplay_ui.h").read_text()
-        assert ("set_panel_power_btn_status(udisplay_t* ctx, int32_t rgb) "
-                "{ udisplay_send_int(ctx, WIDGET_ID_PANEL_POWER_BTN_STATUS, rgb); }") in header
-        assert ("set_zone_net(udisplay_t* ctx, uint8_t index) "
-                "{ udisplay_send_uint8(ctx, WIDGET_ID_ZONE_NET, index); }") in header
-        assert "udisplay_send_float(ctx, WIDGET_ID_METERS_AMPS, v);" in header
+        assert ("set_power_btn_status(udisplay_t* ctx, int32_t rgb) "
+                "{ udisplay_send_int(ctx, WIDGET_ID_POWER_BTN_STATUS, rgb); }") in header
+        assert ("set_net(udisplay_t* ctx, uint8_t index) "
+                "{ udisplay_send_uint8(ctx, WIDGET_ID_NET, index); }") in header
+        assert "udisplay_send_float(ctx, WIDGET_ID_AMPS, v);" in header
 
 
 class TestReservedNamesExtra:
@@ -520,13 +554,13 @@ class TestShipAuditGaps:
         with pytest.raises(ValueError, match="Python keyword"):
             python_backend.generate(_ctx(text))
 
-    def test_same_container_name_in_two_sections_allowed(self):
-        """Two containers sharing a name in different sections are distinct
-        namespaces, down to their own children."""
+    def test_same_container_name_in_two_namespaced_sections_allowed(self):
+        """Two containers sharing a name in different namespaced sections
+        are distinct, down to their own children."""
         doc = {"widgets": {
-            "a": {"type": "section", "widgets": {
+            "a": {"type": "section", "namespace": True, "widgets": {
                 "strip": {"type": "row", "widgets": {"x": {"type": "led"}}}}},
-            "b": {"type": "section", "widgets": {
+            "b": {"type": "section", "namespace": True, "widgets": {
                 "strip": {"type": "grid", "columns": 2,
                           "widgets": {"x": {"type": "led"}}}}},
         }}
