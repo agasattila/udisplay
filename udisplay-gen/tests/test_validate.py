@@ -700,41 +700,6 @@ def test_style_on_button_group_item_unknown_stylesheet_rejected():
     assert any("nope" in e for e in errors)
 
 
-def test_style_duplicate_leaf_name_still_caught_for_button():
-    """Regression: the button branch added to _semantic_errors_in_map() must
-    fall through to the existing seen_names check for its OWN key, not
-    early-`continue` past it (the same mistake the CONTAINER_TYPES branch's
-    shape would produce if copied literally)."""
-    doc = {
-        "device": {"name": "x"},
-        "widgets": {
-            "dup": {"type": "button"},
-            "row1": {"type": "row", "widgets": {"dup": {"type": "toggle"}}},
-        },
-    }
-    errors = validate(doc, SCHEMA)
-    assert errors
-    assert any("dup" in e and "duplicate" in e for e in errors)
-
-
-def test_style_duplicate_leaf_name_still_caught_for_button_group_itself():
-    """Same regression, the button-group branch: it must ALSO fall through
-    to seen_names for its own key. Previously this was asserted by the test
-    name/docstring above without actually exercising a button-group widget —
-    caught by the pre-landing testing specialist during /ship."""
-    doc = {
-        "device": {"name": "x"},
-        "widgets": {
-            "dup": {"type": "button-group",
-                    "items": {"a": {"label": "A"}, "b": {"label": "B"}}},
-            "row1": {"type": "row", "widgets": {"dup": {"type": "toggle"}}},
-        },
-    }
-    errors = validate(doc, SCHEMA)
-    assert errors
-    assert any("dup" in e and "duplicate" in e for e in errors)
-
-
 def test_style_two_buttons_same_face_child_name_accepted():
     """Widget identity is compound-path-based (widget_ids.py's assign(),
     YamlParser.cpp's collectPathsRecursive()): "btn_a.icon" != "btn_b.icon".
@@ -988,11 +953,13 @@ def test_label_align_and_text_align_together():
     assert validate(doc, SCHEMA) == []
 
 
-# ── Semantic: duplicate leaf names ────────────────────────────────────────────
+# ── Semantic: generated names are unique per naming scope ───────────────────────────────────────
+# A section/row/grid is transparent to generated names unless it sets
+# `namespace: true` (widget_ids.py), so keys must be unique per naming scope.
 
-def test_duplicate_leaf_name_in_same_scope():
-    """Two widgets with the same key at the top level (impossible in YAML dict, caught by schema)."""
-    # YAML dicts deduplicate keys, so test cross-container duplication instead
+def test_leaf_name_reused_inside_a_section_rejected():
+    """A top-level `relay` and a `relay` in transparent section `grp` would
+    both be WIDGET_ID_RELAY / ui.relay."""
     doc = {
         "device": {"name": "x"},
         "widgets": {
@@ -1003,12 +970,30 @@ def test_duplicate_leaf_name_in_same_scope():
             },
         },
     }
-    errors = semantic_errors(doc)
-    assert errors
-    assert any("relay" in e and "duplicate" in e for e in errors)
+    errs = semantic_errors(doc)
+    assert errs == [
+        "  widgets.relay, widgets.grp.relay: all named 'relay' in the generated "
+        "firmware API; rename one, or set `namespace: true` on a section/row/grid "
+        "that separates them"
+    ]
 
 
-def test_duplicate_leaf_name_across_nested_containers():
+def test_leaf_name_reused_inside_a_namespaced_section_valid():
+    """With `namespace: true` they are `relay` and `grp.relay`."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "relay": {"type": "toggle", "label": "Relay"},
+            "grp": {
+                "type": "section", "namespace": True,
+                "widgets": {"relay": {"type": "toggle", "label": "Relay2"}},
+            },
+        },
+    }
+    assert semantic_errors(doc) == []
+
+
+def test_same_leaf_name_in_two_sections_rejected():
     doc = {
         "device": {"name": "x"},
         "widgets": {
@@ -1022,9 +1007,62 @@ def test_duplicate_leaf_name_across_nested_containers():
             },
         },
     }
-    errors = semantic_errors(doc)
-    assert errors
-    assert any("volt" in e for e in errors)
+    errs = semantic_errors(doc)
+    assert len(errs) == 1 and "widgets.sec_a.volt, widgets.sec_b.volt" in errs[0]
+
+
+def test_same_leaf_name_in_two_namespaced_sections_valid():
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "sec_a": {
+                "type": "section", "namespace": True,
+                "widgets": {"volt": {"type": "display", "label": "V"}},
+            },
+            "sec_b": {
+                "type": "row", "namespace": True,
+                "widgets": {"volt": {"type": "display", "label": "V2"}},
+            },
+        },
+    }
+    assert semantic_errors(doc) == []
+
+
+def test_two_transparent_containers_with_the_same_key_rejected():
+    """A transparent container is addressable (ui.controls.set_visible), so
+    its own key takes a name in its scope too."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "a": {"type": "section", "namespace": True, "widgets": {
+                "controls": {"type": "row", "widgets": {"x": {"type": "led"}}}}},
+            "controls": {"type": "grid", "columns": 1,
+                         "widgets": {"y": {"type": "led"}}},
+            "b": {"type": "section", "widgets": {
+                "controls": {"type": "row", "widgets": {"z": {"type": "led"}}}}},
+        },
+    }
+    errs = semantic_errors(doc)
+    assert len(errs) == 1
+    assert "widgets.controls, widgets.b.controls" in errs[0]
+
+
+def test_compound_widget_children_are_always_namespaced():
+    """dpad buttons, button-group items and face children reuse keys freely."""
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {
+            "nav_a": {"type": "dpad", "widgets": {
+                "up": {"type": "button", "position": "top"}}},
+            "nav_b": {"type": "dpad", "widgets": {
+                "up": {"type": "button", "position": "top"}}},
+            "g1": {"type": "button-group", "items": {"off": {"label": "Off"}}},
+            "g2": {"type": "button-group", "items": {"off": {"label": "Off"}}},
+            "b1": {"type": "button", "widgets": {"icon": {"type": "led"}}},
+            "b2": {"type": "button", "widgets": {"icon": {"type": "led"}}},
+        },
+    }
+    assert semantic_errors(doc) == []
 
 
 def test_unique_leaf_names_across_containers_valid():

@@ -3,8 +3,10 @@
 Every other codegen test greps the generated text; none compiled it, which
 is how the C setter bodies shipped referencing an undeclared `v` for rgbled
 (`int32_t rgb`) and dropdown (`uint8_t index`). Generates a YAML that uses
-every setter-bearing type (including button-group's set/clear) and runs the
-host compiler in syntax-only mode against libudisplay's public headers.
+every setter-bearing type (including button-group's set/clear), inside
+transparent and namespace containers (a row, `namespace: true` sections, two
+dpads reusing button keys), and runs the host compiler in syntax-only mode
+against libudisplay's public headers.
 Skipped when no compiler is on PATH."""
 import pathlib
 import shutil
@@ -44,13 +46,40 @@ widgets:
     items:
       sta: Station
       ap: Access Point
-  mode_sel:
-    type: button-group
-    items:
-      fast:
-        label: Fast
-      slow:
-        label: Slow
+  controls:
+    type: row
+    widgets:
+      mode_sel:
+        type: button-group
+        items:
+          fast:
+            label: Fast
+          slow:
+            label: Slow
+  indoor:
+    type: section
+    namespace: true
+    widgets:
+      temp:
+        type: display
+  outdoor:
+    type: section
+    namespace: true
+    widgets:
+      temp:
+        type: display
+  nav_a:
+    type: dpad
+    widgets:
+      up:
+        type: button
+        position: top
+  nav_b:
+    type: dpad
+    widgets:
+      up:
+        type: button
+        position: top
 """
 
 C_USAGE = """\
@@ -60,7 +89,18 @@ void use(udisplay_t* ctx) {
     set_wifi_mode(ctx, WIFI_MODE_AP);
     set_mode_sel(ctx, WIDGET_ID_MODE_SEL_SLOW);
     clear_mode_sel(ctx);
+    set_indoor_temp(ctx, 21.5f);
+    set_outdoor_temp(ctx, 4.0f);
+    udisplay_set_property(ctx, WIDGET_ID_CONTROLS, UDISPLAY_PROP_VISIBLE, 0);
+    udisplay_set_property(ctx, WIDGET_ID_NAV_B_UP, UDISPLAY_PROP_ENABLED, 0);
 }
+
+static void on_up(void) {}
+static const udisplay_ui_handlers_t handlers = {
+    .on_nav_a_up_click = on_up,
+    .on_nav_b_up_click = on_up,
+};
+const udisplay_ui_handlers_t* get_handlers(void) { return &handlers; }
 """
 
 CPP_USAGE = """\
@@ -70,6 +110,11 @@ void use(UDisplay& ui) {
     ui.mode_sel.set(ModeSelWidget::Item::slow);
     ui.mode_sel.clear();
     ui.wifi_mode.set(WifiModeWidget::Option::ap);
+    ui.controls.set_property(UDISPLAY_PROP_VISIBLE, 0);
+    ui.indoor.temp.set(21.5f);
+    ui.outdoor.temp.set(4.0f);
+    ui.nav_a.up.on_click = []() {};
+    ui.nav_b.up.on_click = []() {};
 }
 """
 

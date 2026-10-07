@@ -119,14 +119,14 @@ static void handle_text_input(const char* str, uint8_t len)
 }
 
 static const udisplay_ui_handlers_t g_handlers = {
-    .on_client_ready          = handle_client_ready,
-    .on_enable_toggle_change  = handle_enable_toggle,
-    .on_mode_sel_fast_press   = handle_mode_sel_fast,
-    .on_mode_sel_slow_press   = handle_mode_sel_slow,
-    .on_mode_sel_turbo_press  = handle_mode_sel_turbo,
-    .on_power_btn_press       = handle_power_btn,
-    .on_rate_slider_change    = handle_rate_slider,
-    .on_text_input_submit     = handle_text_input,
+    .on_client_ready         = handle_client_ready,
+    .on_enable_toggle_change = handle_enable_toggle,
+    .on_mode_sel_fast_press  = handle_mode_sel_fast,
+    .on_mode_sel_slow_press  = handle_mode_sel_slow,
+    .on_mode_sel_turbo_press = handle_mode_sel_turbo,
+    .on_power_btn_press      = handle_power_btn,
+    .on_rate_slider_change   = handle_rate_slider,
+    .on_text_input_submit    = handle_text_input,
 };
 
 /* ── demo_tcp hooks ──────────────────────────────────────────────────────── */

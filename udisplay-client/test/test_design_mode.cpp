@@ -197,6 +197,34 @@ private slots:
         QVERIFY(dc.widgetModel()->rowCount() >= 2);
     }
 
+    /* ── Widget IDs (issue #43) ──────────────────────────────── */
+
+    /* Every widget, the section included, gets an ID, numbered as
+     * udisplay-gen does (panel 0x10 < relay 0x11). */
+    void designMode_numbersEveryWidget()
+    {
+        const char* yaml =
+            "device:\n"
+            "  name: testdev\n"
+            "widgets:\n"
+            "  panel:\n"
+            "    type: section\n"
+            "    widgets:\n"
+            "      relay:\n"
+            "        type: toggle\n";
+        QTemporaryFile f;
+        const QString path = writeTempYaml(f, yaml);
+        QVERIFY(!path.isEmpty());
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+
+        WidgetModel* m = dc.widgetModel();
+        QCOMPARE(m->rowCount(), 2);
+        QCOMPARE(m->data(m->index(0), WidgetModel::WidgetIdRole).toInt(), 0x10);
+        QCOMPARE(m->data(m->index(1), WidgetModel::WidgetIdRole).toInt(), 0x11);
+    }
+
     /* ── startDesignMode — missing file ──────────────────────── */
 
     void missing_file_sets_design_error()
@@ -228,6 +256,43 @@ private slots:
 
         QCOMPARE(dc.state(), QStringLiteral("running"));
         QVERIFY(!dc.designErrorString().isEmpty());
+    }
+
+    /* Two widgets that udisplay-gen would generate under one firmware
+     * name (the same key in two transparent rows) are rejected by design
+     * mode, with udisplay-gen validate's message, instead of rendering. */
+    void duplicate_generated_name_sets_design_error()
+    {
+        const char* yaml =
+            "device:\n"
+            "  name: dup names\n"
+            "widgets:\n"
+            "  row100:\n"
+            "    type: row\n"
+            "    namespace: false\n"
+            "    widgets:\n"
+            "      mylabel:\n"
+            "        type: label\n"
+            "        text: Hello1\n"
+            "  row200:\n"
+            "    type: row\n"
+            "    widgets:\n"
+            "      mylabel:\n"
+            "        type: label\n"
+            "        text: Hello2\n";
+
+        QTemporaryFile f;
+        const QString path = writeTempYaml(f, yaml);
+        QVERIFY(!path.isEmpty());
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+
+        QCOMPARE(dc.state(), QStringLiteral("running"));
+        QCOMPARE(dc.designErrorString(), QStringLiteral(
+            "widgets.row100.mylabel, widgets.row200.mylabel: all named 'mylabel' in "
+            "the generated firmware API; rename one, or set `namespace: true` on a "
+            "section/row/grid that separates them"));
     }
 
     void invalid_yaml_does_not_crash()

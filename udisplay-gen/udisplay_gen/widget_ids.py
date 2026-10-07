@@ -2,159 +2,196 @@
 # Copyright (c) 2026 Attila Agas
 
 """
-Widget ID assignment for uDisplay.
+Widget ID assignment and generated-name paths for uDisplay.
 
-IDs are assigned alphabetically by leaf key name (not full path), starting at 0x10.
-Container types (section, row, grid, dpad) are transparent — their names are excluded
-from the ID path. Decoration types (label, separator) and dropdown items are excluded
-from ID assignment entirely.
+Every widget gets a widget ID (issue #43) — leaves, containers (section, row,
+grid, dpad), decorations (label, separator), button face children and
+button-group items alike — so SET_PROPERTY / RESET_PROPERTY can target any
+node of the widget tree. Dropdown items are options, not widgets, and get no
+ID.
 
-See docs/merkle.md § Widget ID assignment.
+A widget has two paths:
+
+- Its **structural path** (`path`), the chain of YAML keys from the top
+  level down to it: `settings.advanced.rate`. IDs are assigned
+  alphabetically by structural path, starting at 0x10, identically in
+  udisplay-client's YamlParser.cpp. This is the wire contract.
+- Its **name path** (`name_path`), which the generated firmware APIs use
+  for identifiers (`WIDGET_ID_*`, `ui.<member>`). A section, row or grid is
+  transparent unless it sets `namespace: true`: its own key is not part of
+  its descendants' name paths, so moving a widget between such containers
+  changes no generated identifier. A flagged section/row/grid and every
+  compound widget (dpad, button-group, a button with face children) is a
+  namespace for its children. Name paths must be unique
+  (name_path_collisions()).
+
+    YAML                               structural path            name path
+    main (section)                     main                       main
+      row_temp (row)                   main.row_temp              row_temp
+        temp_display                   main.row_temp.temp_display temp_display
+    indoor (section, namespace: true)  indoor                     indoor
+      temperature                      indoor.temperature         indoor.temperature
+
+See docs/protocol.md § Widget ID Assignment.
 """
 from __future__ import annotations
+
+from typing import NamedTuple
 
 ID_START = 0x10
 ID_MAX = 0xFF
 MAX_WIDGETS = ID_MAX - ID_START + 1  # 240
 
-# Container types — transparent to ID assignment (children get IDs, not the container)
-CONTAINER_TYPES = {"section", "row", "grid", "dpad"}
+# Layout containers. Single source of truth for validate.py and the
+# backends (TODO-007).
+CONTAINER_TYPES = frozenset({"section", "row", "grid", "dpad"})
 
-# Types that never receive a widget ID
-NO_ID_TYPES = {"label", "separator"}
+# Containers that take `namespace: true|false` (default false = transparent
+# to generated names). dpad, button-group and a button's face are always
+# namespaces: their children reuse the same keys from one instance to the
+# next (`up`, `off`).
+NAMESPACE_FLAG_TYPES = frozenset({"section", "row", "grid"})
 
 
-def _collect(widgets: dict, prefix: str = "") -> list[str]:
-    """
-    Recursively collect all ID-bearing leaf paths in alphabetical order per level.
+class WidgetNode(NamedTuple):
+    """One widget of the YAML tree: its own key, its structural path (wire
+    ID), its children (widget-map children and button-group items) in YAML
+    declaration order, its type as collect_types() reports it, its name path
+    (generated identifiers), whether it is transparent to its children's
+    name paths, and its YAML mapping."""
+    key: str
+    path: str
+    children: tuple
+    type: str
+    name_path: str
+    transparent: bool
+    widget: dict
 
-    - Containers (section/row/grid/dpad) are transparent: their children get IDs as if
-      the container name were absent from the path.
-    - Decoration types (label, separator) are skipped.
-    - dropdown items are NOT collected (only the dropdown itself gets an ID).
-    - button children and button-group items keep their parent-prefixed paths.
-    """
-    paths: list[str] = []
+
+def _type_str(widget: dict) -> str:
+    wtype = widget.get("type", "")
+    if wtype == "text":
+        return f"text-{widget.get('mode', 'ro')}"
+    return wtype
+
+
+def widget_tree(widgets: dict, prefix: str = "", name_prefix: str = "") -> list:
+    """The widget tree as WidgetNodes, in YAML declaration order — every
+    node that gets an ID. The single place both paths are derived; every
+    other helper here, and every backend, walks this tree."""
+    nodes: list = []
     for key, widget in widgets.items():
         if not isinstance(widget, dict):
             continue
-        wtype = widget.get("type", "")
-
-        if wtype in CONTAINER_TYPES:
-            # Transparent: recurse with the SAME prefix (container name excluded)
-            paths.extend(_collect(widget.get("widgets", {}), prefix))
-            continue
-
-        if wtype in NO_ID_TYPES:
-            continue
-
         path = f"{prefix}.{key}" if prefix else key
-        paths.append(path)
-
-        # button children get IDs, except decoration types (label, separator),
-        # which never receive one — matches top-level label/separator semantics.
-        # Recurse (not a flat loop) so a container-typed child (row/grid,
-        # widget-model-redesign Increment 2) is transparent to ID assignment
-        # just like a top-level container — its own grandchildren get IDs
-        # prefixed by this widget's own path, not the container's throwaway
-        # key. Mirrors the equivalent fix in YamlParser.cpp's
-        # collectPathsRecursive().
-        paths.extend(_collect(widget.get("widgets", {}), path))
-
-        # button-group items get IDs
-        for item_key in widget.get("items", {}):
-            if wtype == "button-group":
-                paths.append(f"{path}.{item_key}")
-            # dropdown items: no IDs (intentional — already handled by skipping)
-
-    return paths
+        name_path = f"{name_prefix}.{key}" if name_prefix else key
+        transparent = (widget.get("type", "") in NAMESPACE_FLAG_TYPES
+                       and widget.get("namespace") is not True)
+        children = widget_tree(widget.get("widgets", {}), path,
+                               name_prefix if transparent else name_path)
+        if widget.get("type", "") == "button-group":
+            children += [
+                WidgetNode(item_key, f"{path}.{item_key}", (), "button-group-item",
+                           f"{name_path}.{item_key}", False,
+                           item if isinstance(item, dict) else {})
+                for item_key, item in widget.get("items", {}).items()
+            ]
+        nodes.append(WidgetNode(key, path, tuple(children), _type_str(widget),
+                                name_path, transparent, widget))
+    return nodes
 
 
-def collect_types(widgets: dict, prefix: str = "") -> dict[str, str]:
+def walk(nodes) -> list:
+    """Every node of a widget_tree(), parents before children."""
+    result: list = []
+    for node in nodes:
+        result.append(node)
+        result.extend(walk(node.children))
+    return result
+
+
+def scope_members(nodes) -> list:
+    """The members of one naming scope, given its direct children (the
+    top-level tree, or a namespace node's children): each child, plus the
+    members a transparent child contributes in its place. These become the
+    members of one generated class (`UDisplay`/`UI` or a namespace's
+    class)."""
+    result: list = []
+    for node in nodes:
+        result.append(node)
+        if node.transparent:
+            result.extend(scope_members(node.children))
+    return result
+
+
+def _collect(widgets: dict) -> list[str]:
+    """Every widget's structural path: `<parent path>.<key>`, or `<key>` at
+    the top level. button-group items get `<group>.<item>`; dropdown items
+    are options, not widgets, and get nothing."""
+    return [node.path for node in walk(widget_tree(widgets))]
+
+
+def collect_types(widgets: dict) -> dict[str, str]:
     """
-    Return a mapping of id_path → type_str for every ID-bearing widget.
+    Return a mapping of structural path → type_str for every widget (same
+    paths as _collect()).
 
     Text mode is baked in: 'text-rw' or 'text-ro'.
-    button children are typed per their own `type:` field (led, rgbled, display —
-    label is excluded from the result, matching top-level label semantics: no ID,
-    no setter).
     button-group items are typed as 'button-group-item'.
-    Container names are excluded from paths (same logic as _collect).
-    label, separator, and dropdown items are excluded.
+    Containers and decorations report their own type ('section', 'row',
+    'label', ...); backends generate no typed setter/handler for them.
     """
-    result: dict[str, str] = {}
-    for key, widget in widgets.items():
-        if not isinstance(widget, dict):
-            continue
-        wtype = widget.get("type", "")
-
-        if wtype in CONTAINER_TYPES:
-            result.update(collect_types(widget.get("widgets", {}), prefix))
-            continue
-
-        if wtype in NO_ID_TYPES:
-            continue
-
-        path = f"{prefix}.{key}" if prefix else key
-
-        if wtype == "text":
-            mode = widget.get("mode", "ro")
-            result[path] = f"text-{mode}"
-        elif wtype == "dropdown":
-            result[path] = "dropdown"
-        else:
-            result[path] = wtype
-
-        # Recurse (not a flat loop) — same container-transparency fix as
-        # _collect() above, so a nested row/grid button-face child's own
-        # children get correctly-prefixed, correctly-typed entries instead
-        # of being silently dropped.
-        result.update(collect_types(widget.get("widgets", {}), path))
-
-        if wtype == "button-group":
-            for item_key in widget.get("items", {}):
-                result[f"{path}.{item_key}"] = "button-group-item"
-
-    return result
+    return {node.path: node.type for node in walk(widget_tree(widgets))}
 
 
-def collect_dropdown_items(widgets: dict, prefix: str = "") -> dict[str, list[tuple[str, str]]]:
+def name_paths(widgets: dict) -> dict[str, str]:
+    """Return a mapping of structural path → name path for every widget."""
+    return {node.path: node.name_path for node in walk(widget_tree(widgets))}
+
+
+def name_path_collisions(widgets: dict) -> list[tuple[str, list[str]]]:
+    """(name path, [structural paths]) for every name path more than one
+    widget resolves to: the same key twice in one naming scope, e.g. a
+    `temp` in each of two transparent rows."""
+    by_name: dict[str, list[str]] = {}
+    for node in walk(widget_tree(widgets)):
+        by_name.setdefault(node.name_path, []).append(node.path)
+    return [(name, paths) for name, paths in by_name.items() if len(paths) > 1]
+
+
+def describe_name_collision(name: str, paths: list[str]) -> str:
+    """The error text for one name_path_collisions() entry, shared by
+    validate.py and the backends."""
+    return (
+        ", ".join(f"widgets.{p}" for p in paths)
+        + f": all named '{name}' in the generated firmware API; rename one, "
+        f"or set `namespace: true` on a section/row/grid that separates them"
+    )
+
+
+def collect_dropdown_items(widgets: dict) -> dict[str, list[tuple[str, str]]]:
     """
-    Return a mapping of dropdown id_path → [(item_key, item_label), ...] in
-    declaration order. Used by build.py to emit per-item index constants.
+    Return a mapping of dropdown structural path → [(item_key, item_label),
+    ...] in declaration order. Used by the backends to emit per-item index
+    constants.
     """
-    result: dict[str, list[tuple[str, str]]] = {}
-    for key, widget in widgets.items():
-        if not isinstance(widget, dict):
-            continue
-        wtype = widget.get("type", "")
-
-        if wtype in CONTAINER_TYPES:
-            result.update(collect_dropdown_items(widget.get("widgets", {}), prefix))
-            continue
-
-        if wtype in NO_ID_TYPES:
-            continue
-
-        path = f"{prefix}.{key}" if prefix else key
-        if wtype == "dropdown":
-            items = widget.get("items", {})
-            # str() guards against YAML 1.1 boolean/int key coercion (e.g. `off:` → False)
-            result[path] = [(str(k), str(v)) for k, v in items.items()]
-
-    return result
+    # str() guards against YAML 1.1 boolean/int key coercion (e.g. `off:` → False)
+    return {
+        node.path: [(str(k), str(v)) for k, v in node.widget.get("items", {}).items()]
+        for node in walk(widget_tree(widgets))
+        if node.type == "dropdown"
+    }
 
 
 def assign(widgets: dict) -> dict[str, int]:
     """
-    Return a mapping of id_path → widget_id for every ID-bearing widget.
+    Return a mapping of id_path → widget_id for every widget.
 
-    Raises ValueError if widget count exceeds 240, or if two widgets resolve
-    to the same id_path (duplicate leaf name under sibling containers that
-    share a transparent-prefix ancestor — e.g. two same-named leaves in two
-    different row/grid children of the same button face; containers don't
-    contribute their own name to the path, so this collides silently
-    instead of erroring at parse time otherwise).
+    Raises ValueError if widget count exceeds 240 (containers and decorations
+    count too), or if two widgets resolve to the same structural path. Valid
+    YAML can't produce a duplicate (every parent's key is a path segment of
+    its children, and the schema forbids '.' in keys); the check guards
+    input that skipped schema validation.
     """
     paths = sorted(_collect(widgets))
     if len(paths) > MAX_WIDGETS:
@@ -167,9 +204,7 @@ def assign(widgets: dict) -> dict[str, int]:
         if path in seen:
             raise ValueError(
                 f"Duplicate widget ID path '{path}' — two widgets resolve to the same "
-                f"protocol ID. Check for same-named leaves under different sibling "
-                f"containers (row/grid/section, or a button face's nested containers) "
-                f"that share a transparent-prefix ancestor."
+                f"protocol ID. Widget keys must not contain '.'."
             )
         seen.add(path)
     return {path: ID_START + i for i, path in enumerate(paths)}

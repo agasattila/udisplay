@@ -22,17 +22,10 @@ import pathlib
 from typing import List
 
 from . import BuildContext, OutputFile
-from ._shared import _macro_name
+from ._shared import _macro_name, widget_name_errors, widget_names
+from ..widget_ids import CONTAINER_TYPES, scope_members, walk, widget_tree
 
 _RUNTIME_SOURCE = pathlib.Path(__file__).parent.parent / "runtime" / "udisplay_runtime.py"
-
-# Container types transparent to the member-ordering traversal below.
-# Mirrors widget_ids.py's CONTAINER_TYPES. NOTE: cpp_backend.py's own local
-# copy of this concept (_cpp_ordered_toplevel's `container_types` set) is
-# missing "dpad" -- a pre-existing gap in cpp_backend.py, flagged separately
-# to the user, not fixed here (out of scope for this backend's diff).
-_CONTAINER_TYPES = {"section", "row", "grid", "dpad"}
-_NO_ID_TYPES = {"label", "separator"}
 
 _WRAPPER_CLASS = {
     "display": "DisplayWidget",
@@ -54,25 +47,27 @@ _WRAPPER_CLASS = {
 # definition silently overwrites the earlier one — see
 # _validate_python_identifiers() below.
 #
-# Top level: every entry in _py_ordered_toplevel() becomes `self.<path>` on
-# the generated UI class (_generate_ui_py below) — cross-reference against
-# every fixed attribute/method UI.__init__ and the class body assign there.
+# Top level: every member of the top-level naming scope (scope_members())
+# becomes `self.<key>` on the generated UI class (_generate_ui_py below) —
+# cross-reference against every fixed attribute/method UI.__init__ and the
+# class body assign there.
 _UI_RESERVED_NAMES = {
     "_device", "on_client_ready", "on_comms_error",
+    "set_property", "reset_property",
     "on_connect", "on_disconnect", "feed", "heartbeat",
     "_on_client_ready", "_on_comms_error", "_on_event",
     "__init__", "self",
 }
 
-# Button face children (_py_sub_members under a `button`) become
-# `self.<path>.<sub_key>` on a ButtonWidget instance — cross-reference
-# against ButtonWidget's own __init__ body above (no __slots__, so any
+# Every other widget becomes `<namespace>.<key>` on its namespace's wrapper
+# (ContainerWidget, ButtonWidget, ButtonGroupWidget) — cross-reference
+# against that class's own body in _BASE_CLASSES (no __slots__, so any
 # attribute name is silently accepted, colliding or not).
-_BUTTON_RESERVED_NAMES = {"_device", "_widget_id", "on_press", "on_release", "on_click"}
+_WIDGET_RESERVED_NAMES = {"_device", "_widget_id", "id", "set_property", "reset_property"}
+_BUTTON_RESERVED_NAMES = _WIDGET_RESERVED_NAMES | {"on_press", "on_release", "on_click"}
 
-# button-group items become `self.<path>.<item_key>` on a ButtonGroupWidget
-# instance — cross-reference against ButtonGroupWidget's own __init__ body.
-_BUTTON_GROUP_RESERVED_NAMES = {"_device", "_widget_id", "_items", "set", "clear"}
+# button-group items: cross-reference against ButtonGroupWidget's own body.
+_BUTTON_GROUP_RESERVED_NAMES = _WIDGET_RESERVED_NAMES | {"_items", "set", "clear"}
 
 
 def _validate_python_identifiers(ctx: BuildContext) -> None:
@@ -88,8 +83,8 @@ def _validate_python_identifiers(ctx: BuildContext) -> None:
     Raises ValueError listing every violation found, not just the first,
     so one fix-and-rerun cycle catches everything."""
     widget_ids = ctx.widget_ids
-    widget_types = ctx.widget_types or {}
     widgets_yaml = ctx.widgets_yaml or {}
+    names = widget_names(widget_ids, widgets_yaml)
     errors: List[str] = []
 
     def check_segment(name: str, reserved: set, where: str) -> None:
@@ -104,32 +99,24 @@ def _validate_python_identifiers(ctx: BuildContext) -> None:
                 f"generated UI/runtime API"
             )
 
-    ordered = _py_ordered_toplevel(widgets_yaml, widget_types)
-
-    for path in ordered:
-        check_segment(path, _UI_RESERVED_NAMES, f"widget '{path}'")
-
-        wtype = widget_types.get(path, "")
+    tree = widget_tree(widgets_yaml)
+    for node in scope_members(tree):
+        check_segment(node.key, _UI_RESERVED_NAMES, f"widget '{node.path}'")
+    for node in walk(tree):
+        if node.transparent:
+            continue
         sub_reserved = (
-            _BUTTON_GROUP_RESERVED_NAMES if wtype == "button-group"
-            else _BUTTON_RESERVED_NAMES
+            _BUTTON_GROUP_RESERVED_NAMES if node.type == "button-group"
+            else _BUTTON_RESERVED_NAMES if node.type == "button"
+            else _WIDGET_RESERVED_NAMES
         )
-        for sub_key, _sub_type, _sub_id in _py_sub_members(path, widget_types, widget_ids):
-            check_segment(sub_key, sub_reserved, f"widget '{path}.{sub_key}'")
+        for child in scope_members(node.children):
+            check_segment(child.key, sub_reserved, f"widget '{child.path}'")
 
-    # WIDGET_ID_* macro-name collisions (TODO-056) — every widget_ids key
-    # (top-level AND nested, since widget_ids is keyed by full dotted path)
-    # must normalize to a distinct constant name.
-    by_macro: dict = {}
-    for path in widget_ids:
-        by_macro.setdefault(_macro_name(path), []).append(path)
-    for macro, paths in sorted(by_macro.items()):
-        if len(paths) > 1:
-            errors.append(
-                "widget name collision: "
-                + ", ".join(repr(p) for p in sorted(paths))
-                + f" all normalize to the same generated constant WIDGET_ID_{macro}"
-            )
+    # Two widgets sharing one name path, and WIDGET_ID_* macro-name
+    # collisions (TODO-056): every name path must normalize to a distinct
+    # constant name.
+    errors += widget_name_errors(widget_ids, widgets_yaml)
 
     # Same mechanism, scoped per dropdown, for the <NAME>_OPTION_<item> constants.
     from ..widget_ids import collect_dropdown_items
@@ -145,7 +132,7 @@ def _validate_python_identifiers(ctx: BuildContext) -> None:
                     f"dropdown '{path}' item collision: "
                     + ", ".join(repr(k) for k in sorted(keys))
                     + f" all normalize to the same generated constant "
-                    f"{_macro_name(path)}_OPTION_{macro}"
+                    f"{_macro_name(names[path])}_OPTION_{macro}"
                 )
 
     if errors:
@@ -177,125 +164,104 @@ def _py_bytes_literal(data: bytes) -> str:
     return 'b"' + "".join(f"\\x{b:02x}" for b in data) + '"'
 
 
-def _py_ordered_toplevel(widgets_yaml: dict, widget_types: dict) -> list:
-    """Top-level widget paths in YAML declaration order (containers
-    transparent). Mirrors cpp_backend.py's _cpp_ordered_toplevel."""
-    result: list = []
-    for key, widget in widgets_yaml.items():
-        if not isinstance(widget, dict):
-            continue
-        wtype = widget.get("type", "")
-        if wtype in _NO_ID_TYPES:
-            continue
-        if wtype in _CONTAINER_TYPES:
-            for child_path in _py_ordered_toplevel(widget.get("widgets", {}), widget_types):
-                if child_path not in result:
-                    result.append(child_path)
-            continue
-        if key in widget_types:
-            result.append(key)
-    return result
-
-
-def _py_sub_members(path: str, widget_types: dict, widget_ids: dict) -> list:
-    """[(sub_key, type_str, widget_id)] for sub-members, alphabetical order.
-    Mirrors cpp_backend.py's _cpp_sub_members."""
-    prefix = path + "."
-    return [
-        (sub_path[len(prefix):], widget_types[sub_path], widget_ids[sub_path])
-        for sub_path in sorted(widget_ids)
-        if sub_path.startswith(prefix)
-    ]
-
 
 _BASE_CLASSES = '''
 # ── Widget wrapper classes ──────────────────────────────────────────────────
 # __slots__ on the value-only leaf wrappers (the bulk of widget instances,
 # up to MAX_WIDGETS=240) keeps per-instance RAM down; ButtonWidget/
-# ButtonGroupWidget skip __slots__ so generated __init__ code below can
-# attach named sub-widgets (LED children, button-group items) as plain
-# attributes.
+# ButtonGroupWidget/ContainerWidget skip __slots__ so generated __init__
+# code below can attach named children (face children, button-group items,
+# a container's widgets) as plain attributes: ui.settings.rate.
 
-class DisplayWidget:
+class Widget:
+    # Every widget -- containers (section/row/grid/dpad) and decorations
+    # (label/separator) included -- has a widget ID and takes runtime
+    # properties (UDISPLAY_PROP_ENABLED, UDISPLAY_PROP_VISIBLE, ...).
     __slots__ = ("_device", "_widget_id")
     def __init__(self, device, widget_id):
         self._device = device
         self._widget_id = widget_id
+    @property
+    def id(self):
+        return self._widget_id
+    def set_property(self, property_id, value):
+        self._device.set_property(self._widget_id, property_id, value)
+    def reset_property(self, property_id):
+        self._device.reset_property(self._widget_id, property_id)
+
+
+class ContainerWidget(Widget):
+    # section/row/grid/dpad. A namespace container holds its children as
+    # attributes, attached by UI.__init__ (ui.settings.rate); a transparent
+    # one's children are attributes of the enclosing scope instead. No
+    # __slots__ for that.
+    def __init__(self, device, widget_id):
+        Widget.__init__(self, device, widget_id)
+
+
+class DisplayWidget(Widget):
+    __slots__ = ()
     def set(self, value):
         self._device.send_float(self._widget_id, value)
 
 
-class LedWidget:
-    __slots__ = ("_device", "_widget_id")
-    def __init__(self, device, widget_id):
-        self._device = device
-        self._widget_id = widget_id
+class LedWidget(Widget):
+    __slots__ = ()
     def set(self, value):
         self._device.send_bool(self._widget_id, value)
 
 
-class RgbLedWidget:
-    __slots__ = ("_device", "_widget_id")
-    def __init__(self, device, widget_id):
-        self._device = device
-        self._widget_id = widget_id
+class RgbLedWidget(Widget):
+    __slots__ = ()
     def set(self, value):
         self._device.send_int(self._widget_id, value)
 
 
-class ToggleWidget:
-    __slots__ = ("_device", "_widget_id", "on_change")
+class ToggleWidget(Widget):
+    __slots__ = ("on_change",)
     def __init__(self, device, widget_id):
-        self._device = device
-        self._widget_id = widget_id
+        Widget.__init__(self, device, widget_id)
         self.on_change = None
     def set(self, value):
         self._device.send_bool(self._widget_id, value)
 
 
-class SliderWidget:
-    __slots__ = ("_device", "_widget_id", "on_change")
+class SliderWidget(Widget):
+    __slots__ = ("on_change",)
     def __init__(self, device, widget_id):
-        self._device = device
-        self._widget_id = widget_id
+        Widget.__init__(self, device, widget_id)
         self.on_change = None
     def set(self, value):
         self._device.send_float(self._widget_id, value)
 
 
-class TextRwWidget:
-    __slots__ = ("_device", "_widget_id", "on_submit")
+class TextRwWidget(Widget):
+    __slots__ = ("on_submit",)
     def __init__(self, device, widget_id):
-        self._device = device
-        self._widget_id = widget_id
+        Widget.__init__(self, device, widget_id)
         self.on_submit = None
     def set(self, value):
         self._device.send_string(self._widget_id, value)
 
 
-class TextRoWidget:
-    __slots__ = ("_device", "_widget_id")
-    def __init__(self, device, widget_id):
-        self._device = device
-        self._widget_id = widget_id
+class TextRoWidget(Widget):
+    __slots__ = ()
     def set(self, value):
         self._device.send_string(self._widget_id, value)
 
 
-class DropdownWidget:
-    __slots__ = ("_device", "_widget_id", "on_change")
+class DropdownWidget(Widget):
+    __slots__ = ("on_change",)
     def __init__(self, device, widget_id):
-        self._device = device
-        self._widget_id = widget_id
+        Widget.__init__(self, device, widget_id)
         self.on_change = None
     def set(self, index):
         self._device.send_uint8(self._widget_id, index)
 
 
-class ButtonWidget:
+class ButtonWidget(Widget):
     def __init__(self, device, widget_id):
-        self._device = device
-        self._widget_id = widget_id
+        Widget.__init__(self, device, widget_id)
         self.on_press = None
         self.on_release = None
         self.on_click = None
@@ -308,15 +274,14 @@ class ButtonWidget:
 ButtonItem = ButtonWidget
 
 
-class ButtonGroupWidget:
+class ButtonGroupWidget(Widget):
     # Exclusive selection is device-authoritative: an item press only fires
     # that item's callbacks; firmware confirms with set(), which pushes
     # STATE_UPDATE(group, uint8 item widget ID). Items are ButtonItem
     # sub-attributes, assigned in UI.__init__ below along with _items, the
     # tuple of their widget IDs.
     def __init__(self, device, widget_id):
-        self._device = device
-        self._widget_id = widget_id
+        Widget.__init__(self, device, widget_id)
         self._items = ()
     def set(self, item):
         # item: one of this group's ButtonItem attributes (ui.mode.fast) or
@@ -334,7 +299,7 @@ class ButtonGroupWidget:
 '''.lstrip("\n")
 
 
-def _py_dropdown_options(widgets_yaml: dict, widget_ids: dict) -> list:
+def _py_dropdown_options(widgets_yaml: dict, widget_ids: dict, names: dict) -> list:
     """Module-level '<DROPDOWN_NAME>_OPTION_<ITEM_KEY> = idx' constants for
     every dropdown's items, in declaration order. Scoped per-dropdown (like
     cpp_backend's nested enum) so two dropdowns can reuse the same item key."""
@@ -345,54 +310,49 @@ def _py_dropdown_options(widgets_yaml: dict, widget_ids: dict) -> list:
     for path, items in dropdown_items.items():
         if path not in widget_ids:
             continue
-        const_prefix = _macro_name(path)
+        const_prefix = _macro_name(names[path])
         for idx, (item_key, _label) in enumerate(items):
             lines.append(f"{const_prefix}_OPTION_{_macro_name(item_key)} = {idx}")
     return lines
 
 
-def _py_instantiate(path: str, type_str: str, widget_types: dict, widget_ids: dict) -> list:
-    """UI.__init__ body lines constructing `self.<path>` and any sub-members."""
-    cls = _WRAPPER_CLASS.get(type_str, "ButtonWidget")
-    const = f"WIDGET_ID_{_macro_name(path)}"
-    lines = [f"        self.{path} = {cls}(self._device, {const})"]
-    if type_str in ("button", "button-group"):
-        item_consts = []
-        for sub_key, sub_type, sub_wid in _py_sub_members(path, widget_types, widget_ids):
-            sub_cls = _WRAPPER_CLASS.get(sub_type, "LedWidget")
-            sub_const = f"WIDGET_ID_{_macro_name(path + '.' + sub_key)}"
-            lines.append(f"        self.{path}.{sub_key} = {sub_cls}(self._device, {sub_const})")
-            if sub_type == "button-group-item":
-                item_consts.append(sub_const)
-        if type_str == "button-group":
-            # Trailing comma keeps a one-item group a tuple.
-            lines.append(f"        self.{path}._items = ({''.join(c + ', ' for c in item_consts).rstrip()})")
+def _py_instantiate(node, widget_types: dict) -> list:
+    """UI.__init__ body lines constructing `self.<name path>` and,
+    recursively, its children, in YAML declaration order. A transparent
+    container's children land in its enclosing scope (`self.<key>`), a
+    namespace's under it (`self.<namespace>.<key>`)."""
+    type_str = widget_types.get(node.path, "")
+    if type_str in CONTAINER_TYPES:
+        cls = "ContainerWidget"
+    else:
+        cls = _WRAPPER_CLASS.get(type_str, "Widget")
+    const = f"WIDGET_ID_{_macro_name(node.name_path)}"
+    lines = [f"        self.{node.name_path} = {cls}(self._device, {const})"]
+    for child in node.children:
+        lines.extend(_py_instantiate(child, widget_types))
+    if type_str == "button-group":
+        # Trailing comma keeps a one-item group a tuple.
+        item_consts = [
+            f"WIDGET_ID_{_macro_name(child.name_path)}" for child in node.children
+            if widget_types.get(child.path) == "button-group-item"
+        ]
+        lines.append(f"        self.{node.name_path}._items = ({''.join(c + ', ' for c in item_consts).rstrip()})")
     return lines
 
 
-def _py_dispatch_cases(ordered: list, widget_types: dict, widget_ids: dict) -> list:
+def _py_dispatch_cases(nodes: list, widget_types: dict, widget_ids: dict) -> list:
     """`if widget_id == ...: ... elif widget_id == ...` body for
-    UI._on_event. Mirrors cpp_backend.py's _cpp_dispatch_cases."""
+    UI._on_event, one branch per widget that raises events, at any depth.
+    Mirrors cpp_backend.py's _cpp_dispatch_cases."""
     lines: list = []
 
     def kw() -> str:
         return "if" if not lines else "elif"
 
-    def button_branch(const: str, attr: str) -> None:
-        lines.extend([
-            f"        {kw()} widget_id == {const}:",
-            f"            if event_type == UDISPLAY_EVENT_BUTTON_PRESS and self.{attr}.on_press:",
-            f"                self.{attr}.on_press()",
-            f"            elif event_type == UDISPLAY_EVENT_BUTTON_RELEASE and self.{attr}.on_release:",
-            f"                self.{attr}.on_release()",
-            f"            elif event_type == UDISPLAY_EVENT_BUTTON_CLICK and self.{attr}.on_click:",
-            f"                self.{attr}.on_click()",
-        ])
-
-    for path in ordered:
-        type_str = widget_types.get(path, "")
-        wid = widget_ids.get(path)
-        if wid is None:
+    for node in nodes:
+        path = node.name_path
+        type_str = widget_types.get(node.path, "")
+        if node.path not in widget_ids:
             continue
         const = f"WIDGET_ID_{_macro_name(path)}"
 
@@ -408,8 +368,16 @@ def _py_dispatch_cases(ordered: list, widget_types: dict, widget_ids: dict) -> l
                 f"            if event_type == UDISPLAY_EVENT_SLIDER_CHANGE and self.{path}.on_change:",
                 f"                self.{path}.on_change(value)",
             ])
-        elif type_str == "button":
-            button_branch(const, path)
+        elif type_str in ("button", "button-group-item"):
+            lines.extend([
+                f"        {kw()} widget_id == {const}:",
+                f"            if event_type == UDISPLAY_EVENT_BUTTON_PRESS and self.{path}.on_press:",
+                f"                self.{path}.on_press()",
+                f"            elif event_type == UDISPLAY_EVENT_BUTTON_RELEASE and self.{path}.on_release:",
+                f"                self.{path}.on_release()",
+                f"            elif event_type == UDISPLAY_EVENT_BUTTON_CLICK and self.{path}.on_click:",
+                f"                self.{path}.on_click()",
+            ])
         elif type_str == "text-rw":
             lines.extend([
                 f"        {kw()} widget_id == {const}:",
@@ -422,12 +390,6 @@ def _py_dispatch_cases(ordered: list, widget_types: dict, widget_ids: dict) -> l
                 f"            if event_type == UDISPLAY_EVENT_SELECTION_CHANGE and self.{path}.on_change:",
                 f"                self.{path}.on_change(value)",
             ])
-
-        for sub_key, sub_type, sub_wid in _py_sub_members(path, widget_types, widget_ids):
-            if sub_type != "button-group-item":
-                continue
-            sub_const = f"WIDGET_ID_{_macro_name(path + '.' + sub_key)}"
-            button_branch(sub_const, f"{path}.{sub_key}")
 
     return lines
 
@@ -450,7 +412,7 @@ def _generate_ui_py(ctx: BuildContext) -> str:
     chunks = [blob[i * CHUNK_SIZE:(i + 1) * CHUNK_SIZE] for i in range(n)]
     chunk_lens = [len(c) for c in chunks]
 
-    ordered = _py_ordered_toplevel(widgets_yaml, widget_types)
+    tree = widget_tree(widgets_yaml)
 
     lines = [
         "# SPDX-License-Identifier: MIT",
@@ -472,10 +434,11 @@ def _generate_ui_py(ctx: BuildContext) -> str:
         "# ── Widget IDs ───────────────────────────────────────────────────────────",
     ]
 
-    for path in sorted(widget_ids):
-        lines.append(f"WIDGET_ID_{_macro_name(path)} = 0x{widget_ids[path]:02X}")
+    names = widget_names(widget_ids, widgets_yaml)
+    for path in sorted(widget_ids, key=lambda p: names[p]):
+        lines.append(f"WIDGET_ID_{_macro_name(names[path])} = 0x{widget_ids[path]:02X}")
 
-    dropdown_opts = _py_dropdown_options(widgets_yaml, widget_ids)
+    dropdown_opts = _py_dropdown_options(widgets_yaml, widget_ids, names)
     if dropdown_opts:
         lines.append("")
         lines.append("# ── Dropdown item indices ───────────────────────────────────────────────")
@@ -521,9 +484,8 @@ def _generate_ui_py(ctx: BuildContext) -> str:
         "",
     ]
 
-    for path in ordered:
-        type_str = widget_types.get(path, "")
-        lines.extend(_py_instantiate(path, type_str, widget_types, widget_ids))
+    for node in tree:
+        lines.extend(_py_instantiate(node, widget_types))
 
     lines += [
         "",
@@ -550,7 +512,7 @@ def _generate_ui_py(ctx: BuildContext) -> str:
         "    def _on_event(self, widget_id, event_type, value):",
     ]
 
-    dispatch = _py_dispatch_cases(ordered, widget_types, widget_ids)
+    dispatch = _py_dispatch_cases(walk(tree), widget_types, widget_ids)
     if dispatch:
         lines.extend(dispatch)
     else:

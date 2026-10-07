@@ -11,6 +11,7 @@ import zlib
 import pytest
 
 from udisplay_gen.merkle import CHUNK_SIZE, chunk_hashes, compute, root
+from udisplay_gen.validate import semantic_errors
 from udisplay_gen.widget_ids import assign
 
 
@@ -93,6 +94,19 @@ class TestWidgetIdGoldenFixtures:
             expected = {k: int(vid, 16) for k, vid in fixture["widget_ids"].items()}
             assert ids == expected, f"widget_id_fixtures.{name}"
 
+
+class TestNameCollisionFixtures:
+    """Generated-name collisions: udisplay-gen's validate and the client's
+    YamlParser (test_widget_id_golden_fixtures.cpp) check the same cases."""
+    def test_fixtures_match_semantic_errors(self, vectors):
+        import yaml as pyyaml
+        cases = vectors["name_collision_fixtures"]["cases"]
+        assert cases, "name_collision_fixtures must not be empty"
+        assert any(c["errors"] for c in cases.values())
+        assert any(not c["errors"] for c in cases.values())
+        for name, case in cases.items():
+            doc = pyyaml.safe_load(case["yaml"])
+            assert [e.strip() for e in semantic_errors(doc)] == case["errors"], name
 
 # ── Message encoding vectors ──────────────────────────────────────────────────
 

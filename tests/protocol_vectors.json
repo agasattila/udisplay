@@ -93,68 +93,106 @@
   },
   "widget_id_fixtures": {
     "nesting_and_dpad": {
-      "description": "Golden fixture for the widget-ID cross-check between udisplay-gen's widget_ids.assign() and udisplay-client's YamlParser collectPaths()/ID assignment: multi-level container nesting (section > row > grid, section > dpad), no-ID decoration types (label, separator), a button-group with items, a dpad with button children, and a dropdown (whose items are excluded from ID assignment). Both implementations MUST assign identical IDs to identical paths \u2014 any divergence is a protocol-routing bug (see the dpad-split design doc's golden-fixture cross-check task).",
+      "description": "Golden fixture for the widget-ID cross-check between udisplay-gen's widget_ids.assign() and udisplay-client's YamlParser collectPaths()/ID assignment (v5 scheme, PROTO_VERSION >= 0x05, issue #43): multi-level container nesting (section > row > grid, section > dpad), where every container and decoration (label, separator) gets its own ID and every container key is a segment of its descendants' paths (sensors.ctrl_row.inner_grid.led1), a button-group with items, a dpad with button children, and a dropdown (whose items are excluded from ID assignment). Both implementations MUST assign identical IDs to identical paths \u2014 any divergence is a protocol-routing bug.",
       "yaml": "device:\n  name: dpad and nesting fixture\nwidgets:\n  sensors:\n    type: section\n    label: Sensors\n    widgets:\n      temp:\n        type: display\n        label: Temp\n      ctrl_row:\n        type: row\n        widgets:\n          relay:\n            type: toggle\n          note:\n            type: label\n            text: hi\n          inner_grid:\n            type: grid\n            columns: 2\n            widgets:\n              led1:\n                type: led\n              led2:\n                type: led\n      dir_pad:\n        type: dpad\n        widgets:\n          up_btn:\n            type: button\n            label: Up\n            position: top\n          down_btn:\n            type: button\n            label: Down\n            position: bottom\n          left_btn:\n            type: button\n            label: Left\n            position: left\n  mode_sel:\n    type: button-group\n    items:\n      dc:\n        label: DCV\n      ac:\n        label: ACV\n  divider:\n    type: separator\n  net_dropdown:\n    type: dropdown\n    items:\n      sta: Station\n      ap: Access Point\n",
       "widget_ids": {
-        "down_btn": "0x10",
-        "led1": "0x11",
-        "led2": "0x12",
-        "left_btn": "0x13",
-        "mode_sel": "0x14",
-        "mode_sel.ac": "0x15",
-        "mode_sel.dc": "0x16",
-        "net_dropdown": "0x17",
-        "relay": "0x18",
-        "temp": "0x19",
-        "up_btn": "0x1A"
+        "divider": "0x10",
+        "mode_sel": "0x11",
+        "mode_sel.ac": "0x12",
+        "mode_sel.dc": "0x13",
+        "net_dropdown": "0x14",
+        "sensors": "0x15",
+        "sensors.ctrl_row": "0x16",
+        "sensors.ctrl_row.inner_grid": "0x17",
+        "sensors.ctrl_row.inner_grid.led1": "0x18",
+        "sensors.ctrl_row.inner_grid.led2": "0x19",
+        "sensors.ctrl_row.note": "0x1A",
+        "sensors.ctrl_row.relay": "0x1B",
+        "sensors.dir_pad": "0x1C",
+        "sensors.dir_pad.down_btn": "0x1D",
+        "sensors.dir_pad.left_btn": "0x1E",
+        "sensors.dir_pad.up_btn": "0x1F",
+        "sensors.temp": "0x20"
+      }
+    },
+    "button_face_containers": {
+      "description": "v5 scheme (issue #43): a section, a button-face row, face/top-level labels and a separator all get IDs; the face row is a namespace for its children (power_btn.face_row.icon), like the section and grid are for theirs.",
+      "yaml": "device:\n  name: button face containers fixture\nwidgets:\n  panel:\n    type: section\n    label: Panel\n    widgets:\n      power_btn:\n        type: button\n        label: Power\n        widgets:\n          face_row:\n            type: row\n            widgets:\n              icon:\n                type: led\n              caption:\n                type: label\n                text: PWR\n          status:\n            type: rgbled\n      title:\n        type: label\n        text: Controls\n  zone:\n    type: grid\n    columns: 2\n    widgets:\n      amps:\n        type: display\n      sep:\n        type: separator\n",
+      "widget_ids": {
+        "panel": "0x10",
+        "panel.power_btn": "0x11",
+        "panel.power_btn.face_row": "0x12",
+        "panel.power_btn.face_row.caption": "0x13",
+        "panel.power_btn.face_row.icon": "0x14",
+        "panel.power_btn.status": "0x15",
+        "panel.title": "0x16",
+        "zone": "0x17",
+        "zone.amps": "0x18",
+        "zone.sep": "0x19"
+      }
+    },
+    "namespaced_keys": {
+      "description": "v5 scheme: widget keys are local to their parent. The same key (temp, controls, enable) appears in several containers and at the top level; every occurrence gets its own ID because each container key is a path segment (boiler.controls.temp vs tank.temp vs temp). Every container that reuses a key below it sets `namespace: true`, so the reused keys are distinct generated names too; the flag changes no ID.",
+      "yaml": "device:\n  name: namespaced keys fixture\nwidgets:\n  boiler:\n    type: section\n    namespace: true\n    label: Boiler\n    widgets:\n      temp:\n        type: display\n      controls:\n        type: row\n        namespace: true\n        widgets:\n          enable:\n            type: toggle\n          temp:\n            type: slider\n            min: 0\n            max: 100\n  tank:\n    type: section\n    namespace: true\n    label: Tank\n    widgets:\n      temp:\n        type: display\n      controls:\n        type: row\n        namespace: true\n        widgets:\n          enable:\n            type: toggle\n  temp:\n    type: display\n",
+      "widget_ids": {
+        "boiler": "0x10",
+        "boiler.controls": "0x11",
+        "boiler.controls.enable": "0x12",
+        "boiler.controls.temp": "0x13",
+        "boiler.temp": "0x14",
+        "tank": "0x15",
+        "tank.controls": "0x16",
+        "tank.controls.enable": "0x17",
+        "tank.temp": "0x18",
+        "temp": "0x19"
       }
     }
   },
   "messages": {
     "HANDSHAKE": {
-      "description": "Device\u2192client on connect. proto_version=4, flags=0x00 (no auth), uses V1 merkle root, chunk_count=1, chunk_size=256. flags byte inserted at offset 2; merkle_root shifted to offset 3.",
+      "description": "Device\u2192client on connect. proto_version=5, flags=0x00 (no auth), uses V1 merkle root, chunk_count=1, chunk_size=256. flags byte inserted at offset 2; merkle_root shifted to offset 3.",
       "input": {
         "msg_type": "0x00",
-        "proto_version": 4,
+        "proto_version": 5,
         "flags": "0x00",
         "merkle_root": "74ac9fa684287d0cab3e64e3f25ee369c74b46e7f2ec0025cd10bac7bdffdb6e",
         "chunk_count": 1,
         "chunk_size": 256
       },
-      "bytes": "00 04 00 74 ac 9f a6 84 28 7d 0c ab 3e 64 e3 f2 5e e3 69 c7 4b 46 e7 f2 ec 00 25 cd 10 ba c7 bd ff db 6e 01 00 00 01",
+      "bytes": "00 05 00 74 ac 9f a6 84 28 7d 0c ab 3e 64 e3 f2 5e e3 69 c7 4b 46 e7 f2 ec 00 25 cd 10 ba c7 bd ff db 6e 01 00 00 01",
       "total_bytes": 39
     },
     "HANDSHAKE_AUTH": {
-      "description": "Device\u2192client on connect when auth_algo=HMAC-SHA256. proto_version=4, flags=0x01 (auth required), algorithm=0x01 (HMAC-SHA256), salt=0x01..0x20. No merkle_root in this message; sent after auth succeeds.",
+      "description": "Device\u2192client on connect when auth_algo=HMAC-SHA256. proto_version=5, flags=0x01 (auth required), algorithm=0x01 (HMAC-SHA256), salt=0x01..0x20. No merkle_root in this message; sent after auth succeeds.",
       "input": {
         "msg_type": "0x00",
-        "proto_version": 4,
+        "proto_version": 5,
         "flags": "0x01",
         "algorithm": "0x01",
         "salt_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
       },
-      "bytes": "00 04 01 01 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20",
+      "bytes": "00 05 01 01 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20",
       "total_bytes": 36
     },
     "HANDSHAKE_ACK": {
-      "description": "Client\u2192device. client_proto_max=4, flags=0x00 (no auth). flags byte added at offset 2 (proto v0.04). Old firmware ignores extra byte (len \u2265 2 check).",
+      "description": "Client\u2192device. client_proto_max=5, flags=0x00 (no auth). flags byte added at offset 2 (proto v0.04). Old firmware ignores extra byte (len \u2265 2 check).",
       "input": {
         "msg_type": "0x01",
-        "client_proto_max": 4,
+        "client_proto_max": 5,
         "flags": "0x00"
       },
-      "bytes": "01 04 00",
+      "bytes": "01 05 00",
       "total_bytes": 3
     },
     "HANDSHAKE_ACK_AUTH": {
-      "description": "Client\u2192device when device sent HANDSHAKE(flags=1). client_proto_max=4, flags=0x01, credential=HMAC-SHA256(key=password, message=salt) as 32 bytes (test vector uses 0x21..0x40).",
+      "description": "Client\u2192device when device sent HANDSHAKE(flags=1). client_proto_max=5, flags=0x01, credential=HMAC-SHA256(key=password, message=salt) as 32 bytes (test vector uses 0x21..0x40).",
       "input": {
         "msg_type": "0x01",
-        "client_proto_max": 4,
+        "client_proto_max": 5,
         "flags": "0x01",
         "credential_hex": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40"
       },
-      "bytes": "01 04 01 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40",
+      "bytes": "01 05 01 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40",
       "total_bytes": 35
     },
     "CLIENT_READY": {
@@ -418,6 +456,23 @@
       },
       "bytes": "07 00 30 10 01 c3 f5 48 40",
       "total_bytes": 9
+    }
+  },
+  "name_collision_fixtures": {
+    "description": "Golden fixtures for generated-name collisions, checked by udisplay-gen's semantic_errors() and udisplay-client's YamlParser::parse(). A section/row/grid is transparent to its children's generated names unless it sets `namespace: true`; dpad, button-group and button faces always are namespaces. `errors` lists every collision udisplay-gen reports, in order; the client rejects the YAML with errors[0] as its error string. An empty list means both must accept it.",
+    "cases": {
+      "transparent_rows_and_mixed_levels": {
+        "yaml": "device:\n  name: \"My Device\"\nstyle:\n  insane:\n    text: \"#F0d4aa\"\n    button_text: \"#F00000\"\n    button: \"#00F000\"\n    accent: \"#F00000\"\nwidgets:\n  row100:\n    type: row\n    namespace: false\n    widgets:\n      mylabel:\n        type: label\n        text: Hello1\n      mylabel2:\n        type: label\n        text: Hello2\n      mybutton:\n        type: button\n        style: insane\n        label: \"Hello\"\n  row200:\n    type: row\n    widgets:\n      mylabel:\n        type: label\n        text: Hello1\n      mylabel2:\n        type: label\n        text: Hello2\n  mybutton:\n    type: button\n    style: insane\n    label: \"Hello\"\n    widgets:\n      mylabel:\n        align: center\n        type: label\n        text: Hello\n      mylabel2:\n        align: center\n        type: label\n        text: World!\n        style: default\n",
+        "errors": [
+          "widgets.row100.mylabel, widgets.row200.mylabel: all named 'mylabel' in the generated firmware API; rename one, or set `namespace: true` on a section/row/grid that separates them",
+          "widgets.row100.mylabel2, widgets.row200.mylabel2: all named 'mylabel2' in the generated firmware API; rename one, or set `namespace: true` on a section/row/grid that separates them",
+          "widgets.row100.mybutton, widgets.mybutton: all named 'mybutton' in the generated firmware API; rename one, or set `namespace: true` on a section/row/grid that separates them"
+        ]
+      },
+      "namespaces_and_compound_widgets": {
+        "yaml": "device:\n  name: name paths ok\nwidgets:\n  indoor:\n    type: section\n    namespace: true\n    widgets:\n      temp:\n        type: display\n      controls:\n        type: row\n        widgets:\n          enable:\n            type: toggle\n  outdoor:\n    type: row\n    namespace: true\n    widgets:\n      temp:\n        type: display\n  enable_all:\n    type: toggle\n  nav_a:\n    type: dpad\n    widgets:\n      up:\n        type: button\n        position: top\n  nav_b:\n    type: dpad\n    widgets:\n      up:\n        type: button\n        position: top\n  g1:\n    type: button-group\n    items:\n      off:\n        label: Off\n  g2:\n    type: button-group\n    items:\n      off:\n        label: Off\n  b1:\n    type: button\n    label: B1\n    widgets:\n      icon:\n        type: led\n  b2:\n    type: button\n    label: B2\n    widgets:\n      icon:\n        type: led\n",
+        "errors": []
+      }
     }
   }
 }

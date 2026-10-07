@@ -6,6 +6,7 @@
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <array>
+#include <utility>
 #include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
@@ -28,6 +29,20 @@ static void diag(Diags& diags, Severity sev,
                  const std::string& key, const char* field, const QString& msg)
 {
     diags.append({sev, qs(key), QString::fromLatin1(field), msg});
+}
+
+/* The widget ID collectPaths() assigned to a path. Every build site asks
+ * for a path that walk numbered, so a miss means the two walks disagree;
+ * a 0 ID would silently drop every STATE_UPDATE for that widget, so it is
+ * a fatal diagnostic instead. */
+static uint8_t widgetIdFor(const std::map<std::string, uint8_t>& idMap,
+                           const std::string& path, Diags& diags)
+{
+    auto it = idMap.find(path);
+    if (it != idMap.end()) return it->second;
+    diag(diags, Severity::Error, path, "widgetId",
+         QStringLiteral("internal error: no widget ID assigned to this path"));
+    return 0;
 }
 
 /* Returns true if v is a member of the constexpr array. */
@@ -123,9 +138,8 @@ static int parseGridColumns(const YAML::Node& node, const std::string& key, Diag
  * top-level-section construction, AND the button-group item construction
  * loop below — section widgets and button-group items are NOT built via
  * buildWidget(), so this must be called from all three sites rather than
- * folded into buildWidget() alone (a lesson from TODO-037: container-
- * transparency logic in this file already has more than one construction
- * path for the same widget type).
+ * folded into buildWidget() alone (a lesson from TODO-037: this file
+ * already has more than one construction path for the same widget type).
  * Only checks whether style: was WRITTEN here — validating that the name
  * refers to an actually-declared stylesheet happens in a post-pass in
  * YamlParser::parse(), once the full style: block (stylesOut) and the full
@@ -145,22 +159,32 @@ struct PathEntry {
     bool        isChild;
     std::string parentPath;
     std::string childKey;
+    std::string namePath;   /* generated firmware name, see below */
 };
 
-/* Container types: transparent to ID assignment (children inherit prefix). */
-static bool isContainer(const std::string& type)
+/* A section/row/grid is transparent to its children's generated firmware
+ * names unless it sets `namespace: true`; dpad, button-group and a button
+ * face always are namespaces (widget_ids.py, NAMESPACE_FLAG_TYPES). */
+static bool isTransparentContainer(const std::string& type, const YAML::Node& w)
 {
-    return type == "section" || type == "row" || type == "grid" || type == "dpad";
+    if (type != "section" && type != "row" && type != "grid")
+        return false;
+    bool flag = false;
+    const YAML::Node ns = w["namespace"];
+    return !(ns && ns.IsScalar() && YAML::convert<bool>::decode(ns, flag) && flag);
 }
 
-/* Decoration types: no widget ID, no protocol exchange. */
-static bool isDecoration(const std::string& type)
-{
-    return type == "label" || type == "separator";
-}
-
+/* Mirrors widget_ids.py's _collect(). Every widget map entry gets a path
+ * (issue #43): `<prefix>.<key>`, where the prefix is the parent widget's own
+ * path. Every widget with `widgets:` (containers and button faces alike) is
+ * a namespace for its children, so a path names the whole chain of keys from
+ * the top level: `section.row.leaf`. A container's `namespace:` key does not
+ * change this: it only shapes each widget's name path (namePrefix), the
+ * identifier udisplay-gen generates for firmware, never the wire IDs.
+ * Entries are appended in YAML declaration order, parents first. */
 static void collectPathsRecursive(const YAML::Node& widgets,
                                   const std::string& prefix,
+                                  const std::string& namePrefix,
                                   std::vector<PathEntry>& entries)
 {
     for (auto it = widgets.begin(); it != widgets.end(); ++it) {
@@ -172,44 +196,65 @@ static void collectPathsRecursive(const YAML::Node& widgets,
         if (w["type"] && w["type"].IsScalar())
             type = w["type"].as<std::string>();
 
-        if (isContainer(type)) {
-            if (w["widgets"] && w["widgets"].IsMap())
-                collectPathsRecursive(w["widgets"], prefix, entries);
-            continue;
-        }
-
-        if (isDecoration(type)) continue;
-
         std::string path = prefix.empty() ? key : prefix + "." + key;
-        entries.push_back({ path, !prefix.empty(), prefix, key });
+        std::string namePath = namePrefix.empty() ? key : namePrefix + "." + key;
 
-        /* Recurse (not a flat loop) so a container-typed child (row/grid,
-         * widget-model-redesign Increment 2) is transparent to ID assignment
-         * just like a top-level container — its own grandchildren get IDs
-         * prefixed by this widget's own path, not the container's throwaway
-         * key. This is the exact same walk the top-level `widgets` map gets;
-         * decoration children (label, separator) are skipped by the
-         * isDecoration() check above on the recursive call, mirroring
-         * widget_ids.py's NO_ID_TYPES exclusion so the client and the
-         * offline codegen tool agree on ID numbering for every widget after
-         * this one. */
+        entries.push_back({ path, !prefix.empty(), prefix, key, namePath });
+
         if (w["widgets"] && w["widgets"].IsMap())
-            collectPathsRecursive(w["widgets"], path, entries);
+            collectPathsRecursive(w["widgets"], path,
+                                  isTransparentContainer(type, w) ? namePrefix : namePath,
+                                  entries);
 
         if (type == "button-group" && w["items"] && w["items"].IsMap()) {
             for (auto ii = w["items"].begin();
                  ii != w["items"].end(); ++ii) {
                 std::string itemKey = ii->first.as<std::string>();
-                entries.push_back({ path + "." + itemKey, true, path, itemKey });
+                entries.push_back({ path + "." + itemKey, true, path, itemKey,
+                                    namePath + "." + itemKey });
             }
         }
     }
 }
 
+/* The first name path two or more widgets share, as udisplay-gen
+ * validate's error text (widget_ids.py describe_name_collision()), or ""
+ * if every name is unique. "First" is by first occurrence in declaration
+ * order, matching validate's report order, so both tools name the same
+ * collision. `entries` must still be in declaration order. */
+static std::string firstNameCollision(const std::vector<PathEntry>& entries)
+{
+    std::map<std::string, std::vector<std::string>> byName;
+    std::vector<std::string> order;
+    for (const auto& e : entries) {
+        auto& paths = byName[e.namePath];
+        if (paths.empty()) order.push_back(e.namePath);
+        paths.push_back(e.path);
+    }
+    for (const auto& name : order) {
+        const auto& paths = byName[name];
+        if (paths.size() < 2) continue;
+        std::string msg;
+        for (const auto& p : paths)
+            msg += (msg.empty() ? "" : ", ") + std::string("widgets.") + p;
+        return msg + ": all named '" + name + "' in the generated firmware API; "
+               "rename one, or set `namespace: true` on a section/row/grid that "
+               "separates them";
+    }
+    return {};
+}
+
+/* Every widget's path in YAML declaration order (collectPathsRecursive());
+ * sortedPaths() orders them for ID assignment. */
 static std::vector<PathEntry> collectPaths(const YAML::Node& widgets)
 {
     std::vector<PathEntry> entries;
-    collectPathsRecursive(widgets, {}, entries);
+    collectPathsRecursive(widgets, {}, {}, entries);
+    return entries;
+}
+
+static std::vector<PathEntry> sortedPaths(std::vector<PathEntry> entries)
+{
     std::sort(entries.begin(), entries.end(),
               [](const PathEntry& a, const PathEntry& b) {
                   return a.path < b.path;
@@ -235,7 +280,6 @@ static std::vector<PathEntry> collectPaths(const YAML::Node& widgets)
 static int buildWidget(const std::string& key,
                        const YAML::Node& node,
                        uint8_t widgetId,
-                       const std::string& idPrefix,
                        const std::map<std::string, uint8_t>& idMap,
                        int parentId,
                        QList<WidgetDef>& out,
@@ -279,22 +323,11 @@ static void warnExcludedButtonFaceTypes(const YAML::Node& widgets,
     }
 }
 
-/* idPrefix: the effective ID-path prefix to use when looking up this node's
- * OWN children in idMap, if this node turns out to be a container (row/
- * grid/dpad) — irrelevant otherwise, since every other widget type resolves
- * its own children's ID paths from `key` directly. Container types are
- * transparent to ID assignment (their own name is never a path segment —
- * see isContainer()), so idPrefix must be threaded explicitly rather than
- * derived from `key`: a row/grid reached via a button's face (key =
- * "btn_key.container_key") needs idPrefix = "btn_key" (skipping the
- * container's own throwaway key), while a row/grid reached via ordinary
- * top-level/nested-container recursion needs idPrefix = "" (unchanged
- * through any number of container hops — see collectPathsRecursive's
- * matching isContainer() recursion, which also keeps prefix unchanged). */
+/* key: this node's full ID path. Every child's ID path is `<key>.<child>`
+ * (containers and button faces alike), matching collectPathsRecursive(). */
 static int buildWidget(const std::string& key,
                        const YAML::Node& node,
                        uint8_t widgetId,
-                       const std::string& idPrefix,
                        const std::map<std::string, uint8_t>& idMap,
                        int parentId,
                        QList<WidgetDef>& out,
@@ -535,12 +568,8 @@ static int buildWidget(const std::string& key,
                  ci != node["widgets"].end(); ++ci) {
                 std::string ck = ci->first.as<std::string>();
                 std::string cp = key + "." + ck;
-                uint8_t cid = idMap.count(cp) ? idMap.at(cp) : 0;
-                /* idPrefix = key (the button's own path): if this face
-                 * child is itself a container (row/grid), ITS children's ID
-                 * lookups must skip the container's own throwaway key `ck`
-                 * and use the button's path instead. */
-                int idx = buildWidget(cp, ci->second, cid, key, idMap, myRow, out, diags);
+                uint8_t cid = widgetIdFor(idMap, cp, diags);
+                int idx = buildWidget(cp, ci->second, cid, idMap, myRow, out, diags);
                 out[idx].flex  = parseFlex(ci->second, key, diags);
                 out[idx].align = parseAlign(ci->second, key, "align", kRowGridAligns, diags);
             }
@@ -573,7 +602,7 @@ static int buildWidget(const std::string& key,
                  * buildWidget(), which requires a `type:` key. */
                 WidgetDef item;
                 item.keyPath  = qs(ip);
-                item.widgetId = idMap.count(ip) ? idMap.at(ip) : 0;
+                item.widgetId = widgetIdFor(idMap, ip, diags);
                 item.type     = WidgetType::Button;
                 item.label    = nodeStr(ii->second, "label");
                 item.parentId = myRow;
@@ -606,15 +635,12 @@ static int buildWidget(const std::string& key,
                  ii != node["widgets"].end(); ++ii) {
                 ++itemCount;
                 std::string ik = ii->first.as<std::string>();
-                /* Container transparency: dpad is in isContainer() /
-                 * widget_ids.py's CONTAINER_TYPES, so its own key is never a
-                 * path segment — idPrefix carries through unchanged, same as
-                 * the Row/Grid case below. Dpad items now get full
-                 * type-specific parsing via buildWidget() (they always carry
-                 * an explicit `type:` in YAML, e.g. `type: button`). */
-                std::string idPath = idPrefix.empty() ? ik : idPrefix + "." + ik;
-                uint8_t cid = idMap.count(idPath) ? idMap.at(idPath) : 0;
-                int idx = buildWidget(ik, ii->second, cid, idPrefix, idMap, myRow, out, diags);
+                /* Dpad items get full type-specific parsing via
+                 * buildWidget() (they always carry an explicit `type:` in
+                 * YAML, e.g. `type: button`). */
+                std::string idPath = key + "." + ik;
+                uint8_t cid = widgetIdFor(idMap, idPath, diags);
+                int idx = buildWidget(idPath, ii->second, cid, idMap, myRow, out, diags);
                 out[idx].props[QStringLiteral("position")] = nodeStr(ii->second, "position");
             }
             if (itemCount < 1) {
@@ -634,11 +660,9 @@ static int buildWidget(const std::string& key,
             for (auto ci = node["widgets"].begin();
                  ci != node["widgets"].end(); ++ci) {
                 std::string ck = ci->first.as<std::string>();
-                /* Container transparency: idPrefix carries through unchanged
-                 * from whatever scope this row/grid was reached in. */
-                std::string idPath = idPrefix.empty() ? ck : idPrefix + "." + ck;
-                uint8_t cid = idMap.count(idPath) ? idMap.at(idPath) : 0;
-                int idx = buildWidget(ck, ci->second, cid, idPrefix, idMap, myRow, out, diags);
+                std::string idPath = key + "." + ck;
+                uint8_t cid = widgetIdFor(idMap, idPath, diags);
+                int idx = buildWidget(idPath, ci->second, cid, idMap, myRow, out, diags);
                 out[idx].flex  = parseFlex(ci->second, ck, diags);
                 out[idx].align = parseAlign(ci->second, ck, "align", kRowGridAligns, diags);
                 out[idx].props[QStringLiteral("position")] = nodeStr(ci->second, "position");
@@ -658,14 +682,17 @@ static int buildWidget(const std::string& key,
  *  Top-level list builder
  * ══════════════════════════════════════════════════════════════════════════ */
 
+/* prefix: the ID path of the enclosing section ("" at the top level). */
 static void buildAndAppendWidgets(const YAML::Node& widgets,
+                                   const std::string& prefix,
                                    const std::map<std::string, uint8_t>& idMap,
                                    int parentId,
                                    QList<WidgetDef>& out,
                                    Diags& diags)
 {
     for (auto it = widgets.begin(); it != widgets.end(); ++it) {
-        std::string key  = it->first.as<std::string>();
+        const std::string bareKey = it->first.as<std::string>();
+        const std::string key = prefix.empty() ? bareKey : prefix + "." + bareKey;
         YAML::Node  node = it->second;
         if (!node.IsMap()) {
             diag(diags, Severity::Warning, key, "type",
@@ -680,7 +707,7 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
         if (type == "section") {
             WidgetDef s;
             s.keyPath  = qs(key);
-            s.widgetId = 0;
+            s.widgetId = widgetIdFor(idMap, key, diags);
             s.type     = WidgetType::Section;
             s.label    = nodeStr(node, "label");
             bool collapsible = false;
@@ -692,18 +719,19 @@ static void buildAndAppendWidgets(const YAML::Node& widgets,
             out.append(s);
             int sectionRow = out.size() - 1;
             if (node["widgets"] && node["widgets"].IsMap())
-                buildAndAppendWidgets(node["widgets"], idMap, sectionRow, out, diags);
+                buildAndAppendWidgets(node["widgets"], key, idMap, sectionRow, out, diags);
 
         } else if (type == "row" || type == "grid") {
-            /* Top-level row/grid: idPrefix stays empty for its children.
-             * Its own flex is never used (nothing above a top-level widget
-             * reads its flex weight) — matches original behavior, which
-             * never parsed flex for a top-level row/grid either. */
-            buildWidget(key, node, 0, /*idPrefix=*/{}, idMap, parentId, out, diags);
+            /* Top-level row/grid: its own flex is never used (nothing above
+             * a top-level widget reads its flex weight) — matches original
+             * behavior, which never parsed flex for a top-level row/grid
+             * either. */
+            uint8_t wid = widgetIdFor(idMap, key, diags);
+            buildWidget(key, node, wid, idMap, parentId, out, diags);
 
         } else {
-            uint8_t wid = idMap.count(key) ? idMap.at(key) : 0;
-            int idx = buildWidget(key, node, wid, /*idPrefix=*/{}, idMap, parentId, out, diags);
+            uint8_t wid = widgetIdFor(idMap, key, diags);
+            int idx = buildWidget(key, node, wid, idMap, parentId, out, diags);
             out[idx].flex = parseFlex(node, key, diags);
         }
     }
@@ -846,33 +874,42 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
     }
     const YAML::Node& widgets = doc["widgets"];
 
-    auto entries = collectPaths(widgets);
+    auto declared = collectPaths(widgets);
+    /* Name collisions are reported in declaration order (see
+     * firstNameCollision()), so find one before sorting; the check itself
+     * runs below, after the path-level ones. */
+    const std::string nameCollision = firstNameCollision(declared);
+    auto entries = sortedPaths(std::move(declared));
     if (entries.size() > 240) {
         m_error = QStringLiteral("Too many widget paths (%1); maximum is 240")
                       .arg(static_cast<int>(entries.size()));
         return false;
     }
     /* Duplicate id-paths: two widgets resolving to the same protocol ID.
-     * Containers (section/row/grid) don't contribute their own name to the
-     * path — two same-named leaves under different sibling containers that
-     * share a transparent-prefix ancestor (e.g. two same-named leaves in
-     * two different row/grid children of the same button face) collide
-     * silently here otherwise: idMap[e.path] = nextId++ below would just
-     * overwrite, both ending up with the LAST-written ID, one real ID slot
-     * wasted, and STATE_UPDATE messages cross-applying between two
-     * semantically unrelated widgets. entries is sorted by path (see
-     * collectPaths()), so adjacent duplicates catch every collision in one
-     * pass. */
+     * Every parent's key is a segment of its children's paths, so valid
+     * YAML can't produce one; a key containing a dot (`a.b` next to a
+     * container `a` with a child `b`) still could, and idMap[e.path] =
+     * nextId++ below would then silently overwrite, cross-applying
+     * STATE_UPDATE messages between two unrelated widgets. entries is
+     * sorted by path (see sortedPaths()), so adjacent duplicates catch
+     * every collision in one pass. */
     for (size_t i = 1; i < entries.size(); ++i) {
         if (entries[i].path == entries[i - 1].path) {
             m_error = QStringLiteral(
                 "Duplicate widget ID path '%1' — two widgets resolve to the same "
-                "protocol ID. Check for same-named leaves under different sibling "
-                "containers (row/grid/section, or a button face's nested containers) "
-                "that share a transparent-prefix ancestor.")
+                "protocol ID. Widget keys must not contain '.'.")
                           .arg(qs(entries[i].path));
             return false;
         }
+    }
+    /* Duplicate generated names: two widgets udisplay-gen would emit under
+     * one WIDGET_ID_* / ui.<member> (the same key twice in one naming
+     * scope). Wire IDs would still be distinct, but this YAML can never be
+     * built into firmware, so reject it here too: design mode then catches
+     * it as early as `udisplay-gen validate` does. */
+    if (!nameCollision.empty()) {
+        m_error = qs(nameCollision);
+        return false;
     }
     std::map<std::string, uint8_t> idMap;
     uint8_t nextId = 0x10;
@@ -880,7 +917,7 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
         idMap[e.path] = nextId++;
 
     widgetsOut.clear();
-    buildAndAppendWidgets(widgets, idMap, /*parentId=*/-1, widgetsOut, m_diagnostics);
+    buildAndAppendWidgets(widgets, /*prefix=*/{}, idMap, /*parentId=*/-1, widgetsOut, m_diagnostics);
 
     /* style: name validation — a post-pass over the fully-built flat list,
      * now that stylesOut (the full named-stylesheet registry, parsed before

@@ -9,6 +9,7 @@ import re
 from typing import Optional
 
 from ..merkle import CHUNK_SIZE
+from ..widget_ids import describe_name_collision, name_path_collisions, name_paths
 
 # Practical upper limit on blob chunk count.
 MAX_CHUNK_COUNT = 64
@@ -65,6 +66,47 @@ def _macro_name(key_path: str) -> str:
     Dots and any non-alphanumeric characters become underscores.
     """
     return re.sub(r"[^a-zA-Z0-9]+", "_", key_path).upper()
+
+
+def widget_id_macro_collisions(widget_ids) -> list:
+    """One error per group of widget name paths (top-level and nested) that
+    normalize to the same WIDGET_ID_* name, e.g. `pump_rate` and a face child
+    `pump.rate` (TODO-056). Every backend that emits WIDGET_ID_* constants
+    must reject these: the later definition silently wins otherwise."""
+    by_macro: dict = {}
+    for path in widget_ids:
+        by_macro.setdefault(_macro_name(path), []).append(path)
+    return [
+        "widget name collision: "
+        + ", ".join(repr(p) for p in sorted(paths))
+        + f" all normalize to the same generated constant WIDGET_ID_{macro}"
+        for macro, paths in sorted(by_macro.items())
+        if len(paths) > 1
+    ]
+
+
+def widget_names(widget_ids: dict, widgets_yaml: Optional[dict]) -> dict:
+    """Structural path → name path for every widget in widget_ids: the
+    path generated identifiers are built from (widget_ids.py). Without the
+    YAML tree (a C-header-only caller) every name is its structural path."""
+    if widgets_yaml is None:
+        return {path: path for path in widget_ids}
+    return name_paths(widgets_yaml)
+
+
+def widget_name_errors(widget_ids: dict, widgets_yaml: Optional[dict]) -> list:
+    """Generated-name errors every backend rejects: two widgets sharing one
+    name path, and distinct name paths that normalize to the same
+    WIDGET_ID_* constant (TODO-056)."""
+    errors = []
+    if widgets_yaml is not None:
+        errors += [
+            "widget name collision: " + describe_name_collision(name, paths)
+            for name, paths in name_path_collisions(widgets_yaml)
+        ]
+    return errors + widget_id_macro_collisions(
+        sorted(set(widget_names(widget_ids, widgets_yaml).values()))
+    )
 
 
 def _fn_suffix(key_path: str) -> str:

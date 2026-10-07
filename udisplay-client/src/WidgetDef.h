@@ -9,10 +9,10 @@
  * grid/section layout children, button-group items, dpad items), is its own
  * row in declaration order. `parentId` links a row to its container: -1 for
  * top-level widgets, otherwise the flat-list row index of the parent widget
- * (NOT the parent's widgetId — containers like row/grid/section always have
- * widgetId 0, so multiple sibling containers would collide if parentId were
- * widgetId-keyed; and 0 is itself a valid row index, so it cannot double as
- * the "no parent" sentinel either — that's why -1, not 0, means top-level).
+ * (NOT the parent's widgetId — row indices are what WidgetModel's
+ * children lookup is keyed by; and 0 is itself a valid row index, so it
+ * cannot double as the "no parent" sentinel — that's why -1, not 0, means
+ * top-level).
  * parentId is only valid until the next
  * WidgetModel::setWidgets() call (row indices are reassigned on every reset).
  *
@@ -45,10 +45,10 @@ enum class WidgetType {
     Toggle,
     Text,
     Dropdown,
-    /* Decoration types (no widget ID, no protocol exchange) */
+    /* Decoration types (static: no value, no events) */
     Label,
     Separator,
-    /* Container types (transparent to ID assignment) */
+    /* Container types (their key prefixes their children's ID paths) */
     Section,
     Row,
     Grid,
