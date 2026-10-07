@@ -7,11 +7,14 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Add libudisplay once; each demo's CMakeLists.txt guards against re-adding it.
-set(UDISPLAY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(
-    ${CMAKE_CURRENT_SOURCE_DIR}/../libudisplay
-    ${CMAKE_CURRENT_BINARY_DIR}/libudisplay
-)
+# Skipped when built from the top-level CMakeLists.txt, which already added it.
+if (NOT TARGET udisplay)
+    set(UDISPLAY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(
+        ${CMAKE_CURRENT_SOURCE_DIR}/../libudisplay
+        ${CMAKE_CURRENT_BINARY_DIR}/libudisplay
+    )
+endif()
 
 add_subdirectory(demo01)
 add_subdirectory(demo02)
