@@ -873,8 +873,7 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
     }
     const YAML::Node& widgets = doc["widgets"];
 
-    const auto declared = collectPaths(widgets);
-    auto entries = sortedPaths(declared);
+    auto entries = sortedPaths(collectPaths(widgets));
     if (entries.size() > 240) {
         m_error = QStringLiteral("Too many widget paths (%1); maximum is 240")
                       .arg(static_cast<int>(entries.size()));
@@ -902,7 +901,7 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
      * scope). Wire IDs would still be distinct, but this YAML can never be
      * built into firmware, so reject it here too: design mode then catches
      * it as early as `udisplay-gen validate` does. */
-    const std::string nameCollision = firstNameCollision(declared);
+    const std::string nameCollision = firstNameCollision(entries);
     if (!nameCollision.empty()) {
         m_error = qs(nameCollision);
         return false;
