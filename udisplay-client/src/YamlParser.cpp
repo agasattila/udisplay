@@ -6,6 +6,7 @@
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <array>
+#include <utility>
 #include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
@@ -873,7 +874,12 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
     }
     const YAML::Node& widgets = doc["widgets"];
 
-    auto entries = sortedPaths(collectPaths(widgets));
+    auto declared = collectPaths(widgets);
+    /* Name collisions are reported in declaration order (see
+     * firstNameCollision()), so find one before sorting; the check itself
+     * runs below, after the path-level ones. */
+    const std::string nameCollision = firstNameCollision(declared);
+    auto entries = sortedPaths(std::move(declared));
     if (entries.size() > 240) {
         m_error = QStringLiteral("Too many widget paths (%1); maximum is 240")
                       .arg(static_cast<int>(entries.size()));
@@ -901,7 +907,6 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
      * scope). Wire IDs would still be distinct, but this YAML can never be
      * built into firmware, so reject it here too: design mode then catches
      * it as early as `udisplay-gen validate` does. */
-    const std::string nameCollision = firstNameCollision(entries);
     if (!nameCollision.empty()) {
         m_error = qs(nameCollision);
         return false;
