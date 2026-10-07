@@ -6,6 +6,7 @@ Tested on Ubuntu 24.04 LTS (Noble). Ubuntu 22.04 LTS works with the same package
 ## Contents
 
 - [Quick start](#quick-start)
+- [Top-level build and framework package](#top-level-build-and-framework-package)
 - [udisplay-client (Qt desktop app)](#udisplay-client-qt-desktop-app)
 - [udisplay-gen (Python codegen)](#udisplay-gen-python-codegen)
 - [libudisplay (firmware C library — host build)](#libudisplay-firmware-c-library--host-build)
@@ -44,6 +45,59 @@ cmake --build udisplay-client/build -j$(nproc)
 ```
 
 The binary lands at `udisplay-client/build/udisplay-client`.
+
+---
+
+## Top-level build and framework package
+
+The `CMakeLists.txt` in the repository root builds every desktop component in one tree:
+libudisplay, the TCP demos (demo01–demo03), udisplay-client, and all of their tests. It
+also stages the **uDisplay framework** package: libudisplay, udisplay-gen and the demos as
+sources, with the version patched in. CI runs exactly these commands
+(`.github/workflows/framework-build.yml`), so you can reproduce a release package locally.
+
+```bash
+# udisplay-gen's Python dependencies (the build runs the in-tree udisplay-gen,
+# not whatever is on PATH)
+python3 -m venv .venv
+.venv/bin/pip install -e "./udisplay-gen[dev]"
+
+cmake -B build -DPython3_EXECUTABLE="$PWD/.venv/bin/python" -DUDISPLAY_VERSION=1.2.3
+cmake --build build -j$(nproc)
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+
+# Framework install tree ...
+cmake --install build --prefix stage/udisplay-framework-1.2.3
+# ... or straight to build/package/udisplay-framework-1.2.3.tar.gz
+cpack --config build/CPackConfig.cmake
+```
+
+| Option | Default | Effect |
+|---|---|---|
+| `UDISPLAY_VERSION` | `0.0.0` | `MAJOR.MINOR.PATCH`, compiled into libudisplay's `version.h` and stamped into the packaged udisplay-gen |
+| `UDISPLAY_VERSION_FULL` | `UDISPLAY_VERSION` | Display version with an optional suffix (e.g. `1.2.3-rc1`); used in the package name and `VERSION` file |
+| `UDISPLAY_BUILD_CLIENT` | `ON` | Build udisplay-client (needs Qt 6). Turn off for a Qt-free framework build |
+| `UDISPLAY_BUILD_DEMOS` | `ON` | Build demo01–demo03 |
+| `UDISPLAY_BUILD_TESTS` | `ON` | Build and register all unit tests (gtest, Qt tests, pytest) with CTest |
+
+The package keeps the repository's relative layout, so the libudisplay and demo CMake
+projects inside it build as-is and default to the packaged version:
+
+```text
+udisplay-framework-<version>/
+├── VERSION, README.md, udisplay.schema.json, LICENSES/
+├── cmake/          version helpers (+ the pinned package version)
+├── libudisplay/    sources, without the test suite
+├── udisplay-gen/   pip-installable: pip install ./udisplay-gen
+└── demos/
+```
+
+udisplay-client is an end-user application (AppImage / APK, see its own workflow), so it is
+not part of the framework package. To install it from the top-level build anyway, use
+`cmake --install build --component client`.
+
+The ESP-IDF demos and the Android client are cross builds and stay out of the top-level
+build; the per-component builds below keep working standalone.
 
 ---
 
