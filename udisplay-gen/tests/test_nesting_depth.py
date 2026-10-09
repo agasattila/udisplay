@@ -91,7 +91,7 @@ def test_widget_tree_and_assign_raise_past_max_depth():
     """Callers that skip validate (the backends, assign()) still refuse."""
     with pytest.raises(ValueError, match="nested 11 levels deep"):
         widget_tree(_rows(MAX_NESTING_DEPTH + 1))
-    with pytest.raises(ValueError, match=r"'.*\.leaf\.a' is nested 11 levels deep"):
+    with pytest.raises(ValueError, match=r"\.leaf\.a: nested 11 levels deep"):
         assign(_rows(MAX_NESTING_DEPTH, BUTTON_GROUP))
 
 
@@ -118,3 +118,14 @@ def test_cli_accepts_max_depth_yaml(tmp_path):
     src.write_text(_yaml(MAX_NESTING_DEPTH))
     result = CliRunner().invoke(cli, ["validate", str(src)])
     assert result.exit_code == 0, result.output
+
+
+def test_alias_cycle_rejected(tmp_path):
+    """An alias to an enclosing anchor loads as a cyclic dict; without the
+    cap, every recursive walk over it would never end."""
+    src = tmp_path / "cycle.yaml"
+    src.write_text("device:\n  name: d\nwidgets:\n"
+                   "  loop: &loop\n    type: row\n    widgets:\n      again: *loop\n")
+    result = CliRunner().invoke(cli, ["validate", str(src)])
+    assert result.exit_code == 1
+    assert ("widgets.loop" + ".again" * 10 + ": nested 11 levels deep") in result.output

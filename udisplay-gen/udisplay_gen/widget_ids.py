@@ -83,6 +83,13 @@ def _type_str(widget: dict) -> str:
     return wtype
 
 
+def _depth_message(path: str, depth: int) -> str:
+    """The error text for a widget nested past MAX_NESTING_DEPTH, verbatim
+    the client's (YamlParser.cpp nestingDepthError())."""
+    return (f"widgets.{path}: nested {depth} levels deep; the maximum "
+            f"widget nesting depth is {MAX_NESTING_DEPTH}")
+
+
 def nesting_depth_error(widgets: dict) -> str | None:
     """The error text for the first widget, in walk() order, nested deeper
     than MAX_NESTING_DEPTH, or None if none is. Walks the same edges as
@@ -100,8 +107,7 @@ def nesting_depth_error(widgets: dict) -> str | None:
     while stack:
         path, widget, depth = stack.pop()
         if depth > MAX_NESTING_DEPTH:
-            return (f"widgets.{path}: nested {depth} levels deep; the maximum "
-                    f"widget nesting depth is {MAX_NESTING_DEPTH}")
+            return _depth_message(path, depth)
         children = entries(widget.get("widgets"), path, depth + 1)
         items = widget.get("items")
         if widget.get("type") == "button-group" and isinstance(items, dict):
@@ -126,10 +132,7 @@ def widget_tree(widgets: dict, prefix: str = "", name_prefix: str = "",
             continue
         path = f"{prefix}.{key}" if prefix else key
         if depth > MAX_NESTING_DEPTH:
-            raise ValueError(
-                f"Widget '{path}' is nested {depth} levels deep; the maximum "
-                f"widget nesting depth is {MAX_NESTING_DEPTH}."
-            )
+            raise ValueError(_depth_message(path, depth))
         name_path = f"{name_prefix}.{key}" if name_prefix else key
         transparent = (widget.get("type", "") in NAMESPACE_FLAG_TYPES
                        and widget.get("namespace") is not True)
@@ -137,12 +140,9 @@ def widget_tree(widgets: dict, prefix: str = "", name_prefix: str = "",
                                name_prefix if transparent else name_path,
                                depth + 1)
         if widget.get("type", "") == "button-group":
-            if depth + 1 > MAX_NESTING_DEPTH and widget.get("items"):
-                raise ValueError(
-                    f"Widget '{path}.{next(iter(widget['items']))}' is nested "
-                    f"{depth + 1} levels deep; the maximum widget nesting depth "
-                    f"is {MAX_NESTING_DEPTH}."
-                )
+            items = widget.get("items")
+            if depth + 1 > MAX_NESTING_DEPTH and isinstance(items, dict) and items:
+                raise ValueError(_depth_message(f"{path}.{next(iter(items))}", depth + 1))
             children += [
                 WidgetNode(item_key, f"{path}.{item_key}", (), "button-group-item",
                            f"{name_path}.{item_key}", False,
