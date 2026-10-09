@@ -121,7 +121,9 @@ test.yml            ctest on the build tree
 ```
 
 The build tree is passed to the downstream jobs as an artifact, so tests and packaging
-reuse the same binaries instead of recompiling. Tags `vX.Y.Z[-suffix]` set
+reuse the same binaries instead of recompiling. The jobs that need the desktop toolchain
+(Qt, apt packages, udisplay-gen venv) share it through the
+[`setup-desktop`](../.github/actions/setup-desktop/action.yml) composite action. Tags `vX.Y.Z[-suffix]` set
 `UDISPLAY_VERSION`/`UDISPLAY_VERSION_FULL`; other `v*` tags fail CI, and any other ref
 builds as `0.0.0-<short sha>`. Once all packaging jobs pass, a tag push creates a GitHub
 Release with the client archive and the framework package.
