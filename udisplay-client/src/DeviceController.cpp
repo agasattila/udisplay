@@ -347,12 +347,10 @@ QVariantMap DeviceController::effectiveStyleFor(int row)
      * button-group), falling back to the app-wide active style. The walk
      * cannot cycle — parentId always points to a lower flat-list row, by
      * construction of YamlParser's top-down recursive build — but it is
-     * still capped defensively, consistent with TODO-036's proposed nesting
-     * limit for the (separate, still-open) parse-time recursion guard. */
-    static constexpr int kMaxStyleAncestorDepth = 10;
-
+     * still capped defensively. The cap is the parser's own nesting limit,
+     * so a parsed widget's whole ancestor chain (itself included) fits. */
     int currentRow = row;
-    for (int depth = 0; currentRow >= 0 && depth < kMaxStyleAncestorDepth; ++depth) {
+    for (int depth = 0; currentRow >= 0 && depth < kMaxWidgetNestingDepth; ++depth) {
         QModelIndex idx = m_model.index(currentRow);
         if (!idx.isValid()) break;
 

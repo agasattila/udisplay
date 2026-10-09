@@ -10,6 +10,9 @@
  *   2. Sort alphabetically.
  *   3. Assign IDs 0x10, 0x11, ... in sort order.
  *
+ * Like udisplay-gen, it rejects documents with more than 240 widgets or with
+ * a widget nested deeper than kMaxWidgetNestingDepth (WidgetDef.h).
+ *
  * Device name and version are returned via out-parameters.
  */
 #pragma once

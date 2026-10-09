@@ -159,10 +159,11 @@ public:
      * `row`, walking the parentId ancestor chain: its own explicit `style:`
      * name if set (props["style"]), else the nearest ancestor's `style:`
      * (row/grid/dpad/section/button-group may all carry one), else the
-     * app-wide activeStyle. The walk is capped at kMaxStyleAncestorDepth
-     * levels — see docs/designs/container-style-cascading.md — a defensive
-     * bound on this one walk, independent of TODO-036's still-open parse-time
-     * nesting cap. Defensive against an invalid/out-of-range row or a style
+     * app-wide activeStyle. The walk is capped at kMaxWidgetNestingDepth
+     * levels (WidgetDef.h) — see docs/designs/container-style-cascading.md.
+     * The parser rejects deeper documents, so the walk always reaches a
+     * parsed widget's top-level ancestor; the cap only guards a list that
+     * did not come from the parser. Defensive against an invalid/out-of-range row or a style
      * name absent from m_styles (both should be unreachable from a
      * successfully-parsed YAML — the parser rejects an unknown stylesheet
      * name at Severity::Error — but never crash regardless). QML bindings
