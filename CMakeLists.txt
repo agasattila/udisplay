@@ -227,6 +227,7 @@ install(
 install(
     FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/udisplay-gen/pyproject.toml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/udisplay-gen/README.md"
         "${CMAKE_CURRENT_SOURCE_DIR}/udisplay-gen/LICENSE"
     DESTINATION "udisplay-gen"
     COMPONENT framework
