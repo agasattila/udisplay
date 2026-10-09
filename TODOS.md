@@ -26,8 +26,9 @@ for wider distribution, not preemptively.
 permits JDWP debugger attach and `adb run-as` shell access on any device the APK is
 installed on. Accepted for v1: sideload-only hobbyist tool, no credentials/user data
 handled client-side (it talks to the user's own uDisplay device over local
-network/BLE), uploaded as a public 30-day CI artifact on this already-public repo.
-Revisit this specifically (not just signing) if the threat model ever changes.
+network/BLE), uploaded as a public 30-day CI artifact on this already-public repo and,
+until v1.0, attached to each tagged GitHub Release. Revisit this specifically (not just
+signing) if the threat model ever changes.
 
 ### TODO-051: Multi-ABI matrix build for udisplay-client Android APK
 

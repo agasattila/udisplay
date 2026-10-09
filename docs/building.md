@@ -115,7 +115,7 @@ ci.yml: Desktop build-all (top-level CMake build, client included)
    ▼
 test.yml            ctest on the build tree
    │
-   ├─► build-appimage.yml   cmake --install --component client -> tar.gz + AppImage
+   ├─► build-appimage.yml   cmake --install --component client -> AppImage
    ├─► build-framework.yml  cmake --install --component framework -> udisplay-framework-<version>.tar.gz
    └─► build-android.yml    own Android cross build -> arm64-v8a debug APK
 ```
@@ -126,7 +126,22 @@ reuse the same binaries instead of recompiling. The jobs that need the desktop t
 [`setup-desktop`](../.github/actions/setup-desktop/action.yml) composite action. Tags `vX.Y.Z[-suffix]` set
 `UDISPLAY_VERSION`/`UDISPLAY_VERSION_FULL`; other `v*` tags fail CI, and any other ref
 builds as `0.0.0-<short sha>`. Once all packaging jobs pass, a tag push creates a GitHub
-Release with the client archive and the framework package.
+Release with the AppImage, the debug APK and the framework package. The AppImage is the
+only Linux client download: the bare binary links against the CI runner's libraries and
+isn't portable to other distributions.
+
+A CMake build tree isn't relocatable, so reusing it across jobs assumes every job that
+restores it has the same environment as the build job:
+
+- the same runner image and architecture (`ubuntu-24.04`, x86_64), so the same apt
+  packages, system libraries and compiler;
+- the same workspace path (GitHub-hosted runners always use the same one);
+- the same Qt version and install path (one `qt-version` in `ci.yml`, installed by
+  `setup-desktop`);
+- the same udisplay-gen venv path (`.venv/` in the workspace, created by `setup-desktop`).
+
+Moving some jobs to self-hosted runners, or changing the runner image or Qt setup for
+only some of them, breaks this. Change all of them together.
 
 ---
 
@@ -409,7 +424,8 @@ If you just want an APK to sideload instead of building locally, CI already buil
 [`build-android.yml`](../.github/workflows/build-android.yml) produces an
 arm64-v8a debug APK as a workflow artifact on every CI run whose tests pass (`main`, `v*`
 tags, pull requests; Actions tab, artifact `udisplay-client-android-arm64-v8a-<sha>`
-containing `uDisplay-<sha>-arm64-v8a-debug.apk`, retained 30 days). It's debug-signed for sideloading only — see `TODOS.md` for the
+containing `uDisplay-<version>-arm64-v8a-debug.apk`, retained 30 days), and attaches it
+to the GitHub Release for each `vX.Y.Z` tag. It's debug-signed for sideloading only — see `TODOS.md` for the
 signing/distribution tradeoff. The manual steps below are for local development.
 
 1. Install the Qt for Android toolchain from the Qt online installer (the apt packages do
