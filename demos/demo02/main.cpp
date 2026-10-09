@@ -17,7 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 #include "demo_tcp.h"
 

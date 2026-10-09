@@ -78,7 +78,7 @@ cpack --config build/CPackConfig.cmake
 
 | Option | Default | Effect |
 |---|---|---|
-| `UDISPLAY_VERSION` | `0.0.0` | `MAJOR.MINOR.PATCH`, compiled into libudisplay's `version.h` and stamped into the packaged udisplay-gen |
+| `UDISPLAY_VERSION` | `0.0.0` | `MAJOR.MINOR.PATCH`, compiled into libudisplay's version macros (`libudisplay/udisplay.h`) and stamped into the packaged libudisplay header and udisplay-gen |
 | `UDISPLAY_VERSION_FULL` | `UDISPLAY_VERSION` | Display version with an optional suffix (e.g. `1.2.3-rc1`); used in the package name and `VERSION` file |
 | `UDISPLAY_BUILD_CLIENT` | `ON` | Build udisplay-client (needs Qt 6). Turn off for a Qt-free framework build |
 | `UDISPLAY_BUILD_DEMOS` | `ON` | Build demo01–demo03 |
@@ -290,7 +290,7 @@ with a digit). It prefixes generated widget-ID macros and blob data arrays
 (`WIDGET_ID_*` → `BLE_WIDGET_ID_*`, `UDISPLAY_MERKLE_ROOT` → `BLE_UDISPLAY_MERKLE_ROOT`)
 and the bind/init surface (`udisplay_ui_init` → `udisplay_ble_ui_init`, and for
 `--lang cpp`, `namespace udisplay_ui` → `namespace udisplay_ble_ui`) — everything else
-(the core `udisplay_*` functions in `udisplay.h`) takes the same `udisplay_t* ctx` for
+(the core `udisplay_*` functions in `libudisplay/udisplay.h`) takes the same `udisplay_t* ctx` for
 every instance regardless of namespace.
 
 ### Run tests
@@ -325,6 +325,22 @@ cmake -B build .
 cmake --build build -j$(nproc)
 cd build && ctest --output-on-failure
 ```
+
+### Using libudisplay
+
+The public header lives under a `libudisplay/` prefix: the include directory is
+`libudisplay/include`, and firmware includes
+
+```c
+#include "libudisplay/udisplay.h"
+```
+
+That header also defines the version macros (`UDISPLAY_VERSION_MAJOR`/`_MINOR`/`_PATCH`,
+`UDISPLAY_VERSION_STRING`, `UDISPLAY_VERSION` and `UDISPLAY_VERSION_ENCODE()`); there is no
+separate version header. In a framework package the header carries the release version; in
+a git checkout it defaults to `0.0.0`. A CMake build (host or ESP-IDF) also passes the
+configured `UDISPLAY_VERSION`/`UDISPLAY_VERSION_FULL` to libudisplay and its consumers as
+compile definitions, which take precedence over the header defaults.
 
 ---
 

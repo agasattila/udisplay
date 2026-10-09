@@ -14,7 +14,7 @@
  * exclusive per connection.
  */
 #include <gtest/gtest.h>
-#include "../include/udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "protocol.h"
 #include <cstring>
 #include <vector>

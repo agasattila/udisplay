@@ -532,7 +532,7 @@ class TestProtoVersionInSync:
         import re
         from udisplay_gen.runtime import udisplay_runtime as rt
         root = pathlib.Path(__file__).resolve().parents[2]
-        header = (root / "libudisplay" / "include" / "udisplay.h").read_text()
+        header = (root / "libudisplay" / "include" / "libudisplay" / "udisplay.h").read_text()
         m = re.search(r"#define UDISPLAY_PROTO_VERSION\s+0x([0-9A-Fa-f]+)u", header)
         assert m, "UDISPLAY_PROTO_VERSION not found in udisplay.h"
         vectors = json.loads((root / "tests" / "protocol_vectors.json").read_text())

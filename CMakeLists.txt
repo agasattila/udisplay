@@ -174,6 +174,38 @@ udisplay_write_if_changed(
     "${UDISPLAY_FRAMEWORK_STAGE_DIR}/udisplay-gen/udisplay_gen/__init__.py"
     "${_gen_init_content}")
 
+# libudisplay's main header carries the version as #ifndef-guarded defaults
+# (0.0.0 in git); stamp the framework version into them, so a consumer that
+# only includes "libudisplay/udisplay.h" (no CMake compile definitions)
+# still sees the release version.
+set(_lib_header_rel "include/libudisplay/udisplay.h")
+set(_lib_header "${CMAKE_CURRENT_SOURCE_DIR}/libudisplay/${_lib_header_rel}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_lib_header}")
+file(READ "${_lib_header}" _lib_header_content)
+foreach(_pair
+        "MAJOR=${UDISPLAY_VERSION_MAJOR}"
+        "MINOR=${UDISPLAY_VERSION_MINOR}"
+        "PATCH=${UDISPLAY_VERSION_PATCH}"
+        "STRING=\"${UDISPLAY_VERSION_FULL}\"")
+    string(REGEX MATCH "^([A-Z]+)=(.*)$" _ "${_pair}")
+    set(_name "UDISPLAY_VERSION_${CMAKE_MATCH_1}")
+    set(_value "${CMAKE_MATCH_2}")
+    set(_regex "\n#define ${_name} [^\n]*\n")
+    string(REGEX MATCHALL "${_regex}" _matches "${_lib_header_content}")
+    list(LENGTH _matches _count)
+    if(NOT _count EQUAL 1)
+        message(FATAL_ERROR
+            "Expected exactly one '#define ${_name} ...' line in "
+            "${_lib_header} to patch, found ${_count}")
+    endif()
+    string(REGEX REPLACE "${_regex}"
+        "\n#define ${_name} ${_value}\n"
+        _lib_header_content "${_lib_header_content}")
+endforeach()
+udisplay_write_if_changed(
+    "${UDISPLAY_FRAMEWORK_STAGE_DIR}/libudisplay/${_lib_header_rel}"
+    "${_lib_header_content}")
+
 # Local build/editor/cache leftovers never belong in the package, even when
 # installing from a working tree rather than a clean checkout.
 set(_framework_source_excludes
@@ -214,14 +246,20 @@ install(
     COMPONENT framework
 )
 
-# libudisplay without its gtest suite; its CMakeLists.txt skips test/ when
-# the directory is absent.
+# libudisplay without its gtest suite (its CMakeLists.txt skips test/ when
+# the directory is absent), with the version-stamped main header.
 install(
     DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/libudisplay/"
     DESTINATION "libudisplay"
     COMPONENT framework
     ${_framework_source_excludes}
     REGEX "/libudisplay/test$" EXCLUDE
+    REGEX "/libudisplay/include/libudisplay/udisplay\\.h$" EXCLUDE
+)
+install(
+    FILES "${UDISPLAY_FRAMEWORK_STAGE_DIR}/libudisplay/${_lib_header_rel}"
+    DESTINATION "libudisplay/include/libudisplay"
+    COMPONENT framework
 )
 
 install(

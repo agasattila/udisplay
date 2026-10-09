@@ -30,7 +30,7 @@ message(STATUS
 
 # ── Git-derived display version (udisplay-client UI only) ──────────────────
 # Distinct from UDISPLAY_VERSION_FULL (the numeric MAJOR.MINOR.PATCH consumed
-# by libudisplay's firmware version.h) so this never leaks into the ESP-IDF
+# by libudisplay's version macros) so this never leaks into the ESP-IDF
 # build path. Exact tag match -> use the tag as-is. Otherwise ->
 # v0.0.0-<short-hash>. git unavailable / not a repo -> v0.0.0-unknown.
 #

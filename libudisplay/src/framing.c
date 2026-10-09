@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Attila Agas
 
 #include "framing.h"
-#include "../include/udisplay.h"
+#include "libudisplay/udisplay.h"
 #include <string.h>
 
 /* ── BLE inbound reassembly ─────────────────────────────────────────────── */

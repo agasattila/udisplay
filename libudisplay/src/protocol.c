@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Attila Agas
 
 #include "protocol.h"
-#include "../include/udisplay.h"
+#include "libudisplay/udisplay.h"
 #include <string.h>
 
 /* ── Little-endian helpers ───────────────────────────────────────────────── */

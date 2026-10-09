@@ -2,16 +2,15 @@ cmake_minimum_required(VERSION 3.16)
 
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/uDisplayVersion.cmake")
 
-set(UDISPLAY_GENERATED_DIR
-    "${CMAKE_CURRENT_BINARY_DIR}/generated"
+# The configured version reaches libudisplay and everything that links it
+# as compile definitions, overriding the defaults in
+# include/libudisplay/udisplay.h (see the Version section there).
+set(UDISPLAY_VERSION_DEFINITIONS
+    "UDISPLAY_VERSION_MAJOR=${UDISPLAY_VERSION_MAJOR}"
+    "UDISPLAY_VERSION_MINOR=${UDISPLAY_VERSION_MINOR}"
+    "UDISPLAY_VERSION_PATCH=${UDISPLAY_VERSION_PATCH}"
+    "UDISPLAY_VERSION_STRING=\"${UDISPLAY_VERSION_FULL}\""
 )
-
-configure_file(
-    "${CMAKE_CURRENT_LIST_DIR}/include/version.h.in"
-    "${UDISPLAY_GENERATED_DIR}/udisplay/version.h"
-    @ONLY
-)
-
 
 if(DEFINED IDF_VERSION_MAJOR)
     # ── ESP-IDF component build ───────────────────────────────────────────
@@ -23,20 +22,15 @@ if(DEFINED IDF_VERSION_MAJOR)
             "src/udisplay.c"
         INCLUDE_DIRS
             "include"
-            "${UDISPLAY_GENERATED_DIR}"
         PRIV_INCLUDE_DIRS
             "src"
+    )
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC
+        ${UDISPLAY_VERSION_DEFINITIONS}
     )
 else()
     # ── Standalone build (tests / host development) ───────────────────────
     project(udisplay VERSION ${UDISPLAY_VERSION} LANGUAGES C CXX)
-
-    # configure_file(
-    #     "${CMAKE_CURRENT_SOURCE_DIR}/include/version.h.in"
-    #     "${CMAKE_CURRENT_BINARY_DIR}/generated/version.h"
-    #     @ONLY
-    # )
-
 
     set(CMAKE_C_STANDARD 11)
     set(CMAKE_CXX_STANDARD 14)
@@ -52,9 +46,11 @@ else()
     target_include_directories(udisplay
         PUBLIC  
             include
-            "${UDISPLAY_GENERATED_DIR}"
         PRIVATE 
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_compile_definitions(udisplay PUBLIC
+        ${UDISPLAY_VERSION_DEFINITIONS}
     )
     target_compile_options(udisplay PRIVATE
         $<$<COMPILE_LANG_AND_ID:C,GNU,Clang>:-Wall -Wextra -Wpedantic>

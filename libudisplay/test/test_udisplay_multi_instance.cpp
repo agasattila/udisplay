@@ -8,7 +8,7 @@
  * separate write callbacks.
  */
 #include <gtest/gtest.h>
-#include "../include/udisplay.h"
+#include "libudisplay/udisplay.h"
 #include <cstring>
 #include <vector>
 

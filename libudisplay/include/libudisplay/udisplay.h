@@ -76,7 +76,45 @@
 extern "C" {
 #endif
 
-// Query library version
+/* ── Version ─────────────────────────────────────────────────────────────── */
+
+/*
+ * libudisplay release version. A framework package (the top-level CMake
+ * build's `cmake --install`) has its release version patched into the
+ * defaults below; a git checkout says 0.0.0. A CMake build of libudisplay
+ * also passes its configured version (UDISPLAY_VERSION /
+ * UDISPLAY_VERSION_FULL) to the library and its consumers as compile
+ * definitions, which take precedence over these defaults.
+ *
+ * Example version guard:
+ *
+ *   #if UDISPLAY_VERSION >= UDISPLAY_VERSION_ENCODE(1, 2, 0)
+ *       // API available since 1.2.0
+ *   #endif
+ */
+#ifndef UDISPLAY_VERSION_MAJOR
+#define UDISPLAY_VERSION_MAJOR 0
+#endif
+#ifndef UDISPLAY_VERSION_MINOR
+#define UDISPLAY_VERSION_MINOR 0
+#endif
+#ifndef UDISPLAY_VERSION_PATCH
+#define UDISPLAY_VERSION_PATCH 0
+#endif
+#ifndef UDISPLAY_VERSION_STRING
+#define UDISPLAY_VERSION_STRING "0.0.0"
+#endif
+
+#define UDISPLAY_VERSION_ENCODE(major, minor, patch) \
+    (((major) * 10000) + ((minor) * 100) + (patch))
+
+#define UDISPLAY_VERSION \
+    UDISPLAY_VERSION_ENCODE( \
+        UDISPLAY_VERSION_MAJOR, \
+        UDISPLAY_VERSION_MINOR, \
+        UDISPLAY_VERSION_PATCH)
+
+/** Version string of the compiled library (UDISPLAY_VERSION_STRING). */
 const char *udisplay_version(void);
 
 /* ── Constants ───────────────────────────────────────────────────────────── */

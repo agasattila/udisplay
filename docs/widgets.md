@@ -176,7 +176,7 @@ temp_display:
 **Generated C API:**
 
 ```c
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.h"
 
 extern udisplay_t g_ctx; /* one instance per live connection — see udisplay.h */
@@ -199,7 +199,7 @@ stores them as raw function pointers; adding `--modern` switches every handler t
 `button` below). Setters are unaffected by that flag — identical in both variants.
 
 ```cpp
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 
 using namespace udisplay_ui;
@@ -259,7 +259,7 @@ power_btn:
 **Generated C API:**
 
 ```c
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.h"
 
 extern udisplay_t g_ctx;
@@ -275,7 +275,7 @@ void someUpdateFunction(uint8_t active) {
 **Generated C++ API:**
 
 ```cpp
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 
 using namespace udisplay_ui;
@@ -327,7 +327,7 @@ status_rgb:
 **Generated C API:**
 
 ```c
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.h"
 
 extern udisplay_t g_ctx;
@@ -342,7 +342,7 @@ void someUpdateFunction(int32_t rgb) {
 **Generated C++ API:**
 
 ```cpp
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 
 using namespace udisplay_ui;
@@ -472,7 +472,7 @@ No setter — the device does not push state to buttons. All three handlers
 wire up only the ones you need:
 
 ```c
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.h"
 
 static udisplay_t g_ctx;
@@ -501,7 +501,7 @@ handlers require `--lang cpp --modern` — the plain `--lang cpp` build stores h
 as raw function pointers, which a capturing lambda can't convert to.
 
 ```cpp
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 
 using namespace udisplay_ui;
@@ -602,7 +602,7 @@ all. The symbolic item values are the items' own widget-ID macros
 also gets three handlers; wire up only the ones you need:
 
 ```c
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.h"
 
 static udisplay_t g_ctx;
@@ -655,7 +655,7 @@ plus a scoped `Item` enum (the values are the items' widget IDs) and
 `button` above for why).
 
 ```cpp
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 
 using namespace udisplay_ui;
@@ -735,7 +735,7 @@ rate_slider:
 Clamp, update state, and echo the accepted value back:
 
 ```c
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.h"
 
 static udisplay_t g_ctx;
@@ -759,7 +759,7 @@ static const udisplay_ui_handlers_t g_handlers = {
 **Generated C++ API:**
 
 ```cpp
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 
 using namespace udisplay_ui;
@@ -813,7 +813,7 @@ enable_toggle:
 Update state, then echo the confirmed state back:
 
 ```c
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.h"
 
 static udisplay_t g_ctx;
@@ -835,7 +835,7 @@ static const udisplay_ui_handlers_t g_handlers = {
 **Generated C++ API:**
 
 ```cpp
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 
 using namespace udisplay_ui;
@@ -908,7 +908,7 @@ status_display:
 **Generated C API:**
 
 ```c
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.h"
 
 extern udisplay_t g_ctx;
@@ -936,7 +936,7 @@ static const udisplay_ui_handlers_t g_handlers = {
 **Generated C++ API:**
 
 ```cpp
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 
 using namespace udisplay_ui;
@@ -1020,7 +1020,7 @@ Per-item index constants (`WIFI_MODE_STA`, `WIFI_MODE_AP`, ...) let you avoid
 hardcoding indices on either side:
 
 ```c
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.h"
 
 static udisplay_t g_ctx;
@@ -1045,7 +1045,7 @@ Dropdowns get their own derived class with a scoped `Option` enum instead of the
 API's `#define` index constants:
 
 ```cpp
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 
 using namespace udisplay_ui;

@@ -551,7 +551,7 @@ def test_handler_for_type_text_ro_is_none():
 
 def test_header_includes_udisplay_h(full_vocab_yaml):
     header = _make_header(full_vocab_yaml)
-    assert '#include "udisplay.h"' in header
+    assert '#include "libudisplay/udisplay.h"' in header
 
 
 def test_header_setter_display(full_vocab_yaml):
@@ -740,7 +740,7 @@ def test_cli_lang_c_explicit(minimal_yaml, tmp_path):
     result = runner.invoke(cli, ["build", str(minimal_yaml), "-o", str(tmp_path), "--lang", "c"])
     assert result.exit_code == 0, result.output
     header = (tmp_path / "udisplay_ui.h").read_text()
-    assert '#include "udisplay.h"' in header
+    assert '#include "libudisplay/udisplay.h"' in header
 
 
 def test_cli_cpp_produces_hpp(minimal_yaml, tmp_path):
@@ -1437,7 +1437,7 @@ def _parse_udisplay_config_t_fields() -> set:
     """Parse udisplay_config_t's field names directly out of udisplay.h."""
     header_path = (
         pathlib.Path(__file__).resolve().parents[2]
-        / "libudisplay" / "include" / "udisplay.h"
+        / "libudisplay" / "include" / "libudisplay" / "udisplay.h"
     )
     text = header_path.read_text()
     # [^{}]* (not .*?) is deliberate: udisplay_config_t's body has no nested

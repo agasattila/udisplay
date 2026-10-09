@@ -11,7 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "demo_tcp.h"
 
 #define TICK_MS 100

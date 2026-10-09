@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#include "../include/udisplay.h" /* chunk_server_t is defined there — see the
+#include "libudisplay/udisplay.h" /* chunk_server_t is defined there — see the
                                      "Internal state layout" comment in udisplay.h
                                      for why it lives in the public header. */
 

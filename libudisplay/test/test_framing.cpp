@@ -7,7 +7,7 @@
  */
 #include <gtest/gtest.h>
 #include "framing.h"
-#include "../include/udisplay.h"
+#include "libudisplay/udisplay.h"
 #include <cstring>
 #include <vector>
 

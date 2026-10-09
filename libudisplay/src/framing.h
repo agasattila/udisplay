@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#include "../include/udisplay.h" /* ble_rx_t / tcp_rx_t are defined there — see the
+#include "libudisplay/udisplay.h" /* ble_rx_t / tcp_rx_t are defined there — see the
                                      "Internal state layout" comment in udisplay.h
                                      for why they live in the public header. */
 
