@@ -140,6 +140,9 @@ restores it has the same environment as the build job:
   `setup-desktop`);
 - the same udisplay-gen venv path (`.venv/` in the workspace, created by `setup-desktop`).
 
+The runner image label is not a pin: GitHub updates `ubuntu-24.04` on a rolling basis, so
+jobs within one run normally match, but a downstream job re-run days later can see newer
+packages than the build job did. If a re-run fails oddly, re-run the whole workflow.
 Moving some jobs to self-hosted runners, or changing the runner image or Qt setup for
 only some of them, breaks this. Change all of them together.
 

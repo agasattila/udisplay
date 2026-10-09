@@ -22,10 +22,12 @@
 # that restores it running on the same runner image (ubuntu-24.04, x86_64)
 # with the same workspace path, the same Qt version and install path
 # (setup-desktop), the same apt packages and toolchain, and the same
-# udisplay-gen venv path. GitHub-hosted runners guarantee the workspace path;
-# the rest is pinned here and in setup-desktop. Self-hosted runners, or a
-# runner/Qt change in only some jobs, would break this. See "CI" in
-# docs/building.md.
+# udisplay-gen venv path. GitHub-hosted runners guarantee the workspace path,
+# and Qt and the venv are set up the same way by setup-desktop. The runner
+# image itself is not pinned: ubuntu-24.04 gets rolling updates, so a job
+# re-run days later may see newer packages than the build job did.
+# Self-hosted runners, or a runner/Qt change in only some jobs, would break
+# this. See "CI" in docs/building.md.
 
 name: CI
 
