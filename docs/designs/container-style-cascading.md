@@ -82,7 +82,9 @@ Approach A — smallest diff, reuses a pattern this codebase already trusts (sam
   open; this cap is a local defensive bound on this specific runtime walk, not a substitute
   for TODO-036's parse-time fix). A widget nested deeper than 10 containers falls back to
   `activeStyle` rather than walking further — matches "safe ancestor-walk depth limit,
-  consistent with TODO-036" from the issue.
+  consistent with TODO-036" from the issue. (Update, issue #24: TODO-036 landed with the
+  same limit, `kMaxWidgetNestingDepth` = 10, which this walk now uses, so the parser
+  rejects any document deep enough to reach the fallback.)
 - **`style:` on transparent containers:** lift the rejection for `row`/`grid`/`dpad` (they
   become valid cascade roots; their own rendering is unaffected — still `color:"transparent"`,
   no own chrome). `button` stays rejected — not a general subtree container.

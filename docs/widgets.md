@@ -76,6 +76,12 @@ widgets:
 - Keys must be **lowercase snake_case** identifiers matching `^[a-z][a-z0-9_]*$`
 - At least one widget is required
 - Maximum **240 widgets** per device (IDs `0x10`–`0xFF`)
+- Maximum nesting depth of **10**: the number of keys in a widget's path, so
+  a top-level widget is at depth 1, a widget inside a top-level row at
+  depth 2, and a button-group item one deeper than its group. Every
+  `widgets:` map counts (section, row, grid, dpad, button face), whether or
+  not the container sets `namespace: true`. `udisplay-gen validate` and the
+  client both reject anything deeper, naming the first widget past the limit
 - Widgets are rendered top-to-bottom in declaration order (v1 layout)
 - Widget IDs are assigned alphabetically by key path — not by YAML order
 
@@ -1522,7 +1528,8 @@ combined freely.
 
 A `style:` on a container (`row`, `grid`, `dpad`, `section`, `button-group`, or
 `button`) also cascades to descendant widgets that have no `style:` of their
-own, at any nesting depth (up to a defensive 10-level ancestor-walk cap).
+own, at any nesting depth (up to the maximum nesting depth of 10, see
+[`widgets` block](#widgets-block)).
 Resolution order for any given widget is: **its own explicit `style:`, else
 the nearest styled ancestor's `style:`, else the app-wide active theme.**
 

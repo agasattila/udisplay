@@ -591,6 +591,7 @@ design after V1 widget system expansion (TODO-016/017/018/009) is proven in prod
 ---
 
 ### TODO-036: Cap recursion depth for nested row/grid/section/button-children
+**Status:** ✅ DONE — issue #24: maximum nesting depth 10 (keys in a widget's structural path; top level = 1, button-group items count). The client checks it in `collectPathsRecursive()` rather than threading a counter through `buildWidget()`/`buildAndAppendWidgets()`: that walk runs first, follows a superset of their edges and stops at the cap, so they only ever see a bounded tree (it also ends alias cycles, which recursed forever). `WidgetDump` stops at the same depth and the style cascade's walk uses the same `kMaxWidgetNestingDepth`. `udisplay-gen validate` rejects the same documents with an iterative walk that runs before the line map, jsonschema (whose `oneOf` made deep documents effectively hang) and the semantic checks; `widget_tree()` raises past the cap. `nesting_depth_fixtures` in `tests/protocol_vectors.json` cross-check both tools.
 **What:** Add a depth counter (parameter or thread-local) threaded through
 `YamlParser.cpp`'s `buildWidget()`/`buildAndAppendWidgets()` recursion and
 `WidgetDump::dumpWidget()`, that errors out (not just warns) past a sane
