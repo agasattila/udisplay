@@ -2,7 +2,9 @@
 #
 # Packages the udisplay-client binary from ci.yml's desktop build-all job
 # (no recompilation): `cmake --install --component client` stages it, then
-# the staged tree is archived and bundled into an AppImage.
+# the staged tree is bundled into an AppImage. The AppImage is the only Linux
+# client deliverable: the bare binary links against the runner's system
+# libraries and isn't portable to other distributions.
 
 name: AppImage package
 
@@ -11,6 +13,10 @@ on:
     inputs:
       qt-version:
         description: Qt version the build tree was configured with
+        type: string
+        required: true
+      version-full:
+        description: Display version, used in the AppImage file name
         type: string
         required: true
 
@@ -48,13 +54,6 @@ jobs:
             --component client \
             --prefix "${{ github.workspace }}/package"
 
-      - name: Create archive
-        run: |
-          tar \
-            -C package \
-            -czf udisplay-client-linux-x86_64.tar.gz \
-            .
-
       - name: Download linuxdeploy tools
         run: |
           mkdir -p tools
@@ -91,7 +90,7 @@ jobs:
           QML_SOURCES_PATHS: ${{ github.workspace }}/udisplay-client/qml
           QMAKE: ${{ env.QT_ROOT_DIR }}/bin/qmake
           APPIMAGE_EXTRACT_AND_RUN: "1"
-          OUTPUT: uDisplay-${{ github.sha }}-x86_64.AppImage
+          OUTPUT: uDisplay-${{ inputs.version-full }}-x86_64.AppImage
         run: |
           rm -rf AppDir
           echo "Contents of package directory:"
@@ -107,18 +106,10 @@ jobs:
           test -f "${OUTPUT}"
           chmod +x "${OUTPUT}"
 
-      - name: Upload tar.gz artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: udisplay-client-linux-x86_64
-          path: udisplay-client-linux-x86_64.tar.gz
-          if-no-files-found: error
-          retention-days: 30
-
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udisplay-client-linux-appimage-${{ github.sha }}
-          path: uDisplay-${{ github.sha }}-x86_64.AppImage
+          path: uDisplay-${{ inputs.version-full }}-x86_64.AppImage
           if-no-files-found: error
           retention-days: 30

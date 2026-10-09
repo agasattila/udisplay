@@ -16,6 +16,16 @@
 # tarball (upload-artifact would drop executable bits) of build/ without
 # object files. Build, test and packaging rules all live in CMake; see
 # docs/building.md for the same commands run locally.
+#
+# A CMake build tree isn't relocatable: it stores absolute paths and links
+# against what the build job had installed. Reusing it relies on every job
+# that restores it running on the same runner image (ubuntu-24.04, x86_64)
+# with the same workspace path, the same Qt version and install path
+# (setup-desktop), the same apt packages and toolchain, and the same
+# udisplay-gen venv path. GitHub-hosted runners guarantee the workspace path;
+# the rest is pinned here and in setup-desktop. Self-hosted runners, or a
+# runner/Qt change in only some jobs, would break this. See "CI" in
+# docs/building.md.
 
 name: CI
 
@@ -130,6 +140,7 @@ jobs:
     uses: ./.github/workflows/build-appimage.yml
     with:
       qt-version: ${{ needs.version.outputs.qt-version }}
+      version-full: ${{ needs.version.outputs.full }}
 
   framework:
     name: Framework package
@@ -144,6 +155,7 @@ jobs:
     uses: ./.github/workflows/build-android.yml
     with:
       qt-version: ${{ needs.version.outputs.qt-version }}
+      version-full: ${{ needs.version.outputs.full }}
 
   release:
     name: Create GitHub Release
@@ -158,10 +170,16 @@ jobs:
       contents: write
 
     steps:
-      - name: Download client archive
+      - name: Download AppImage
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: udisplay-client-linux-x86_64
+          name: udisplay-client-linux-appimage-${{ github.sha }}
+          path: release-files
+
+      - name: Download Android APK
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: udisplay-client-android-arm64-v8a-${{ github.sha }}
           path: release-files
 
       - name: Download framework package
@@ -170,13 +188,16 @@ jobs:
           name: udisplay-framework-${{ needs.version.outputs.full }}
           path: release-files
 
+      # The APK is debug-signed, for sideloading only (TODO-050).
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION_FULL: ${{ needs.version.outputs.full }}
         run: |
           gh release create "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
-            release-files/udisplay-client-linux-x86_64.tar.gz \
-            "release-files/udisplay-framework-${{ needs.version.outputs.full }}.tar.gz" \
+            "release-files/uDisplay-${VERSION_FULL}-x86_64.AppImage" \
+            "release-files/uDisplay-${VERSION_FULL}-arm64-v8a-debug.apk" \
+            "release-files/udisplay-framework-${VERSION_FULL}.tar.gz" \
             --title "uDisplay ${{ github.ref_name }}" \
             --generate-notes

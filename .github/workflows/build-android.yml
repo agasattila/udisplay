@@ -14,6 +14,10 @@ on:
         description: Qt version for both the Android kit and the host tools
         type: string
         required: true
+      version-full:
+        description: Display version, used in the APK file name
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -179,13 +183,13 @@ jobs:
           fi
           APK_PATH="${APK_MATCHES[0]}"
           test -s "$APK_PATH"
-          cp "$APK_PATH" "uDisplay-${{ github.sha }}-arm64-v8a-debug.apk"
+          cp "$APK_PATH" "uDisplay-${{ inputs.version-full }}-arm64-v8a-debug.apk"
 
       # 10. Upload workflow artifact
       - name: Upload APK artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udisplay-client-android-arm64-v8a-${{ github.sha }}
-          path: uDisplay-${{ github.sha }}-arm64-v8a-debug.apk
+          path: uDisplay-${{ inputs.version-full }}-arm64-v8a-debug.apk
           if-no-files-found: error
           retention-days: 30
