@@ -54,7 +54,7 @@ The binary lands at `udisplay-client/build/udisplay-client`.
 The `CMakeLists.txt` in the repository root builds every desktop component in one tree:
 libudisplay, the TCP demos (demo01–demo03), udisplay-client, and all of their tests. It
 also stages the **uDisplay framework** package: libudisplay, udisplay-gen and the demos as
-sources, with the version patched in. CI runs exactly these commands, so you can reproduce a
+sources, with the version patched in. CI runs these same commands, so you can reproduce a
 release package locally: [`ci.yml`](../.github/workflows/ci.yml) configures and builds this
 tree once, then runs the tests, packages the framework and bundles the client AppImage from
 that same build tree without recompiling (see [CI](#ci)).
@@ -69,9 +69,10 @@ cmake -B build -DPython3_EXECUTABLE="$PWD/.venv/bin/python" -DUDISPLAY_VERSION=1
 cmake --build build -j$(nproc)
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 
-# Framework install tree ...
-cmake --install build --prefix stage/udisplay-framework-1.2.3
-# ... or straight to build/package/udisplay-framework-1.2.3.tar.gz
+# Framework install tree (CI tars this up as udisplay-framework-1.2.3.tar.gz) ...
+cmake --install build --component framework --prefix stage/udisplay-framework-1.2.3
+# ... or straight to build/package/udisplay-framework-1.2.3.tar.gz (cpack builds
+# out-of-date targets first, like `make install`)
 cpack --config build/CPackConfig.cmake
 ```
 
@@ -115,7 +116,7 @@ ci.yml: Desktop build-all (top-level CMake build, client included)
 test.yml            ctest on the build tree
    │
    ├─► build-appimage.yml   cmake --install --component client -> tar.gz + AppImage
-   ├─► build-framework.yml  cpack -> udisplay-framework-<version>.tar.gz
+   ├─► build-framework.yml  cmake --install --component framework -> udisplay-framework-<version>.tar.gz
    └─► build-android.yml    own Android cross build -> arm64-v8a debug APK
 ```
 

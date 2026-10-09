@@ -1,10 +1,14 @@
 # .github/workflows/build-framework.yml
 #
 # Packages the uDisplay framework (libudisplay, udisplay-gen, demos as
-# sources) from the build tree of ci.yml's desktop build-all job. CPack runs
-# the CMake install rules of the `framework` component into a staging tree
-# and archives it as udisplay-framework-<version>.tar.gz; the version is
-# baked in at configure time. Nothing is compiled, so no Qt is needed.
+# sources) from the build tree of ci.yml's desktop build-all job: the CMake
+# install rules of the `framework` component stage udisplay-framework-<version>/
+# (version baked in at configure time), which is archived as
+# udisplay-framework-<version>.tar.gz. Nothing is compiled, so no Qt is needed.
+#
+# The archive has the same content as `cpack --config build/CPackConfig.cmake`,
+# but cpack first runs the `preinstall` target, which re-checks the build
+# system against the fresh checkout and recompiles; `cmake --install` doesn't.
 
 name: Framework package
 
@@ -37,13 +41,25 @@ jobs:
       - name: Extract build tree
         run: tar -xzf desktop-build.tar.gz && rm desktop-build.tar.gz
 
-      - name: Package
-        run: cpack --config build/CPackConfig.cmake
+      - name: Install framework tree
+        run: |
+          cmake \
+            --install build \
+            --component framework \
+            --prefix "stage/udisplay-framework-${{ inputs.version-full }}"
+
+      - name: Create archive
+        run: |
+          tar \
+            -C stage \
+            --owner=0 --group=0 --numeric-owner \
+            -czf "udisplay-framework-${{ inputs.version-full }}.tar.gz" \
+            "udisplay-framework-${{ inputs.version-full }}"
 
       - name: Upload framework artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udisplay-framework-${{ inputs.version-full }}
-          path: build/package/udisplay-framework-${{ inputs.version-full }}.tar.gz
+          path: udisplay-framework-${{ inputs.version-full }}.tar.gz
           if-no-files-found: error
           retention-days: 30
