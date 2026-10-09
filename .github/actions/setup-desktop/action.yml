@@ -1,0 +1,59 @@
+# .github/actions/setup-desktop/action.yml
+#
+# Desktop toolchain shared by every job that builds, tests or packages the
+# top-level build tree: Qt, the apt packages udisplay-client needs, and a
+# venv with udisplay-gen's Python dependencies.
+#
+# The desktop build tree is passed between jobs as an artifact and holds
+# absolute paths (Qt kit, venv interpreter, source dir). GitHub-hosted
+# runners use the same workspace path in every job, so installing the same
+# toolchain at the same locations is all a downstream job needs to reuse it.
+
+name: Set up desktop toolchain
+description: Qt, system packages and the udisplay-gen venv for the top-level desktop build
+
+inputs:
+  qt-version:
+    description: Qt version to install (must match the one the build tree was configured with)
+    required: true
+  udisplay-gen-venv:
+    description: Create the .venv the build tree's Python3_EXECUTABLE points at (not needed for packaging)
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Qt
+      uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+      with:
+        version: "${{ inputs.qt-version }}"
+        modules: "qtconnectivity qttasktree"
+        cache: true
+
+    - name: Install build tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+            build-essential \
+            cmake \
+            git \
+            pkg-config \
+            python3 \
+            python3-venv \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            libqt6quickcontrols2-6 \
+            qml6-module-qtquick-controls \
+            zlib1g-dev \
+            libavahi-client-dev \
+            librsvg2-bin
+
+    # The top-level build runs the in-tree udisplay-gen (demo code
+    # generation) and its pytest suite with this interpreter.
+    - name: Install udisplay-gen dependencies
+      if: inputs.udisplay-gen-venv == 'true'
+      shell: bash
+      run: |
+        python3 -m venv .venv
+        .venv/bin/pip install -e "./udisplay-gen[dev]"

@@ -1,0 +1,115 @@
+# .github/workflows/build-appimage.yml
+#
+# Packages the udisplay-client binary from ci.yml's desktop build-all job
+# (no recompilation): `cmake --install --component client` stages it, then
+# the staged tree is bundled into an AppImage. The AppImage is the only Linux
+# client deliverable: the bare binary links against the runner's system
+# libraries and isn't portable to other distributions.
+
+name: AppImage package
+
+on:
+  workflow_call:
+    inputs:
+      qt-version:
+        description: Qt version the build tree was configured with
+        type: string
+        required: true
+      version-full:
+        description: Display version, used in the AppImage file name
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  appimage:
+    name: Package AppImage
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # linuxdeploy-plugin-qt bundles the Qt kit the client was built with.
+      - name: Set up desktop toolchain
+        uses: ./.github/actions/setup-desktop
+        with:
+          qt-version: ${{ inputs.qt-version }}
+          udisplay-gen-venv: "false"
+
+      - name: Download build tree
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-build
+
+      - name: Extract build tree
+        run: tar -xzf desktop-build.tar.gz && rm desktop-build.tar.gz
+
+      - name: Install into staging directory
+        run: |
+          cmake \
+            --install build \
+            --component client \
+            --prefix "${{ github.workspace }}/package"
+
+      - name: Download linuxdeploy tools
+        run: |
+          mkdir -p tools
+
+          wget \
+            --quiet \
+            --output-document=tools/linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+
+          wget \
+            --quiet \
+            --output-document=tools/linuxdeploy-plugin-qt-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+
+          chmod +x tools/*.AppImage
+
+      - name: Keep only the SQLite Qt SQL driver
+        run: |
+          find "${QT_ROOT_DIR}/plugins/sqldrivers" \
+            -maxdepth 1 \
+            -type f \
+            -name 'libqsql*.so' \
+            ! -name 'libqsqlite.so' \
+            -delete
+
+          echo "Remaining SQL drivers:"
+          find "${QT_ROOT_DIR}/plugins/sqldrivers" \
+            -maxdepth 1 \
+            -type f \
+            -print
+
+      - name: Build AppImage
+        env:
+          QML_SOURCES_PATHS: ${{ github.workspace }}/udisplay-client/qml
+          QMAKE: ${{ env.QT_ROOT_DIR }}/bin/qmake
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          OUTPUT: uDisplay-${{ inputs.version-full }}-x86_64.AppImage
+        run: |
+          rm -rf AppDir
+          echo "Contents of package directory:"
+          find "${{ github.workspace }}/package" \( -type f -o -type l \) -print | sort
+          tools/linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable "${{ github.workspace }}/package/bin/udisplay-client" \
+            --desktop-file "${{ github.workspace }}/package/share/applications/udisplay-client.desktop" \
+            --icon-file "${{ github.workspace }}/package/share/icons/hicolor/256x256/apps/udisplay-client.png" \
+            --plugin qt \
+            --output appimage
+
+          test -f "${OUTPUT}"
+          chmod +x "${OUTPUT}"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: udisplay-client-linux-appimage-${{ github.sha }}
+          path: uDisplay-${{ inputs.version-full }}-x86_64.AppImage
+          if-no-files-found: error
+          retention-days: 30

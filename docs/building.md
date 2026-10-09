@@ -7,6 +7,7 @@ Tested on Ubuntu 24.04 LTS (Noble). Ubuntu 22.04 LTS works with the same package
 
 - [Quick start](#quick-start)
 - [Top-level build and framework package](#top-level-build-and-framework-package)
+  - [CI](#ci)
 - [udisplay-client (Qt desktop app)](#udisplay-client-qt-desktop-app)
 - [udisplay-gen (Python codegen)](#udisplay-gen-python-codegen)
 - [libudisplay (firmware C library — host build)](#libudisplay-firmware-c-library--host-build)
@@ -53,8 +54,10 @@ The binary lands at `udisplay-client/build/udisplay-client`.
 The `CMakeLists.txt` in the repository root builds every desktop component in one tree:
 libudisplay, the TCP demos (demo01–demo03), udisplay-client, and all of their tests. It
 also stages the **uDisplay framework** package: libudisplay, udisplay-gen and the demos as
-sources, with the version patched in. CI runs exactly these commands
-(`.github/workflows/framework-build.yml`), so you can reproduce a release package locally.
+sources, with the version patched in. CI runs the same configure, build, `ctest` and
+`cmake --install --component framework` steps, so you can reproduce a release package locally: [`ci.yml`](../.github/workflows/ci.yml) configures and builds this
+tree once, then runs the tests, packages the framework and bundles the client AppImage from
+that same build tree without recompiling (see [CI](#ci)).
 
 ```bash
 # udisplay-gen's Python dependencies (the build runs the in-tree udisplay-gen,
@@ -66,9 +69,10 @@ cmake -B build -DPython3_EXECUTABLE="$PWD/.venv/bin/python" -DUDISPLAY_VERSION=1
 cmake --build build -j$(nproc)
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 
-# Framework install tree ...
-cmake --install build --prefix stage/udisplay-framework-1.2.3
-# ... or straight to build/package/udisplay-framework-1.2.3.tar.gz
+# Framework install tree (CI tars this up as udisplay-framework-1.2.3.tar.gz) ...
+cmake --install build --component framework --prefix stage/udisplay-framework-1.2.3
+# ... or straight to build/package/udisplay-framework-1.2.3.tar.gz (cpack builds
+# out-of-date targets first, like `make install`)
 cpack --config build/CPackConfig.cmake
 ```
 
@@ -92,12 +96,55 @@ udisplay-framework-<version>/
 └── demos/
 ```
 
-udisplay-client is an end-user application (AppImage / APK, see its own workflow), so it is
+udisplay-client is an end-user application (AppImage / APK, see [CI](#ci)), so it is
 not part of the framework package. To install it from the top-level build anyway, use
 `cmake --install build --component client`.
 
 The ESP-IDF demos and the Android client are cross builds and stay out of the top-level
 build; the per-component builds below keep working standalone.
+
+### CI
+
+[`ci.yml`](../.github/workflows/ci.yml) runs on every push to `main`, every `v*` tag,
+every pull request, and on demand (Run workflow in the Actions tab). It compiles the desktop components once and calls the other workflows
+in `.github/workflows/` as reusable workflows:
+
+```text
+ci.yml: Desktop build-all (top-level CMake build, client included)
+   │
+   ▼
+test.yml            ctest on the build tree
+   │
+   ├─► build-appimage.yml   cmake --install --component client -> AppImage
+   ├─► build-framework.yml  cmake --install --component framework -> udisplay-framework-<version>.tar.gz
+   └─► build-android.yml    own Android cross build -> arm64-v8a debug APK
+```
+
+The build tree is passed to the downstream jobs as an artifact, so tests and packaging
+reuse the same binaries instead of recompiling. The jobs that need the desktop toolchain
+(Qt, apt packages, udisplay-gen venv) share it through the
+[`setup-desktop`](../.github/actions/setup-desktop/action.yml) composite action. Tags `vX.Y.Z[-suffix]` set
+`UDISPLAY_VERSION`/`UDISPLAY_VERSION_FULL`; other `v*` tags fail CI, and any other ref
+builds as `0.0.0-<short sha>`. Once all packaging jobs pass, a tag push creates a GitHub
+Release with the AppImage, the debug APK and the framework package. The AppImage is the
+only Linux client download: the bare binary links against the CI runner's libraries and
+isn't portable to other distributions.
+
+A CMake build tree isn't relocatable, so reusing it across jobs assumes every job that
+restores it has the same environment as the build job:
+
+- the same runner image and architecture (`ubuntu-24.04`, x86_64), so the same apt
+  packages, system libraries and compiler;
+- the same workspace path (GitHub-hosted runners always use the same one);
+- the same Qt version and install path (one `qt-version` in `ci.yml`, installed by
+  `setup-desktop`);
+- the same udisplay-gen venv path (`.venv/` in the workspace, created by `setup-desktop`).
+
+The runner image label is not a pin: GitHub updates `ubuntu-24.04` on a rolling basis, so
+jobs within one run normally match, but a downstream job re-run days later can see newer
+packages than the build job did. If a re-run fails oddly, re-run the whole workflow.
+Moving some jobs to self-hosted runners, or changing the runner image or Qt setup for
+only some of them, breaks this. Change all of them together.
 
 ---
 
@@ -377,11 +424,11 @@ CMake fails at configure time on older Android kits. Desktop builds keep the Qt 
 minimum. CI builds Android with Qt 6.11.
 
 If you just want an APK to sideload instead of building locally, CI already builds one:
-the `build-android` job in
-[`udisplay-client-build.yml`](../.github/workflows/udisplay-client-build.yml) produces an
-arm64-v8a debug APK as a workflow artifact whenever `udisplay-client/**` changes on
-`main`, a `v*` tag, or a pull request (Actions tab, `uDisplay-<sha>-arm64-v8a-debug.apk`,
-retained 30 days). It's debug-signed for sideloading only — see `TODOS.md` for the
+[`build-android.yml`](../.github/workflows/build-android.yml) produces an
+arm64-v8a debug APK as a workflow artifact on every CI run whose tests pass (`main`, `v*`
+tags, pull requests; Actions tab, artifact `udisplay-client-android-arm64-v8a-<sha>`
+containing `uDisplay-<version>-arm64-v8a-debug.apk`, retained 30 days), and attaches it
+to the GitHub Release for each `vX.Y.Z` tag. It's debug-signed for sideloading only — see `TODOS.md` for the
 signing/distribution tradeoff. The manual steps below are for local development.
 
 1. Install the Qt for Android toolchain from the Qt online installer (the apt packages do

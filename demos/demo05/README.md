@@ -149,9 +149,9 @@ uDisplay client (Qt app):
    disconnect (firmware resets `g_led = 0` on `BLE_GAP_EVENT_DISCONNECT`).
 
 Build must also succeed for every supported target before merging any
-`main.cpp`/`Kconfig.projbuild`/codegen change (CI runs this matrix on every
-PR — see `.github/workflows/demo05-build.yml` — but a local check catches
-issues before pushing):
+`main.cpp`/`Kconfig.projbuild`/codegen change. CI does not cross-build the
+ESP-IDF demos (see [CI](../../docs/building.md#ci)), so run this matrix
+locally before pushing:
 
 ```bash
 source ~/esp/esp-idf/export.sh   # or wherever ESP-IDF is installed

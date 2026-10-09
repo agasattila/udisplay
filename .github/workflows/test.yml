@@ -1,0 +1,47 @@
+# .github/workflows/test.yml
+#
+# Runs every CTest-registered test (libudisplay gtest, udisplay-client Qt
+# and QML tests, udisplay-gen pytest, demo tests) against the build tree
+# produced by ci.yml's desktop build-all job. Nothing is recompiled here.
+
+name: Tests
+
+on:
+  workflow_call:
+    inputs:
+      qt-version:
+        description: Qt version the build tree was configured with
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Runtime side of the build: Qt and system libraries for the client
+      # tests, the venv the pytest suite was registered with.
+      - name: Set up desktop toolchain
+        uses: ./.github/actions/setup-desktop
+        with:
+          qt-version: ${{ inputs.qt-version }}
+
+      - name: Download build tree
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-build
+
+      - name: Extract build tree
+        run: tar -xzf desktop-build.tar.gz && rm desktop-build.tar.gz
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure --no-tests=error
