@@ -1,184 +1,34 @@
-# .github/workflows/udisplay-client-build.yml
+# .github/workflows/build-android.yml
+#
+# Cross-builds the udisplay-client arm64-v8a debug APK. Android needs its own
+# toolchain (Qt for Android + host Qt, JDK, SDK/NDK), so unlike the desktop
+# packaging workflows this one builds udisplay-client itself instead of
+# reusing ci.yml's desktop build tree.
 
-name: Build uDisplay client
+name: Android build
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - "v*"
-    paths:
-      - "udisplay-client/**"
-      - ".github/workflows/udisplay-client-build.yml"
-
-  pull_request:
-    paths:
-      - "udisplay-client/**"
-      - ".github/workflows/udisplay-client-build.yml"
+  workflow_call:
+    inputs:
+      qt-version:
+        description: Qt version for both the Android kit and the host tools
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 jobs:
-  build-linux:
-    name: Linux build
-    runs-on: ubuntu-24.04
-
-    steps:
-      # 1. Checkout source
-      - name: Checkout source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          # Default fetch-depth: 1 does not fetch tags — without this, exact-tag
-          # detection for the udisplay-client version label silently never works.
-          fetch-depth: 0
-
-      # 2. Install Qt
-      - name: Install Qt
-        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
-        with:
-          version: "6.11.0"
-          modules: "qtconnectivity qttasktree"
-          cache: true
-
-      # 3. Install build dependencies
-      - name: Install build tools
-        run: |
-          sudo apt-get update
-          sudo apt install -y \
-              build-essential \
-              cmake \
-              git \
-              pkg-config \
-              qt6-base-dev \
-              qt6-declarative-dev \
-              libqt6quickcontrols2-6 \
-              qml6-module-qtquick-controls \
-              zlib1g-dev \
-              libavahi-client-dev \
-              librsvg2-bin
-
-      # 4. CMake configuration
-      - name: Configure
-        run: |
-          cmake \
-            -S udisplay-client \
-            -B build/udisplay-client \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/package" \
-            -DUDISPLAY_CLIENT_BUILD_TESTS=ON
-
-      # 5. Build
-      - name: Build
-        run: |
-          cmake \
-            --build build/udisplay-client \
-            --parallel
-
-      # 5.b Test      
-      - name: Run tests
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          ctest \
-            --test-dir build/udisplay-client \
-            --output-on-failure
-
-      # 6. Install
-      - name: Install into staging directory
-        run: |
-          cmake \
-            --install build/udisplay-client
-
-      # 7. Create archive
-      - name: Create archive
-        run: |
-          tar \
-            -C package \
-            -czf udisplay-client-linux-x86_64.tar.gz \
-            .
-
-      # Download linuxdeploy  tools
-      - name: Download linuxdeploy tools
-        run: |
-          mkdir -p tools
-
-          wget \
-            --quiet \
-            --output-document=tools/linuxdeploy-x86_64.AppImage \
-            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-
-          wget \
-            --quiet \
-            --output-document=tools/linuxdeploy-plugin-qt-x86_64.AppImage \
-            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-
-          chmod +x tools/*.AppImage
-
-      # Build AppImage
-      - name: Keep only the SQLite Qt SQL driver
-        run: |
-          find "${QT_ROOT_DIR}/plugins/sqldrivers" \
-            -maxdepth 1 \
-            -type f \
-            -name 'libqsql*.so' \
-            ! -name 'libqsqlite.so' \
-            -delete
-
-          echo "Remaining SQL drivers:"
-          find "${QT_ROOT_DIR}/plugins/sqldrivers" \
-            -maxdepth 1 \
-            -type f \
-            -print      
-      - name: Build AppImage
-        env:
-          QML_SOURCES_PATHS: ${{ github.workspace }}/udisplay-client/qml
-          QMAKE: ${{ env.QT_ROOT_DIR }}/bin/qmake
-          APPIMAGE_EXTRACT_AND_RUN: "1"
-          OUTPUT: uDisplay-${{ github.sha }}-x86_64.AppImage
-        run: |
-          rm -rf AppDir         
-          echo "Contents of package directory:"
-          find "${{ github.workspace }}/package" \( -type f -o -type l \) -print | sort
-          tools/linuxdeploy-x86_64.AppImage \
-            --appdir AppDir \
-            --executable "${{ github.workspace }}/package/bin/udisplay-client" \
-            --desktop-file "${{ github.workspace }}/package/share/applications/udisplay-client.desktop" \
-            --icon-file "${{ github.workspace }}/package/share/icons/hicolor/256x256/apps/udisplay-client.png" \
-            --plugin qt \
-            --output appimage
-
-          test -f "${OUTPUT}"
-          chmod +x "${OUTPUT}"           
-            
-      # Upload workflow artifact
-      - name: Upload tar.gz artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: udisplay-client-linux-x86_64
-          path: udisplay-client-linux-x86_64.tar.gz
-          if-no-files-found: error
-          retention-days: 30
-      
-      - name: Upload AppImage artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: udisplay-client-linux-appimage-${{ github.sha }}
-          path: uDisplay-${{ github.sha }}-x86_64.AppImage
-          if-no-files-found: error
-          retention-days: 30
-
   build-android:
     name: Android build (arm64-v8a)
     runs-on: ubuntu-24.04
 
     env:
-      # Single source of truth for the Qt version — referenced by both
-      # install-qt-action calls below and (via shell expansion, since GitHub
-      # Actions' env: block can't self-reference within the same block) the
-      # computed Qt directory paths in the Configure step.
-      QT_VERSION: "6.11.0"
+      # Set once in ci.yml and shared with the desktop jobs — referenced by
+      # both install-qt-action calls below and (via shell expansion, since
+      # GitHub Actions' env: block can't self-reference within the same block)
+      # the computed Qt directory paths in the Configure step.
+      QT_VERSION: ${{ inputs.qt-version }}
       # Pinned explicitly rather than relying on whatever NDK/SDK the runner
       # image ships by default (ubuntu-24.04 ships a preinstalled Android SDK
       # at $ANDROID_HOME) — avoids a silent version mismatch between that and
@@ -339,33 +189,3 @@ jobs:
           path: uDisplay-${{ github.sha }}-arm64-v8a-debug.apk
           if-no-files-found: error
           retention-days: 30
-
-  release:
-    name: Create GitHub Release
-    needs: build-linux
-
-    # Runs only on tag push
-    if: startsWith(github.ref, 'refs/tags/v')
-
-    runs-on: ubuntu-24.04
-
-    permissions:
-      contents: write
-
-    steps:
-      # Use previous artifact
-      - name: Download workflow artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: udisplay-client-linux-x86_64
-          path: release-files
-
-      # Create release
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${{ github.ref_name }}" \
-            release-files/udisplay-client-linux-x86_64.tar.gz \
-            --title "uDisplay ${{ github.ref_name }}" \
-            --generate-notes

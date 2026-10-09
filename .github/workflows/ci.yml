@@ -1,0 +1,166 @@
+# .github/workflows/ci.yml
+#
+# CI orchestrator. The desktop components are compiled exactly once, here,
+# by the top-level CMakeLists.txt (build-all); the reusable workflows below
+# then test and package that same build tree without recompiling it:
+#
+#   version ─► Desktop build-all ─► test.yml ─┬─► build-appimage.yml ─► release (tags)
+#                                             ├─► build-framework.yml
+#                                             └─► build-android.yml
+#
+# Android is a cross build with its own toolchain, so build-android.yml
+# compiles on its own; it waits for the tests only so a broken tree doesn't
+# spend a full Android build.
+#
+# The build tree travels between jobs as the `desktop-build` artifact, a
+# tarball (upload-artifact would drop executable bits) of build/ without
+# object files. Build, test and packaging rules all live in CMake; see
+# docs/building.md for the same commands run locally.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  version:
+    name: Determine version
+    runs-on: ubuntu-24.04
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      full: ${{ steps.version.outputs.full }}
+      # Single source of truth for the Qt version used by every job.
+      qt-version: "6.11.0"
+
+    steps:
+      # Tag vX.Y.Z[-suffix] -> X.Y.Z (+ suffix in the display version);
+      # anything else -> 0.0.0-<short sha>, so branch artifacts are never
+      # mistaken for releases.
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)(-[A-Za-z0-9.]+)?$ ]]; then
+            version="${BASH_REMATCH[1]}"
+            full="${version}${BASH_REMATCH[2]}"
+          else
+            version="0.0.0"
+            full="0.0.0-${GITHUB_SHA::7}"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "full=${full}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Desktop build-all
+    needs: version
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Default fetch-depth: 1 does not fetch tags — without this, exact-tag
+          # detection for the udisplay-client version label silently never works.
+          fetch-depth: 0
+
+      - name: Set up desktop toolchain
+        uses: ./.github/actions/setup-desktop
+        with:
+          qt-version: ${{ needs.version.outputs.qt-version }}
+
+      - name: Configure
+        run: |
+          cmake \
+            -S . \
+            -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPython3_EXECUTABLE="${{ github.workspace }}/.venv/bin/python" \
+            -DUDISPLAY_VERSION="${{ needs.version.outputs.version }}" \
+            -DUDISPLAY_VERSION_FULL="${{ needs.version.outputs.full }}"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      # Object files are only needed to relink; nothing downstream builds.
+      - name: Archive build tree
+        run: tar --exclude='*.o' -czf desktop-build.tar.gz build
+
+      - name: Upload build tree
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-build
+          path: desktop-build.tar.gz
+          if-no-files-found: error
+          # Already compressed.
+          compression-level: 0
+          retention-days: 1
+
+  test:
+    name: Tests
+    needs: [version, build]
+    uses: ./.github/workflows/test.yml
+    with:
+      qt-version: ${{ needs.version.outputs.qt-version }}
+
+  appimage:
+    name: AppImage package
+    needs: [version, test]
+    uses: ./.github/workflows/build-appimage.yml
+    with:
+      qt-version: ${{ needs.version.outputs.qt-version }}
+
+  framework:
+    name: Framework package
+    needs: [version, test]
+    uses: ./.github/workflows/build-framework.yml
+    with:
+      version-full: ${{ needs.version.outputs.full }}
+
+  android:
+    name: Android build
+    needs: [version, test]
+    uses: ./.github/workflows/build-android.yml
+    with:
+      qt-version: ${{ needs.version.outputs.qt-version }}
+
+  release:
+    name: Create GitHub Release
+    needs: appimage
+
+    # Runs only on tag push
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download client archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: udisplay-client-linux-x86_64
+          path: release-files
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            release-files/udisplay-client-linux-x86_64.tar.gz \
+            --title "uDisplay ${{ github.ref_name }}" \
+            --generate-notes
