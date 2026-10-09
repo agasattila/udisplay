@@ -238,6 +238,13 @@ valid slider value overwrites the corrupted state.
 fix (runtime-level float validation vs. app-level rejection in generated
 code vs. left to each device application, as demo04 currently does) is a
 design call.
+**Status:** ✅ DONE — issue #27. Validated at the common runtime boundary
+rather than per application: both libudisplay's `dispatch_event` and the
+MicroPython runtime's `_dispatch_event` drop a SLIDER_CHANGE whose float32
+has all exponent bits set (NaN, ±Inf) before any callback runs. The check
+is on the raw bits, so it needs no libm/`math` module and survives
+`-ffast-math`. Regression tests in `libudisplay/test/test_udisplay.cpp`
+(`SliderChange_*`) and `udisplay-gen/tests/test_python_runtime.py`.
 **Effort:** S (human: ~1-2h / CC: ~15 min)
 **Priority:** P2
 **Depends on:** Nothing blocking.
