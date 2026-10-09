@@ -458,10 +458,14 @@ class UDisplayDevice:
             if len(payload) >= 4:
                 # Drop NaN/+-Inf (exponent bits all set) before they reach
                 # the application: NaN slips past ordinary range clamps
-                # since every comparison with it is False. Same raw-bit
-                # check as udisplay.c's dispatch_event, so it needs no
-                # math module. TODO-058.
-                if (struct.unpack("<I", payload[0:4])[0] & 0x7F800000) == 0x7F800000:
+                # since every comparison with it is False. Same exponent
+                # test as udisplay.c's dispatch_event, done per byte
+                # (little-endian: exponent = low 7 bits of byte 3 + top bit
+                # of byte 2) so it needs no math module and never builds a
+                # >30-bit int, which would be a heap-allocated bigint -- or
+                # a compile error on MICROPY_LONGINT_IMPL_NONE ports.
+                # TODO-058.
+                if (payload[3] & 0x7F) == 0x7F and (payload[2] & 0x80):
                     return
                 value = struct.unpack("<f", payload[0:4])[0]
             else:

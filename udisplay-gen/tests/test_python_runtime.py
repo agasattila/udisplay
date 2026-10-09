@@ -388,7 +388,30 @@ class TestUDisplayDeviceEvents:
         assert events[0] == flt_max
         assert events[1] == -flt_max
         assert events[2] > 0.0
-        assert events[3] == 0.0
+        assert struct.pack("<f", events[3]) == struct.pack("<I", 0x80000000)  # -0.0 keeps its sign
+        assert len(events) == 4
+
+    def test_slider_change_trailing_bytes_ignored(self):
+        """Only payload[0:4] is the float; extra bytes don't affect the check."""
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append(v))
+        head = bytes([MSG_EVENT, 0x11, UDISPLAY_EVENT_SLIDER_CHANGE])
+        dev.feed(tcp_frame(head + struct.pack("<I", 0x7FC00000) + b"\xaa"))
+        dev.feed(tcp_frame(head + struct.pack("<f", 1.0) + b"\xff"))
+        assert events == [1.0]
+
+    def test_slider_change_every_exponent_all_ones_pattern_dropped(self):
+        """The per-byte exponent test must agree with the 32-bit mask
+        for every sign/mantissa combination at the byte boundaries."""
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append(v))
+        for sign in (0, 0x80000000):
+            for mant in (0, 1, 0x7FFF, 0x8000, 0x400000, 0x7FFFFF):
+                self._feed_slider_bits(dev, sign | 0x7F800000 | mant)
+        assert events == []
+        # One exponent bit short of all-ones on either side of the byte split.
+        for bits in (0x7F000000, 0x00800000, 0x7F7FFFFF, 0xFF000000):
+            self._feed_slider_bits(dev, bits)
         assert len(events) == 4
 
     def test_slider_change_drop_does_not_wedge_later_events(self):
