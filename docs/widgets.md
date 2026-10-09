@@ -179,7 +179,7 @@ temp_display:
 #include "libudisplay/udisplay.h"
 #include "udisplay_ui.h"
 
-extern udisplay_t g_ctx; /* one instance per live connection — see udisplay.h */
+extern udisplay_t g_ctx; /* one instance per live connection — see libudisplay/udisplay.h */
 
 void someUpdateFunction(float temp) {
     set_temp_display(&g_ctx, temp);

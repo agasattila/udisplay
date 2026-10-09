@@ -427,7 +427,7 @@ Total: 1 byte.
 
 **Device watchdog (`on_comms_error` callback):** After `active=1`, each call to `udisplay_heartbeat()` that is not preceded by an inbound HEARTBEAT echo increments an internal `hb_missed_count` counter. When `hb_missed_count` reaches `UDISPLAY_HB_MISS_MAX` (3), the library calls `cfg.on_comms_error(userdata)` exactly once. The counter is capped at `UDISPLAY_HB_MISS_MAX` — no further callbacks fire until the counter resets. The counter resets to 0 on: (a) any inbound HEARTBEAT echo, (b) `on_connect()`, or (c) `on_disconnect()`. Before `active=1`, missed heartbeats do not increment the counter (the client is still bootstrapping).
 
-**`UDISPLAY_HB_MISS_MAX`** is defined in `udisplay.h` and equals 3 (15 s at the recommended 5 s interval).
+**`UDISPLAY_HB_MISS_MAX`** is defined in `libudisplay/udisplay.h` and equals 3 (15 s at the recommended 5 s interval).
 
 ---
 
