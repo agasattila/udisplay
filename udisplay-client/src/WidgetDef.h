@@ -79,6 +79,17 @@ struct StyleToken {
     QString error        = QStringLiteral("#e05555");
 };
 
+/* ── Nesting depth limit ────────────────────────────────────────────────── */
+/* Maximum widget nesting depth (issue #24, TODO-036): the number of keys in
+ * a widget's keyPath, so a top-level widget is at depth 1 and a
+ * button-group item one deeper than its group. YamlParser rejects deeper
+ * documents before any of its recursive walks, matching udisplay-gen's
+ * MAX_NESTING_DEPTH (widget_ids.py); every walk over a parsed list
+ * (WidgetDump, DeviceController's style cascade) is therefore bounded by
+ * it too. The 240-widget cap bounds how many widgets a document has, not
+ * how deep they nest. */
+constexpr int kMaxWidgetNestingDepth = 10;
+
 /* ── Main widget definition ─────────────────────────────────────────────── */
 struct WidgetDef {
     /* Common — every widget, regardless of type, has these. */

@@ -11,7 +11,7 @@ import zlib
 import pytest
 
 from udisplay_gen.merkle import CHUNK_SIZE, chunk_hashes, compute, root
-from udisplay_gen.validate import semantic_errors
+from udisplay_gen.validate import semantic_errors, validate
 from udisplay_gen.widget_ids import assign
 
 
@@ -107,6 +107,21 @@ class TestNameCollisionFixtures:
         for name, case in cases.items():
             doc = pyyaml.safe_load(case["yaml"])
             assert [e.strip() for e in semantic_errors(doc)] == case["errors"], name
+
+
+class TestNestingDepthFixtures:
+    """Maximum widget nesting depth: udisplay-gen's validate and the client's
+    YamlParser (test_widget_id_golden_fixtures.cpp) check the same cases."""
+    def test_fixtures_match_validate(self, vectors):
+        import yaml as pyyaml
+        cases = vectors["nesting_depth_fixtures"]["cases"]
+        assert any(c["error"] for c in cases.values())
+        assert any(not c["error"] for c in cases.values())
+        for name, case in cases.items():
+            doc = pyyaml.safe_load(case["yaml"])
+            errors = validate(doc, yaml_text=case["yaml"])
+            expected = [f"  {case['error']}"] if case["error"] else []
+            assert errors == expected, name
 
 # ── Message encoding vectors ──────────────────────────────────────────────────
 

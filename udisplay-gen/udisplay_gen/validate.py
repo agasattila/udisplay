@@ -28,6 +28,7 @@ SUPPORTED_TYPES = [
 # The container type set is shared with ID assignment (TODO-007).
 from .widget_ids import (  # noqa: E402
     CONTAINER_TYPES, describe_name_collision, name_path_collisions,
+    nesting_depth_error,
 )
 
 # button-group item keys that would collide with the generated group's own
@@ -237,6 +238,8 @@ def semantic_errors(doc: dict) -> list[str]:
     - every widget has a distinct name path: a key appears once per naming
       scope (widget_ids.py), so two `temp` widgets in two transparent rows
       would share WIDGET_ID_TEMP / ui.temp
+    - no widget nests deeper than MAX_NESTING_DEPTH; if one does, that is
+      the only error reported
     """
     # "default" is always implicitly valid, even with no style: block at all
     # — matches udisplay-client's YamlParser.cpp parseStyles(), which always
@@ -244,6 +247,10 @@ def semantic_errors(doc: dict) -> list[str]:
     # else hardcoded StyleToken C++ defaults).
     style_names = set(doc.get("style", {}).keys()) | {"default"}
     widgets = doc.get("widgets", {})
+    # Every check below recurses once per nesting level (validate()).
+    depth_error = nesting_depth_error(widgets)
+    if depth_error:
+        return [f"  {depth_error}"]
     errors = _semantic_errors_in_map(widgets, "", style_names)
     if isinstance(widgets, dict):
         errors += [f"  {describe_name_collision(name, paths)}"
@@ -253,7 +260,16 @@ def semantic_errors(doc: dict) -> list[str]:
 
 def validate(doc: dict, schema: dict | None = None,
              yaml_text: str | None = None) -> list[str]:
-    """Combined schema + semantic validation. Returns all errors."""
+    """Combined schema + semantic validation. Returns all errors.
+
+    A widget nested deeper than MAX_NESTING_DEPTH (widget_ids.py) is the
+    only error reported: the line map, the schema check and the semantic
+    checks all recurse once per nesting level, so they run only on a
+    document known to be shallow enough."""
+    widgets = doc.get("widgets") if isinstance(doc, dict) else None
+    depth_error = nesting_depth_error(widgets)
+    if depth_error:
+        return [f"  {depth_error}"]
     if schema is None:
         schema = load_schema()
     line_map = _yaml_line_map(yaml_text) if yaml_text else {}

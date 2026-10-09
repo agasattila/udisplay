@@ -21,7 +21,12 @@ QString indent(int depth)
     return QString(depth * 2, QLatin1Char(' '));
 }
 
-void dumpWidget(QTextStream& out, const QList<WidgetDef>& all, int row, int depth)
+/* level: the widget's nesting depth (1 at the top level); depth: its
+ * indentation. A parsed list never nests past kMaxWidgetNestingDepth
+ * (YamlParser rejects deeper documents), but the recursion is capped there
+ * anyway rather than trusting every caller's list. */
+void dumpWidget(QTextStream& out, const QList<WidgetDef>& all, int row, int depth,
+                int level)
 {
     const WidgetDef& w = all[row];
     const QString pad = indent(depth);
@@ -124,11 +129,17 @@ void dumpWidget(QTextStream& out, const QList<WidgetDef>& all, int row, int dept
         if (all[j].parentId == row)
             childRows.append(j);
 
-    if (!childRows.isEmpty()) {
-        out << pad << QStringLiteral("  widgets:\n");
-        for (int j : childRows)
-            dumpWidget(out, all, j, depth + 2);
+    if (childRows.isEmpty())
+        return;
+    if (level >= kMaxWidgetNestingDepth) {
+        out << pad << QStringLiteral("  widgets: (%1 not shown: past the maximum "
+                                     "nesting depth of %2)\n")
+                         .arg(childRows.size()).arg(kMaxWidgetNestingDepth);
+        return;
     }
+    out << pad << QStringLiteral("  widgets:\n");
+    for (int j : childRows)
+        dumpWidget(out, all, j, depth + 2, level + 1);
 }
 
 } // namespace
@@ -151,7 +162,7 @@ QString dumpWidgetTree(const QList<WidgetDef>& widgets,
     out << QStringLiteral("widgets: (%1 top-level)\n").arg(topLevel.size());
 
     for (int i : topLevel)
-        dumpWidget(out, widgets, i, 1);
+        dumpWidget(out, widgets, i, 1, 1);
 
     return result;
 }

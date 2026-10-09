@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema",
   "$id": "udisplay.schema.json",
   "title": "uDisplay UI Definition",
-  "description": "Schema for uDisplay YAML UI definitions. Validated by `udisplay-gen validate`. Widget IDs are assigned by codegen (not declared in YAML) to every widget, containers and decorations included. Maximum 240 widgets per device (IDs 0x10–0xFF); codegen fails if this limit is exceeded.",
+  "description": "Schema for uDisplay YAML UI definitions. Validated by `udisplay-gen validate`. Widget IDs are assigned by codegen (not declared in YAML) to every widget, containers and decorations included. Maximum 240 widgets per device (IDs 0x10–0xFF); codegen fails if this limit is exceeded. Maximum widget nesting depth 10 (keys in a widget's path, top level = 1); validate rejects deeper documents.",
   "type": "object",
   "required": ["device", "widgets"],
   "additionalProperties": false,

@@ -6,6 +6,7 @@
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <array>
+#include <string>
 #include <utility>
 #include <QStringList>
 #include <QVariantList>
@@ -174,6 +175,15 @@ static bool isTransparentContainer(const std::string& type, const YAML::Node& w)
     return !(ns && ns.IsScalar() && YAML::convert<bool>::decode(ns, flag) && flag);
 }
 
+/* udisplay-gen validate's error text for a widget nested past
+ * kMaxWidgetNestingDepth (widget_ids.py nesting_depth_error()). */
+static std::string nestingDepthError(const std::string& path, int depth)
+{
+    return "widgets." + path + ": nested " + std::to_string(depth)
+           + " levels deep; the maximum widget nesting depth is "
+           + std::to_string(kMaxWidgetNestingDepth);
+}
+
 /* Mirrors widget_ids.py's _collect(). Every widget map entry gets a path
  * (issue #43): `<prefix>.<key>`, where the prefix is the parent widget's own
  * path. Every widget with `widgets:` (containers and button faces alike) is
@@ -181,11 +191,21 @@ static bool isTransparentContainer(const std::string& type, const YAML::Node& w)
  * the top level: `section.row.leaf`. A container's `namespace:` key does not
  * change this: it only shapes each widget's name path (namePrefix), the
  * identifier udisplay-gen generates for firmware, never the wire IDs.
- * Entries are appended in YAML declaration order, parents first. */
-static void collectPathsRecursive(const YAML::Node& widgets,
+ * Entries are appended in YAML declaration order, parents first.
+ *
+ * `depth` is the nesting depth of the widgets in `widgets` (1 at the top
+ * level). The first widget found past kMaxWidgetNestingDepth stops the walk
+ * with tooDeep set to the error and false returned, so the recursion never
+ * goes deeper than the cap however deep the YAML nests. This is the only
+ * depth check: the walk follows every `widgets:` map and every button-group
+ * item, a superset of what buildAndAppendWidgets()/buildWidget() and
+ * warnExcludedButtonFaceTypes() recurse into, and parse() runs it first. */
+static bool collectPathsRecursive(const YAML::Node& widgets,
                                   const std::string& prefix,
                                   const std::string& namePrefix,
-                                  std::vector<PathEntry>& entries)
+                                  int depth,
+                                  std::vector<PathEntry>& entries,
+                                  std::string& tooDeep)
 {
     for (auto it = widgets.begin(); it != widgets.end(); ++it) {
         std::string key = it->first.as<std::string>();
@@ -199,22 +219,32 @@ static void collectPathsRecursive(const YAML::Node& widgets,
         std::string path = prefix.empty() ? key : prefix + "." + key;
         std::string namePath = namePrefix.empty() ? key : namePrefix + "." + key;
 
+        if (depth > kMaxWidgetNestingDepth) {
+            tooDeep = nestingDepthError(path, depth);
+            return false;
+        }
         entries.push_back({ path, !prefix.empty(), prefix, key, namePath });
 
-        if (w["widgets"] && w["widgets"].IsMap())
-            collectPathsRecursive(w["widgets"], path,
-                                  isTransparentContainer(type, w) ? namePrefix : namePath,
-                                  entries);
+        if (w["widgets"] && w["widgets"].IsMap()
+            && !collectPathsRecursive(w["widgets"], path,
+                                      isTransparentContainer(type, w) ? namePrefix : namePath,
+                                      depth + 1, entries, tooDeep))
+            return false;
 
         if (type == "button-group" && w["items"] && w["items"].IsMap()) {
             for (auto ii = w["items"].begin();
                  ii != w["items"].end(); ++ii) {
                 std::string itemKey = ii->first.as<std::string>();
+                if (depth + 1 > kMaxWidgetNestingDepth) {
+                    tooDeep = nestingDepthError(path + "." + itemKey, depth + 1);
+                    return false;
+                }
                 entries.push_back({ path + "." + itemKey, true, path, itemKey,
                                     namePath + "." + itemKey });
             }
         }
     }
+    return true;
 }
 
 /* The first name path two or more widgets share, as udisplay-gen
@@ -245,12 +275,12 @@ static std::string firstNameCollision(const std::vector<PathEntry>& entries)
 }
 
 /* Every widget's path in YAML declaration order (collectPathsRecursive());
- * sortedPaths() orders them for ID assignment. */
-static std::vector<PathEntry> collectPaths(const YAML::Node& widgets)
+ * sortedPaths() orders them for ID assignment. Returns false, with tooDeep
+ * set, if a widget nests past kMaxWidgetNestingDepth. */
+static bool collectPaths(const YAML::Node& widgets,
+                         std::vector<PathEntry>& entries, std::string& tooDeep)
 {
-    std::vector<PathEntry> entries;
-    collectPathsRecursive(widgets, {}, {}, entries);
-    return entries;
+    return collectPathsRecursive(widgets, {}, {}, 1, entries, tooDeep);
 }
 
 static std::vector<PathEntry> sortedPaths(std::vector<PathEntry> entries)
@@ -275,6 +305,8 @@ static std::vector<PathEntry> sortedPaths(std::vector<PathEntry> entries)
  *  Returns the row index this call appended, so callers can post-process
  *  that specific row (flex/align/position overrides) after any nested
  *  children have already been appended after it.
+ *  The recursion is at most kMaxWidgetNestingDepth deep: parse() rejects
+ *  any deeper document in collectPathsRecursive() before building.
  * ══════════════════════════════════════════════════════════════════════════ */
 
 static int buildWidget(const std::string& key,
@@ -874,7 +906,14 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
     }
     const YAML::Node& widgets = doc["widgets"];
 
-    auto declared = collectPaths(widgets);
+    /* Nesting depth first: every other walk over `widgets` recurses once
+     * per level, collectPaths() alone stops at the cap. */
+    std::vector<PathEntry> declared;
+    std::string tooDeep;
+    if (!collectPaths(widgets, declared, tooDeep)) {
+        m_error = qs(tooDeep);
+        return false;
+    }
     /* Name collisions are reported in declaration order (see
      * firstNameCollision()), so find one before sorting; the check itself
      * runs below, after the path-level ones. */

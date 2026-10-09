@@ -42,6 +42,14 @@ ID_START = 0x10
 ID_MAX = 0xFF
 MAX_WIDGETS = ID_MAX - ID_START + 1  # 240
 
+# Maximum widget nesting depth (issue #24, TODO-036): the number of keys in a
+# widget's structural path, so a top-level widget is at depth 1 and a
+# button-group item one deeper than its group. udisplay-client's
+# YamlParser.cpp rejects the same documents (kMaxWidgetNestingDepth).
+# MAX_WIDGETS bounds how many widgets a document has, not how deep they
+# nest, and every walk over the tree recurses once per level.
+MAX_NESTING_DEPTH = 10
+
 # Layout containers. Single source of truth for validate.py and the
 # backends (TODO-007).
 CONTAINER_TYPES = frozenset({"section", "row", "grid", "dpad"})
@@ -75,21 +83,66 @@ def _type_str(widget: dict) -> str:
     return wtype
 
 
-def widget_tree(widgets: dict, prefix: str = "", name_prefix: str = "") -> list:
+def _depth_message(path: str, depth: int) -> str:
+    """The error text for a widget nested past MAX_NESTING_DEPTH, verbatim
+    the client's (YamlParser.cpp nestingDepthError())."""
+    return (f"widgets.{path}: nested {depth} levels deep; the maximum "
+            f"widget nesting depth is {MAX_NESTING_DEPTH}")
+
+
+def nesting_depth_error(widgets: dict) -> str | None:
+    """The error text for the first widget, in walk() order, nested deeper
+    than MAX_NESTING_DEPTH, or None if none is. Walks the same edges as
+    widget_tree() (every `widgets:` map, plus button-group items), but
+    iteratively, so it is safe to run on input that would exhaust the stack
+    of the recursive walks: run it before any of them."""
+    def entries(children, prefix: str, depth: int) -> list:
+        if not isinstance(children, dict):
+            return []
+        return [(f"{prefix}.{key}" if prefix else key, widget, depth)
+                for key, widget in children.items() if isinstance(widget, dict)]
+
+    # Reversed onto the stack, so entries pop in declaration order.
+    stack = entries(widgets, "", 1)[::-1]
+    while stack:
+        path, widget, depth = stack.pop()
+        if depth > MAX_NESTING_DEPTH:
+            return _depth_message(path, depth)
+        children = entries(widget.get("widgets"), path, depth + 1)
+        items = widget.get("items")
+        if widget.get("type") == "button-group" and isinstance(items, dict):
+            # Items are widgets whatever their value (widget_tree()), and
+            # leaves: an empty mapping stands in for each.
+            children += [(f"{path}.{key}", {}, depth + 1) for key in items]
+        stack.extend(reversed(children))
+    return None
+
+
+def widget_tree(widgets: dict, prefix: str = "", name_prefix: str = "",
+                depth: int = 1) -> list:
     """The widget tree as WidgetNodes, in YAML declaration order — every
     node that gets an ID. The single place both paths are derived; every
-    other helper here, and every backend, walks this tree."""
+    other helper here, and every backend, walks this tree.
+
+    Raises ValueError past MAX_NESTING_DEPTH (nesting_depth_error() reports
+    the same documents without recursing; validate.py runs it first)."""
     nodes: list = []
     for key, widget in widgets.items():
         if not isinstance(widget, dict):
             continue
         path = f"{prefix}.{key}" if prefix else key
+        if depth > MAX_NESTING_DEPTH:
+            raise ValueError(_depth_message(path, depth))
         name_path = f"{name_prefix}.{key}" if name_prefix else key
         transparent = (widget.get("type", "") in NAMESPACE_FLAG_TYPES
                        and widget.get("namespace") is not True)
         children = widget_tree(widget.get("widgets", {}), path,
-                               name_prefix if transparent else name_path)
+                               name_prefix if transparent else name_path,
+                               depth + 1)
         if widget.get("type", "") == "button-group":
+            items = widget.get("items")
+            if depth + 1 > MAX_NESTING_DEPTH and isinstance(items, dict) and items:
+                raise ValueError(_depth_message(f"{path}.{next(iter(items))}", depth + 1))
             children += [
                 WidgetNode(item_key, f"{path}.{item_key}", (), "button-group-item",
                            f"{name_path}.{item_key}", False,
@@ -188,7 +241,8 @@ def assign(widgets: dict) -> dict[str, int]:
     Return a mapping of id_path → widget_id for every widget.
 
     Raises ValueError if widget count exceeds 240 (containers and decorations
-    count too), or if two widgets resolve to the same structural path. Valid
+    count too), if a widget is nested deeper than MAX_NESTING_DEPTH, or if
+    two widgets resolve to the same structural path. Valid
     YAML can't produce a duplicate (every parent's key is a path segment of
     its children, and the schema forbids '.' in keys); the check guards
     input that skipped schema validation.
