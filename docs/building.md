@@ -91,7 +91,7 @@ projects inside it build as-is and default to the packaged version:
 udisplay-framework-<version>/
 ├── VERSION, README.md, udisplay.schema.json, LICENSES/
 ├── cmake/          version helpers (+ the pinned package version)
-├── libudisplay/    sources, without the test suite
+├── libudisplay/    sources, without the test suite; include/libudisplay/udisplay.h carries the package version
 ├── udisplay-gen/   pip-installable: pip install ./udisplay-gen
 └── demos/
 ```
