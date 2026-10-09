@@ -16,15 +16,6 @@ cmake_minimum_required(VERSION 3.21)
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/uDisplayVersion.cmake")
 project(udisplay-framework VERSION ${UDISPLAY_VERSION} LANGUAGES C CXX)
 
-# UDISPLAY_VERSION_FULL ends up in file names and in a generated .cmake file;
-# keep it to characters that are safe in both.
-if(NOT UDISPLAY_VERSION_FULL MATCHES "^[A-Za-z0-9._+-]+$")
-    message(FATAL_ERROR
-        "UDISPLAY_VERSION_FULL may only contain [A-Za-z0-9._+-], "
-        "got: '${UDISPLAY_VERSION_FULL}'"
-    )
-endif()
-
 option(UDISPLAY_BUILD_CLIENT "Build udisplay-client (requires Qt 6)" ON)
 option(UDISPLAY_BUILD_DEMOS  "Build the desktop TCP demos (demo01-demo03)" ON)
 # Same cache variable libudisplay's standalone build uses for its own tests.
@@ -107,12 +98,9 @@ if(UDISPLAY_BUILD_TESTS)
     add_test(
         NAME framework-version-header
         COMMAND "${CMAKE_COMMAND}"
-            "-DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
-            "-DPREFIX=${CMAKE_CURRENT_BINARY_DIR}/test-framework-install"
-            "-DMAJOR=${UDISPLAY_VERSION_MAJOR}"
-            "-DMINOR=${UDISPLAY_VERSION_MINOR}"
-            "-DPATCH=${UDISPLAY_VERSION_PATCH}"
-            "-DFULL=${UDISPLAY_VERSION_FULL}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-framework-version-header"
+            "-DC_COMPILER=${CMAKE_C_COMPILER}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/framework_version_header.cmake"
     )
 endif()
@@ -189,38 +177,6 @@ udisplay_write_if_changed(
     "${UDISPLAY_FRAMEWORK_STAGE_DIR}/udisplay-gen/udisplay_gen/__init__.py"
     "${_gen_init_content}")
 
-# libudisplay's main header carries the version as #ifndef-guarded defaults
-# (0.0.0 in git); stamp the framework version into them, so a consumer that
-# only includes "libudisplay/udisplay.h" (no CMake compile definitions)
-# still sees the release version.
-set(_lib_header_rel "include/libudisplay/udisplay.h")
-set(_lib_header "${CMAKE_CURRENT_SOURCE_DIR}/libudisplay/${_lib_header_rel}")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_lib_header}")
-file(READ "${_lib_header}" _lib_header_content)
-foreach(_pair
-        "MAJOR=${UDISPLAY_VERSION_MAJOR}"
-        "MINOR=${UDISPLAY_VERSION_MINOR}"
-        "PATCH=${UDISPLAY_VERSION_PATCH}"
-        "STRING=\"${UDISPLAY_VERSION_FULL}\"")
-    string(REGEX MATCH "^([A-Z]+)=(.*)$" _ "${_pair}")
-    set(_name "UDISPLAY_VERSION_${CMAKE_MATCH_1}")
-    set(_value "${CMAKE_MATCH_2}")
-    set(_regex "\n#define ${_name} [^\n]*\n")
-    string(REGEX MATCHALL "${_regex}" _matches "${_lib_header_content}")
-    list(LENGTH _matches _count)
-    if(NOT _count EQUAL 1)
-        message(FATAL_ERROR
-            "Expected exactly one '#define ${_name} ...' line in "
-            "${_lib_header} to patch, found ${_count}")
-    endif()
-    string(REGEX REPLACE "${_regex}"
-        "\n#define ${_name} ${_value}\n"
-        _lib_header_content "${_lib_header_content}")
-endforeach()
-udisplay_write_if_changed(
-    "${UDISPLAY_FRAMEWORK_STAGE_DIR}/libudisplay/${_lib_header_rel}"
-    "${_lib_header_content}")
-
 # Local build/editor/cache leftovers never belong in the package, even when
 # installing from a working tree rather than a clean checkout.
 set(_framework_source_excludes
@@ -272,8 +228,15 @@ install(
     REGEX "/libudisplay/include/libudisplay/udisplay\\.h$" EXCLUDE
 )
 install(
-    FILES "${UDISPLAY_FRAMEWORK_STAGE_DIR}/libudisplay/${_lib_header_rel}"
-    DESTINATION "libudisplay/include/libudisplay"
+    CODE "
+        set(SOURCE \"${CMAKE_CURRENT_SOURCE_DIR}/libudisplay/include/libudisplay/udisplay.h\")
+        set(DESTINATION \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/libudisplay/include/libudisplay/udisplay.h\")
+        set(MAJOR ${UDISPLAY_VERSION_MAJOR})
+        set(MINOR ${UDISPLAY_VERSION_MINOR})
+        set(PATCH ${UDISPLAY_VERSION_PATCH})
+        set(FULL ${UDISPLAY_VERSION_FULL})
+        include(\"${CMAKE_CURRENT_SOURCE_DIR}/cmake/uDisplayStampVersionHeader.cmake\")
+    "
     COMPONENT framework
 )
 

@@ -33,10 +33,6 @@ TEST(Version, StringStartsWithNumericTriple)
 TEST(Version, EncodedValue)
 {
     EXPECT_EQ(UDISPLAY_VERSION_ENCODE(1, 2, 3), 10203);
-    EXPECT_EQ(UDISPLAY_VERSION,
-              UDISPLAY_VERSION_ENCODE(UDISPLAY_VERSION_MAJOR,
-                                      UDISPLAY_VERSION_MINOR,
-                                      UDISPLAY_VERSION_PATCH));
 #if UDISPLAY_VERSION < UDISPLAY_VERSION_ENCODE(0, 0, 0)
 #error "UDISPLAY_VERSION must be usable in #if"
 #endif

@@ -1,48 +1,82 @@
-# Installs the framework component of a configured top-level build into a
-# scratch prefix and checks that libudisplay/udisplay.h carries the build's
-# version in place of the 0.0.0 defaults.
+# Configures a scratch top-level build with a non-default version, installs
+# its framework component, and checks that the installed
+# libudisplay/udisplay.h carries that version on its own: a consumer compiled
+# against the installed include directory, without any version compile
+# definitions, must see it. The source header still says 0.0.0, so this
+# fails if the install copies it unpatched.
 #
-#   cmake -DBUILD_DIR=... -DPREFIX=... -DMAJOR=1 -DMINOR=2 -DPATCH=3
-#         -DFULL=1.2.3-rc1 -P framework_version_header.cmake
+#   cmake -DSOURCE_DIR=<repo> -DWORK_DIR=<scratch> -DC_COMPILER=<cc>
+#         -P framework_version_header.cmake
 
-foreach(_var BUILD_DIR PREFIX MAJOR MINOR PATCH FULL)
+foreach(_var SOURCE_DIR WORK_DIR C_COMPILER)
     if(NOT DEFINED ${_var})
         message(FATAL_ERROR "${_var} not set")
     endif()
 endforeach()
 
-file(REMOVE_RECURSE "${PREFIX}")
-execute_process(
-    COMMAND "${CMAKE_COMMAND}" --install "${BUILD_DIR}"
-            --component framework --prefix "${PREFIX}"
-    RESULT_VARIABLE _result
-    OUTPUT_QUIET
-)
-if(NOT _result EQUAL 0)
-    message(FATAL_ERROR "cmake --install failed: ${_result}")
-endif()
+set(_version "12.34.56")
+set(_full "12.34.56-rc1")
+set(_build "${WORK_DIR}/build")
+set(_prefix "${WORK_DIR}/udisplay-framework-${_full}")
 
-set(_header "${PREFIX}/libudisplay/include/libudisplay/udisplay.h")
-if(NOT EXISTS "${_header}")
-    message(FATAL_ERROR "${_header} was not installed")
-endif()
-file(READ "${_header}" _content)
-
-foreach(_pair "MAJOR=${MAJOR}" "MINOR=${MINOR}" "PATCH=${PATCH}"
-              "STRING=\"${FULL}\"")
-    string(REGEX MATCH "^([A-Z]+)=(.*)$" _ "${_pair}")
-    set(_line "#define UDISPLAY_VERSION_${CMAKE_MATCH_1} ${CMAKE_MATCH_2}")
-    string(FIND "${_content}" "\n${_line}\n" _pos)
-    if(_pos EQUAL -1)
-        message(FATAL_ERROR "'${_line}' not found in ${_header}")
+function(run what)
+    execute_process(COMMAND ${ARGN}
+        RESULT_VARIABLE _result
+        OUTPUT_VARIABLE _output
+        ERROR_VARIABLE _output
+    )
+    if(NOT _result EQUAL 0)
+        message(FATAL_ERROR "${what} failed (${_result}):\n${_output}")
     endif()
-endforeach()
+    set(RUN_OUTPUT "${_output}" PARENT_SCOPE)
+endfunction()
+
+file(REMOVE_RECURSE "${WORK_DIR}")
+# Nothing is built: the framework install only copies sources.
+run("configure" "${CMAKE_COMMAND}" -S "${SOURCE_DIR}" -B "${_build}"
+    "-DUDISPLAY_VERSION=${_version}"
+    "-DUDISPLAY_VERSION_FULL=${_full}"
+    -DUDISPLAY_BUILD_CLIENT=OFF
+    -DUDISPLAY_BUILD_DEMOS=OFF
+    -DUDISPLAY_BUILD_TESTS=OFF
+)
+run("install" "${CMAKE_COMMAND}" --install "${_build}"
+    --component framework --prefix "${_prefix}")
+
+set(_include "${_prefix}/libudisplay/include")
+if(NOT EXISTS "${_include}/libudisplay/udisplay.h")
+    message(FATAL_ERROR "libudisplay/udisplay.h was not installed")
+endif()
 
 # No separate version header ships alongside it.
-file(GLOB_RECURSE _version_headers "${PREFIX}/libudisplay/*version*.h*")
+file(GLOB_RECURSE _version_headers "${_prefix}/libudisplay/*version*.h*")
 if(_version_headers)
     message(FATAL_ERROR "Unexpected version header(s): ${_version_headers}")
 endif()
 
-file(REMOVE_RECURSE "${PREFIX}")
-message(STATUS "Installed udisplay.h carries version ${FULL}")
+file(WRITE "${WORK_DIR}/consumer.c" "
+#include \"libudisplay/udisplay.h\"
+#include <stdio.h>
+
+#if UDISPLAY_VERSION != UDISPLAY_VERSION_ENCODE(12, 34, 56)
+#error \"installed header does not carry version 12.34.56\"
+#endif
+
+int main(void)
+{
+    printf(\"%d.%d.%d %s\\n\", UDISPLAY_VERSION_MAJOR, UDISPLAY_VERSION_MINOR,
+           UDISPLAY_VERSION_PATCH, UDISPLAY_VERSION_STRING);
+    return 0;
+}
+")
+run("compiling a consumer of the installed header" "${C_COMPILER}"
+    -std=c11 -I "${_include}"
+    "${WORK_DIR}/consumer.c" -o "${WORK_DIR}/consumer")
+run("running the consumer" "${WORK_DIR}/consumer")
+if(NOT RUN_OUTPUT STREQUAL "${_version} ${_full}\n")
+    message(FATAL_ERROR
+        "Consumer printed '${RUN_OUTPUT}', expected '${_version} ${_full}'")
+endif()
+
+file(REMOVE_RECURSE "${WORK_DIR}")
+message(STATUS "Installed udisplay.h carries version ${_full}")
