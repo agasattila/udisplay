@@ -121,6 +121,36 @@ private slots:
             }
         }
     }
+
+    /* nesting_depth_fixtures: the same cases udisplay-gen's validate()
+     * checks (test_vectors.py). A YAML nested past kMaxWidgetNestingDepth
+     * fails to parse with udisplay-gen's error, verbatim; the others
+     * parse. */
+    void nestingDepthFixtures_matchCodegen()
+    {
+        QFile f(QStringLiteral(UDISPLAY_PROTOCOL_VECTORS_JSON));
+        QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.errorString()));
+        const QJsonObject cases = QJsonDocument::fromJson(f.readAll()).object()
+            .value(QStringLiteral("nesting_depth_fixtures")).toObject()
+            .value(QStringLiteral("cases")).toObject();
+        QVERIFY2(!cases.isEmpty(), "nesting_depth_fixtures.cases must not be empty");
+
+        for (auto it = cases.begin(); it != cases.end(); ++it) {
+            const QJsonObject c = it.value().toObject();
+            const QJsonValue error = c.value(QStringLiteral("error"));
+            YamlParser p;
+            QList<WidgetDef> widgets;
+            QString name, version;
+            const bool ok = p.parse(c.value(QStringLiteral("yaml")).toString().toUtf8(),
+                                    widgets, name, version);
+            if (error.isNull()) {
+                QVERIFY2(ok, qPrintable(it.key() + ": " + p.errorString()));
+            } else {
+                QVERIFY2(!ok, qPrintable(it.key() + ": parsed, expected a depth error"));
+                QCOMPARE(p.errorString(), error.toString());
+            }
+        }
+    }
 };
 
 QTEST_MAIN(TestWidgetIdGoldenFixtures)
