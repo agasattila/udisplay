@@ -16,6 +16,7 @@ add_executable(udisplay_test
     test_framing.cpp
     test_udisplay.cpp
     test_udisplay_multi_instance.cpp
+    test_version.cpp
 )
 
 target_link_libraries(udisplay_test
