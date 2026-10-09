@@ -6,6 +6,7 @@
  *   - STATE_UPDATE sends are blocked when active=0.
  *   - HEARTBEAT is always sent when connected (bypasses active gate).
  *   - active resets to 0 on connect and on disconnect.
+ *   - SLIDER_CHANGE events carrying NaN/±Inf are dropped (TODO-058).
  *
  * Also verifies the shared comms-miss watchdog (TODO-014): it now covers
  * BOOTSTRAP stalls (connected=1, active=0) in addition to the original
@@ -17,6 +18,7 @@
 #include "../include/udisplay.h"
 #include "protocol.h"
 #include <cstring>
+#include <limits>
 #include <vector>
 
 /* ── Minimal chunk fixture (1 dummy chunk) ───────────────────────────────── */
@@ -43,10 +45,12 @@ static void on_send(const uint8_t* d, uint16_t n, void* ud)
 static int g_event_calls = 0;
 static int g_ready_calls = 0;
 static int g_error_calls = 0;
+static udisplay_event_t g_last_event{};
 
-static void on_event(const udisplay_event_t*, void*)
+static void on_event(const udisplay_event_t* ev, void*)
 {
     ++g_event_calls;
+    g_last_event = *ev;
 }
 
 static void on_ready(void*)
@@ -68,6 +72,7 @@ protected:
         g_event_calls = 0;
         g_ready_calls = 0;
         g_error_calls = 0;
+        g_last_event  = udisplay_event_t{};
         sent.clear();
 
         udisplay_config_t cfg{};
@@ -139,6 +144,108 @@ TEST_F(UDisplayTest, Event_DispatchedAfterActive)
     auto ev = make_event();
     udisplay_on_message(&ctx_, ev.data(), static_cast<uint16_t>(ev.size()));
     EXPECT_EQ(g_event_calls, 1);
+}
+
+/* ── SLIDER_CHANGE non-finite rejection (TODO-058) ───────────────────────── */
+
+/* Feed a SLIDER_CHANGE on widget 0x11 whose float32 payload has the given
+ * IEEE-754 bit pattern (little-endian on the wire). */
+static void feed_slider_bits(udisplay_t* ctx, uint32_t bits)
+{
+    uint8_t msg[7] = { 0x31u, 0x11u, 0x02u,
+                       (uint8_t)bits, (uint8_t)(bits >> 8u),
+                       (uint8_t)(bits >> 16u), (uint8_t)(bits >> 24u) };
+    udisplay_on_message(ctx, msg, (uint16_t)sizeof(msg));
+}
+
+TEST_F(UDisplayTest, SliderChange_FiniteValueDispatched)
+{
+    udisplay_on_connect(&ctx_);
+    feed({ 0x02u });
+    feed_slider_bits(&ctx_, 0x42960000u);   /* 75.0f */
+    ASSERT_EQ(g_event_calls, 1);
+    EXPECT_EQ(g_last_event.widget_id, 0x11u);
+    EXPECT_EQ(g_last_event.event_type, UDISPLAY_EVENT_SLIDER_CHANGE);
+    EXPECT_FLOAT_EQ(g_last_event.slider_value, 75.0f);
+}
+
+TEST_F(UDisplayTest, SliderChange_NaNDropped)
+{
+    udisplay_on_connect(&ctx_);
+    feed({ 0x02u });
+    feed_slider_bits(&ctx_, 0x7FC00000u);   /* quiet NaN */
+    feed_slider_bits(&ctx_, 0xFFC00000u);   /* negative quiet NaN */
+    feed_slider_bits(&ctx_, 0x7F800001u);   /* signaling NaN */
+    feed_slider_bits(&ctx_, 0xFFFFFFFFu);   /* NaN, all mantissa bits set */
+    EXPECT_EQ(g_event_calls, 0);
+}
+
+TEST_F(UDisplayTest, SliderChange_PositiveInfinityDropped)
+{
+    udisplay_on_connect(&ctx_);
+    feed({ 0x02u });
+    feed_slider_bits(&ctx_, 0x7F800000u);   /* +Inf */
+    EXPECT_EQ(g_event_calls, 0);
+}
+
+TEST_F(UDisplayTest, SliderChange_NegativeInfinityDropped)
+{
+    udisplay_on_connect(&ctx_);
+    feed({ 0x02u });
+    feed_slider_bits(&ctx_, 0xFF800000u);   /* -Inf */
+    EXPECT_EQ(g_event_calls, 0);
+}
+
+TEST_F(UDisplayTest, SliderChange_FiniteExtremesDispatched)
+{
+    /* Boundary values next to the non-finite encodings must still pass. */
+    udisplay_on_connect(&ctx_);
+    feed({ 0x02u });
+    feed_slider_bits(&ctx_, 0x7F7FFFFFu);   /* FLT_MAX */
+    EXPECT_EQ(g_last_event.slider_value, std::numeric_limits<float>::max());
+    feed_slider_bits(&ctx_, 0xFF7FFFFFu);   /* -FLT_MAX */
+    EXPECT_EQ(g_last_event.slider_value, -std::numeric_limits<float>::max());
+    feed_slider_bits(&ctx_, 0x00000001u);   /* smallest positive subnormal */
+    EXPECT_GT(g_last_event.slider_value, 0.0f);
+    feed_slider_bits(&ctx_, 0x80000000u);   /* -0.0f */
+    uint32_t out = 0;
+    std::memcpy(&out, &g_last_event.slider_value, 4);
+    EXPECT_EQ(out, 0x80000000u);            /* sign bit preserved */
+    EXPECT_EQ(g_event_calls, 4);
+}
+
+TEST_F(UDisplayTest, SliderChange_TrailingBytesIgnored)
+{
+    /* Only payload[0..3] is the float; extra bytes don't affect the check. */
+    udisplay_on_connect(&ctx_);
+    feed({ 0x02u });
+    feed({ 0x31u, 0x11u, 0x02u, 0x00u, 0x00u, 0xC0u, 0x7Fu, 0xAAu });  /* NaN + junk */
+    EXPECT_EQ(g_event_calls, 0);
+    feed({ 0x31u, 0x11u, 0x02u, 0x00u, 0x00u, 0x80u, 0x3Fu, 0xFFu });  /* 1.0f + junk */
+    ASSERT_EQ(g_event_calls, 1);
+    EXPECT_FLOAT_EQ(g_last_event.slider_value, 1.0f);
+}
+
+TEST_F(UDisplayTest, SliderChange_DropDoesNotWedgeLaterEvents)
+{
+    /* A rejected value drops only that one event; the next valid one is
+     * delivered normally. */
+    udisplay_on_connect(&ctx_);
+    feed({ 0x02u });
+    feed_slider_bits(&ctx_, 0x7FC00000u);   /* NaN — dropped */
+    feed_slider_bits(&ctx_, 0x3F800000u);   /* 1.0f */
+    ASSERT_EQ(g_event_calls, 1);
+    EXPECT_FLOAT_EQ(g_last_event.slider_value, 1.0f);
+}
+
+TEST_F(UDisplayTest, SliderChange_TruncatedPayloadStillDefaultsToZero)
+{
+    /* Short-payload fallback is unchanged by the non-finite check. */
+    udisplay_on_connect(&ctx_);
+    feed({ 0x02u });
+    feed({ 0x31u, 0x11u, 0x02u, 0x01u, 0x02u });
+    ASSERT_EQ(g_event_calls, 1);
+    EXPECT_EQ(g_last_event.slider_value, 0.0f);
 }
 
 TEST_F(UDisplayTest, SendFloat_DroppedBeforeActive)

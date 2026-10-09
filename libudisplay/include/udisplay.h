@@ -177,7 +177,7 @@ typedef struct {
     uint8_t  widget_id;    /**< Which widget generated the event */
     uint8_t  event_type;   /**< UDISPLAY_EVENT_* constant */
     union {
-        float   slider_value;     /**< EVENT_SLIDER_CHANGE */
+        float   slider_value;     /**< EVENT_SLIDER_CHANGE; always finite (NaN/±Inf events are dropped), range not checked */
         uint8_t toggle_state;     /**< EVENT_TOGGLE_CHANGE (0=off, 1=on) */
         uint8_t selection_index;  /**< EVENT_SELECTION_CHANGE — 0-based item index */
         struct {

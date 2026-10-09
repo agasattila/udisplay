@@ -455,7 +455,21 @@ class UDisplayDevice:
         widget_id = in_.widget_id
 
         if event_type == UDISPLAY_EVENT_SLIDER_CHANGE:
-            value = struct.unpack("<f", payload[0:4])[0] if len(payload) >= 4 else 0.0
+            if len(payload) >= 4:
+                # Drop NaN/+-Inf (exponent bits all set) before they reach
+                # the application: NaN slips past ordinary range clamps
+                # since every comparison with it is False. Same exponent
+                # test as udisplay.c's dispatch_event, done per byte
+                # (little-endian: exponent = low 7 bits of byte 3 + top bit
+                # of byte 2) so it needs no math module and never builds a
+                # >30-bit int, which would be a heap-allocated bigint -- or
+                # a compile error on MICROPY_LONGINT_IMPL_NONE ports.
+                # TODO-058.
+                if (payload[3] & 0x7F) == 0x7F and (payload[2] & 0x80):
+                    return
+                value = struct.unpack("<f", payload[0:4])[0]
+            else:
+                value = 0.0
         elif event_type == UDISPLAY_EVENT_TOGGLE_CHANGE:
             value = payload[0] if len(payload) >= 1 else 0
         elif event_type == UDISPLAY_EVENT_TEXT_SUBMIT:

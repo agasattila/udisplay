@@ -700,6 +700,10 @@ u.on_client_ready = lambda: u.mode_sel.set(u.mode_sel.slow)   # initial selectio
 Numeric read-write slider. The client sends a SLIDER_CHANGE event when the user
 releases the slider handle. The device responds with STATE_UPDATE to confirm the
 accepted value — which may differ if the device clamps or quantizes the input.
+The runtime drops a SLIDER_CHANGE whose value is NaN or ±Inf before it reaches
+`on_X_change`, so handlers only ever see finite floats. Range is not checked
+on the device side, so a handler that depends on `min`/`max` should still clamp:
+any peer can send any finite value.
 
 ```
 Client drag+release ──SLIDER_CHANGE(float)──► Device
