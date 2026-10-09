@@ -262,7 +262,11 @@ silently (slider moves, no STATE_UPDATE comes back). Reject non-finite /
 out-of-float32-range `min`/`max`/`step` in both validators and clamp before
 narrowing. (2) `udisplay_send_float`/`send_float` forward NaN/Inf from the
 application to the client unchecked; only `DisplayWidget.qml` handles NaN.
-**Why:** Found by the adversarial review of the TODO-058 fix (2026-10-09).
+(3) A SLIDER_CHANGE with a 0-3 byte payload still reaches the handler as a
+fabricated `0.0` (both runtimes, pinned by tests); rejecting it like
+NaN is a separate, compatibility-visible change.
+**Why:** Found by the Claude and Codex adversarial reviews of the TODO-058
+fix (2026-10-09).
 **Effort:** S
 **Priority:** P3
 **Depends on:** TODO-058.
