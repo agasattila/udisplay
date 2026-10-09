@@ -522,7 +522,7 @@ For `button-group`: `widget_id` identifies the pressed item within the group (ea
 
 For `dropdown`: `widget_id` identifies the dropdown itself. The value byte is the 0-based index of the selected item in YAML declaration order.
 
-For `slider_change`: the value must be a finite `float32`. The device runtime (libudisplay and the MicroPython runtime) silently drops an event whose value is NaN, +Inf, or -Inf (all exponent bits set) without invoking the application callback, because NaN slips past ordinary range clamps. A conforming client never sends one. A payload shorter than 4 bytes is still delivered as `0.0`.
+For `slider_change`: the value must be a finite `float32`. The device runtime (libudisplay and the MicroPython runtime) silently drops an event whose value is NaN, +Inf, or -Inf (all exponent bits set) without invoking the application callback, because NaN slips past ordinary range clamps. No STATE_UPDATE is sent in reply, so a client should not send one. A payload shorter than 4 bytes is still delivered as `0.0`.
 
 ---
 

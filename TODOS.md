@@ -221,7 +221,7 @@ on a button/button-group instance) scopes. Regression tests in
 
 ---
 
-### TODO-058: NaN/Inf validation on inbound SLIDER_CHANGE floats (MicroPython backend)
+### TODO-058: NaN/Inf validation on inbound SLIDER_CHANGE floats (libudisplay + MicroPython runtime)
 **What:** `_dispatch_event`'s SLIDER_CHANGE decode (`struct.unpack("<f", ...)`)
 never checks for NaN/Inf before handing the value to `on_change`. In
 demo04's `on_rate_change`, the clamp logic (`if v < 0.1: v = 0.1`) is a
@@ -239,15 +239,33 @@ fix (runtime-level float validation vs. app-level rejection in generated
 code vs. left to each device application, as demo04 currently does) is a
 design call.
 **Status:** ✅ DONE — issue #27. Validated at the common runtime boundary
-rather than per application: both libudisplay's `dispatch_event` and the
-MicroPython runtime's `_dispatch_event` drop a SLIDER_CHANGE whose float32
-has all exponent bits set (NaN, ±Inf) before any callback runs. The check
-is on the raw bits, so it needs no libm/`math` module and survives
-`-ffast-math`. Regression tests in `libudisplay/test/test_udisplay.cpp`
+rather than per application: both libudisplay's `dispatch_event` (which had
+the same gap) and the MicroPython runtime's `_dispatch_event` drop a
+SLIDER_CHANGE whose float32 has all exponent bits set (NaN, ±Inf) before any
+callback runs. The check is on the raw bits, so it needs no libm/`math`
+module and the C check survives `-ffast-math`; the MicroPython check works
+per byte so it never allocates a bigint. Regression tests in `libudisplay/test/test_udisplay.cpp`
 (`SliderChange_*`) and `udisplay-gen/tests/test_python_runtime.py`.
 **Effort:** S (human: ~1-2h / CC: ~15 min)
 **Priority:** P2
 **Depends on:** Nothing blocking.
+
+---
+
+### TODO-062: Non-finite floats on the other side of the slider boundary
+**What:** Follow-ups to TODO-058 (#27), which only guards device-inbound
+SLIDER_CHANGE. (1) The schema/`validate.py` and the client's `YamlParser`
+accept `min: .nan`, `max: .inf` or a finite `max` beyond FLT_MAX, and
+`DeviceController::sendSliderChange` narrows double→float with
+`static_cast`, so a stock client can emit ±Inf, which the device now drops
+silently (slider moves, no STATE_UPDATE comes back). Reject non-finite /
+out-of-float32-range `min`/`max`/`step` in both validators and clamp before
+narrowing. (2) `udisplay_send_float`/`send_float` forward NaN/Inf from the
+application to the client unchecked; only `DisplayWidget.qml` handles NaN.
+**Why:** Found by the adversarial review of the TODO-058 fix (2026-10-09).
+**Effort:** S
+**Priority:** P3
+**Depends on:** TODO-058.
 
 ---
 

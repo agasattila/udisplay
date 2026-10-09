@@ -208,8 +208,22 @@ TEST_F(UDisplayTest, SliderChange_FiniteExtremesDispatched)
     feed_slider_bits(&ctx_, 0x00000001u);   /* smallest positive subnormal */
     EXPECT_GT(g_last_event.slider_value, 0.0f);
     feed_slider_bits(&ctx_, 0x80000000u);   /* -0.0f */
-    EXPECT_EQ(g_last_event.slider_value, 0.0f);
+    uint32_t out = 0;
+    std::memcpy(&out, &g_last_event.slider_value, 4);
+    EXPECT_EQ(out, 0x80000000u);            /* sign bit preserved */
     EXPECT_EQ(g_event_calls, 4);
+}
+
+TEST_F(UDisplayTest, SliderChange_TrailingBytesIgnored)
+{
+    /* Only payload[0..3] is the float; extra bytes don't affect the check. */
+    udisplay_on_connect(&ctx_);
+    feed({ 0x02u });
+    feed({ 0x31u, 0x11u, 0x02u, 0x00u, 0x00u, 0xC0u, 0x7Fu, 0xAAu });  /* NaN + junk */
+    EXPECT_EQ(g_event_calls, 0);
+    feed({ 0x31u, 0x11u, 0x02u, 0x00u, 0x00u, 0x80u, 0x3Fu, 0xFFu });  /* 1.0f + junk */
+    ASSERT_EQ(g_event_calls, 1);
+    EXPECT_FLOAT_EQ(g_last_event.slider_value, 1.0f);
 }
 
 TEST_F(UDisplayTest, SliderChange_DropDoesNotWedgeLaterEvents)
