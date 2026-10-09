@@ -102,6 +102,21 @@ if(UDISPLAY_BUILD_TESTS)
     )
 endif()
 
+# ── Framework install: version-stamped libudisplay header ────────────────
+if(UDISPLAY_BUILD_TESTS)
+    add_test(
+        NAME framework-version-header
+        COMMAND "${CMAKE_COMMAND}"
+            "-DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+            "-DPREFIX=${CMAKE_CURRENT_BINARY_DIR}/test-framework-install"
+            "-DMAJOR=${UDISPLAY_VERSION_MAJOR}"
+            "-DMINOR=${UDISPLAY_VERSION_MINOR}"
+            "-DPATCH=${UDISPLAY_VERSION_PATCH}"
+            "-DFULL=${UDISPLAY_VERSION_FULL}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/framework_version_header.cmake"
+    )
+endif()
+
 # ── udisplay-client ──────────────────────────────────────────────────────
 # Built and tested here, but not part of the framework package: its install
 # rules are excluded from a plain `cmake --install` and only run with
