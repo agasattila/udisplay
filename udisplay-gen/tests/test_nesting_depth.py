@@ -129,3 +129,17 @@ def test_alias_cycle_rejected(tmp_path):
     result = CliRunner().invoke(cli, ["validate", str(src)])
     assert result.exit_code == 1
     assert ("widgets.loop" + ".again" * 10 + ": nested 11 levels deep") in result.output
+
+
+@pytest.mark.parametrize("command", ["validate", "build"])
+def test_cli_rejects_yaml_too_deep_to_load(tmp_path, command):
+    """Past a few hundred levels PyYAML's own recursive loader gives up
+    before the depth check sees the document; the CLI must still fail
+    cleanly (exit 1, no traceback), not crash."""
+    src = tmp_path / "deeper.yaml"
+    src.write_text(_yaml(600))
+    args = [command, str(src)] + (["-o", str(tmp_path / "out")] if command == "build" else [])
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code == 1
+    assert not isinstance(result.exception, RecursionError)
+    assert "could not parse YAML" in result.output
