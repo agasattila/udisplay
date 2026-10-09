@@ -19,16 +19,23 @@ endif()
 set(UDISPLAY_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${UDISPLAY_GEN_DIR})
 
+# udisplay-gen from PATH by default. The top-level CMakeLists.txt sets these
+# to run the in-tree udisplay-gen instead, and to regenerate when it changes.
+if (NOT DEFINED UDISPLAY_GEN_COMMAND)
+    set(UDISPLAY_GEN_COMMAND udisplay-gen)
+endif()
+
 add_custom_command(
     OUTPUT
         ${UDISPLAY_GEN_DIR}/udisplay_ui.hpp
         ${UDISPLAY_GEN_DIR}/udisplay_ui.bin
     COMMAND
-        udisplay-gen build ${CMAKE_CURRENT_SOURCE_DIR}/demo03.yaml
-                           --lang cpp --modern
-                           -o ${UDISPLAY_GEN_DIR}
+        ${UDISPLAY_GEN_COMMAND} build ${CMAKE_CURRENT_SOURCE_DIR}/demo03.yaml
+                                    --lang cpp --modern
+                                    -o ${UDISPLAY_GEN_DIR}
     DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/demo03.yaml
+        ${UDISPLAY_GEN_DEPENDS}
     COMMENT
         "Generating udisplay_ui.hpp from demo03.yaml (--lang cpp --modern)"
     VERBATIM

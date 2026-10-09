@@ -1,3 +1,9 @@
+# Release packages (the top-level CMake build's framework install) ship a
+# uDisplayVersionDefaults.cmake next to this file that pins the version the
+# package was built with. It only fills in values that aren't already
+# defined, so -DUDISPLAY_VERSION=... still wins. Absent in a git checkout.
+include("${CMAKE_CURRENT_LIST_DIR}/uDisplayVersionDefaults.cmake" OPTIONAL)
+
 if(NOT DEFINED UDISPLAY_VERSION)
     set(UDISPLAY_VERSION "0.0.0")
 endif()

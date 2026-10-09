@@ -316,8 +316,20 @@ endif()
 
 include(GNUInstallDirs)
 
+# The client is an end-user app (AppImage/APK), not part of the uDisplay
+# framework package. Built standalone, `cmake --install` installs it as
+# before; built from the top-level CMakeLists.txt, its rules are excluded
+# from a plain install (which stages the framework) and only run with
+# `cmake --install <build> --component client`.
+set(_udisplay_client_install_opts COMPONENT client)
+if(NOT PROJECT_IS_TOP_LEVEL)
+    list(APPEND _udisplay_client_install_opts EXCLUDE_FROM_ALL)
+endif()
+
 install(
     TARGETS udisplay-client
+    # Before any artifact-kind keyword, so it applies to all of them.
+    ${_udisplay_client_install_opts}
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     BUNDLE DESTINATION "."
@@ -329,6 +341,7 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
         DESTINATION
             "${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps"
         RENAME "udisplay-client.png"
+        ${_udisplay_client_install_opts}
     )
 
     install(
@@ -336,6 +349,7 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
             "${CMAKE_CURRENT_SOURCE_DIR}/packaging/udisplay-client.desktop"
         DESTINATION
             "${CMAKE_INSTALL_DATADIR}/applications"
+        ${_udisplay_client_install_opts}
     )
 endif()
 
