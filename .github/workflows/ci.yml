@@ -4,9 +4,9 @@
 # by the top-level CMakeLists.txt (build-all); the reusable workflows below
 # then test and package that same build tree without recompiling it:
 #
-#   version ─► Desktop build-all ─► test.yml ─┬─► build-appimage.yml ─► release (tags)
-#                                             ├─► build-framework.yml
-#                                             └─► build-android.yml
+#   version ─► Desktop build-all ─► test.yml ─┬─► build-appimage.yml ─┐
+#                                             ├─► build-framework.yml ─┼─► release (tags)
+#                                             └─► build-android.yml ───┘
 #
 # Android is a cross build with its own toolchain, so build-android.yml
 # compiles on its own; it waits for the tests only so a broken tree doesn't
@@ -31,9 +31,11 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request supersedes its running CI; every push to
+# main and every tag keeps its own run.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   version:
@@ -49,13 +51,17 @@ jobs:
     steps:
       # Tag vX.Y.Z[-suffix] -> X.Y.Z (+ suffix in the display version);
       # anything else -> 0.0.0-<short sha>, so branch artifacts are never
-      # mistaken for releases.
+      # mistaken for releases. Any other v* tag fails here: it would
+      # otherwise be released with 0.0.0 packages.
       - name: Determine version
         id: version
         run: |
           if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)(-[A-Za-z0-9.]+)?$ ]]; then
             version="${BASH_REMATCH[1]}"
             full="${version}${BASH_REMATCH[2]}"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "::error::Tag ${GITHUB_REF#refs/tags/} is not vMAJOR.MINOR.PATCH[-suffix]"
+            exit 1
           else
             version="0.0.0"
             full="0.0.0-${GITHUB_SHA::7}"
@@ -91,8 +97,9 @@ jobs:
             -DUDISPLAY_VERSION="${{ needs.version.outputs.version }}" \
             -DUDISPLAY_VERSION_FULL="${{ needs.version.outputs.full }}"
 
+      # A bare --parallel means an unbounded `make -j`.
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel "$(nproc)"
 
       # Object files are only needed to relink; nothing downstream builds.
       - name: Archive build tree
@@ -106,7 +113,9 @@ jobs:
           if-no-files-found: error
           # Already compressed.
           compression-level: 0
-          retention-days: 1
+          # Long enough for "Re-run failed jobs" on a downstream job, which
+          # doesn't rebuild this artifact.
+          retention-days: 7
 
   test:
     name: Tests
@@ -138,10 +147,10 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: appimage
+    needs: [version, appimage, framework, android]
 
-    # Runs only on tag push
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Runs only on tag push (not on a manual run against a tag)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
     runs-on: ubuntu-24.04
 
@@ -155,6 +164,12 @@ jobs:
           name: udisplay-client-linux-x86_64
           path: release-files
 
+      - name: Download framework package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: udisplay-framework-${{ needs.version.outputs.full }}
+          path: release-files
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -162,5 +177,6 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
             release-files/udisplay-client-linux-x86_64.tar.gz \
+            "release-files/udisplay-framework-${{ needs.version.outputs.full }}.tar.gz" \
             --title "uDisplay ${{ github.ref_name }}" \
             --generate-notes

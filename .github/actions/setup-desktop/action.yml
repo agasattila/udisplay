@@ -16,6 +16,9 @@ inputs:
   qt-version:
     description: Qt version to install (must match the one the build tree was configured with)
     required: true
+  udisplay-gen-venv:
+    description: Create the .venv the build tree's Python3_EXECUTABLE points at (not needed for packaging)
+    default: "true"
 
 runs:
   using: composite
@@ -49,6 +52,7 @@ runs:
     # The top-level build runs the in-tree udisplay-gen (demo code
     # generation) and its pytest suite with this interpreter.
     - name: Install udisplay-gen dependencies
+      if: inputs.udisplay-gen-venv == 'true'
       shell: bash
       run: |
         python3 -m venv .venv

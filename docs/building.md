@@ -54,8 +54,8 @@ The binary lands at `udisplay-client/build/udisplay-client`.
 The `CMakeLists.txt` in the repository root builds every desktop component in one tree:
 libudisplay, the TCP demos (demo01–demo03), udisplay-client, and all of their tests. It
 also stages the **uDisplay framework** package: libudisplay, udisplay-gen and the demos as
-sources, with the version patched in. CI runs these same commands, so you can reproduce a
-release package locally: [`ci.yml`](../.github/workflows/ci.yml) configures and builds this
+sources, with the version patched in. CI runs the same configure, build, `ctest` and
+`cmake --install --component framework` steps, so you can reproduce a release package locally: [`ci.yml`](../.github/workflows/ci.yml) configures and builds this
 tree once, then runs the tests, packages the framework and bundles the client AppImage from
 that same build tree without recompiling (see [CI](#ci)).
 
@@ -105,8 +105,8 @@ build; the per-component builds below keep working standalone.
 
 ### CI
 
-[`ci.yml`](../.github/workflows/ci.yml) runs on every push to `main`, every `v*` tag and
-every pull request. It compiles the desktop components once and calls the other workflows
+[`ci.yml`](../.github/workflows/ci.yml) runs on every push to `main`, every `v*` tag,
+every pull request, and on demand (Run workflow in the Actions tab). It compiles the desktop components once and calls the other workflows
 in `.github/workflows/` as reusable workflows:
 
 ```text
@@ -122,8 +122,9 @@ test.yml            ctest on the build tree
 
 The build tree is passed to the downstream jobs as an artifact, so tests and packaging
 reuse the same binaries instead of recompiling. Tags `vX.Y.Z[-suffix]` set
-`UDISPLAY_VERSION`/`UDISPLAY_VERSION_FULL`; any other ref builds as `0.0.0-<short sha>`.
-A tag push also creates a GitHub Release with the client archive.
+`UDISPLAY_VERSION`/`UDISPLAY_VERSION_FULL`; other `v*` tags fail CI, and any other ref
+builds as `0.0.0-<short sha>`. Once all packaging jobs pass, a tag push creates a GitHub
+Release with the client archive and the framework package.
 
 ---
 
@@ -404,8 +405,9 @@ minimum. CI builds Android with Qt 6.11.
 
 If you just want an APK to sideload instead of building locally, CI already builds one:
 [`build-android.yml`](../.github/workflows/build-android.yml) produces an
-arm64-v8a debug APK as a workflow artifact on every CI run for `main`, a `v*` tag, or a
-pull request (Actions tab, `uDisplay-<sha>-arm64-v8a-debug.apk`, retained 30 days). It's debug-signed for sideloading only — see `TODOS.md` for the
+arm64-v8a debug APK as a workflow artifact on every CI run whose tests pass (`main`, `v*`
+tags, pull requests; Actions tab, artifact `udisplay-client-android-arm64-v8a-<sha>`
+containing `uDisplay-<sha>-arm64-v8a-debug.apk`, retained 30 days). It's debug-signed for sideloading only — see `TODOS.md` for the
 signing/distribution tradeoff. The manual steps below are for local development.
 
 1. Install the Qt for Android toolchain from the Qt online installer (the apt packages do

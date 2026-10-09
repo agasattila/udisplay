@@ -156,7 +156,7 @@ jobs:
         run: |
           cmake \
             --build build/udisplay-client-android \
-            --parallel \
+            --parallel "$(nproc)" \
             --target udisplay-client_make_apk
 
       # 9. Sanity check + rename before upload — catches a corrupt/missing
