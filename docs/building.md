@@ -7,6 +7,7 @@ Tested on Ubuntu 24.04 LTS (Noble). Ubuntu 22.04 LTS works with the same package
 
 - [Quick start](#quick-start)
 - [Top-level build and framework package](#top-level-build-and-framework-package)
+  - [CI](#ci)
 - [udisplay-client (Qt desktop app)](#udisplay-client-qt-desktop-app)
 - [udisplay-gen (Python codegen)](#udisplay-gen-python-codegen)
 - [libudisplay (firmware C library — host build)](#libudisplay-firmware-c-library--host-build)
@@ -53,8 +54,10 @@ The binary lands at `udisplay-client/build/udisplay-client`.
 The `CMakeLists.txt` in the repository root builds every desktop component in one tree:
 libudisplay, the TCP demos (demo01–demo03), udisplay-client, and all of their tests. It
 also stages the **uDisplay framework** package: libudisplay, udisplay-gen and the demos as
-sources, with the version patched in. CI runs exactly these commands
-(`.github/workflows/framework-build.yml`), so you can reproduce a release package locally.
+sources, with the version patched in. CI runs exactly these commands, so you can reproduce a
+release package locally: [`ci.yml`](../.github/workflows/ci.yml) configures and builds this
+tree once, then runs the tests, packages the framework and bundles the client AppImage from
+that same build tree without recompiling (see [CI](#ci)).
 
 ```bash
 # udisplay-gen's Python dependencies (the build runs the in-tree udisplay-gen,
@@ -92,12 +95,34 @@ udisplay-framework-<version>/
 └── demos/
 ```
 
-udisplay-client is an end-user application (AppImage / APK, see its own workflow), so it is
+udisplay-client is an end-user application (AppImage / APK, see [CI](#ci)), so it is
 not part of the framework package. To install it from the top-level build anyway, use
 `cmake --install build --component client`.
 
 The ESP-IDF demos and the Android client are cross builds and stay out of the top-level
 build; the per-component builds below keep working standalone.
+
+### CI
+
+[`ci.yml`](../.github/workflows/ci.yml) runs on every push to `main`, every `v*` tag and
+every pull request. It compiles the desktop components once and calls the other workflows
+in `.github/workflows/` as reusable workflows:
+
+```text
+ci.yml: Desktop build-all (top-level CMake build, client included)
+   │
+   ▼
+test.yml            ctest on the build tree
+   │
+   ├─► build-appimage.yml   cmake --install --component client -> tar.gz + AppImage
+   ├─► build-framework.yml  cpack -> udisplay-framework-<version>.tar.gz
+   └─► build-android.yml    own Android cross build -> arm64-v8a debug APK
+```
+
+The build tree is passed to the downstream jobs as an artifact, so tests and packaging
+reuse the same binaries instead of recompiling. Tags `vX.Y.Z[-suffix]` set
+`UDISPLAY_VERSION`/`UDISPLAY_VERSION_FULL`; any other ref builds as `0.0.0-<short sha>`.
+A tag push also creates a GitHub Release with the client archive.
 
 ---
 
@@ -377,11 +402,9 @@ CMake fails at configure time on older Android kits. Desktop builds keep the Qt 
 minimum. CI builds Android with Qt 6.11.
 
 If you just want an APK to sideload instead of building locally, CI already builds one:
-the `build-android` job in
-[`udisplay-client-build.yml`](../.github/workflows/udisplay-client-build.yml) produces an
-arm64-v8a debug APK as a workflow artifact whenever `udisplay-client/**` changes on
-`main`, a `v*` tag, or a pull request (Actions tab, `uDisplay-<sha>-arm64-v8a-debug.apk`,
-retained 30 days). It's debug-signed for sideloading only — see `TODOS.md` for the
+[`build-android.yml`](../.github/workflows/build-android.yml) produces an
+arm64-v8a debug APK as a workflow artifact on every CI run for `main`, a `v*` tag, or a
+pull request (Actions tab, `uDisplay-<sha>-arm64-v8a-debug.apk`, retained 30 days). It's debug-signed for sideloading only — see `TODOS.md` for the
 signing/distribution tradeoff. The manual steps below are for local development.
 
 1. Install the Qt for Android toolchain from the Qt online installer (the apt packages do
