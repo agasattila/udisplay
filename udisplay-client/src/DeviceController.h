@@ -163,8 +163,8 @@ public:
      * levels (WidgetDef.h) — see docs/designs/container-style-cascading.md.
      * The parser rejects deeper documents, so the walk always reaches a
      * parsed widget's top-level ancestor; the cap only guards a list that
-     * did not come from the parser. Defensive against an invalid/out-of-range row or a style
-     * name absent from m_styles (both should be unreachable from a
+     * did not come from the parser. Defensive against an invalid/
+     * out-of-range row or a style name absent from m_styles (both should be unreachable from a
      * successfully-parsed YAML — the parser rejects an unknown stylesheet
      * name at Severity::Error — but never crash regardless). QML bindings
      * must depend on BOTH `activeStyle` and `widgetModel.generation` (see
