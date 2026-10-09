@@ -353,6 +353,51 @@ class TestUDisplayDeviceEvents:
         assert events[0][0:2] == (0x11, UDISPLAY_EVENT_SLIDER_CHANGE)
         assert abs(events[0][2] - 75.0) < 1e-4
 
+    def _feed_slider_bits(self, dev, bits):
+        payload = bytes([MSG_EVENT, 0x11, UDISPLAY_EVENT_SLIDER_CHANGE]) + struct.pack("<I", bits)
+        dev.feed(tcp_frame(payload))
+
+    def test_slider_change_nan_dropped(self):
+        """TODO-058: NaN slips past ordinary range clamps (every NaN
+        comparison is False), so the runtime must drop it before on_event."""
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        for bits in (0x7FC00000, 0xFFC00000, 0x7F800001, 0xFFFFFFFF):
+            self._feed_slider_bits(dev, bits)
+        assert events == []
+
+    def test_slider_change_positive_infinity_dropped(self):
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        self._feed_slider_bits(dev, 0x7F800000)
+        assert events == []
+
+    def test_slider_change_negative_infinity_dropped(self):
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        self._feed_slider_bits(dev, 0xFF800000)
+        assert events == []
+
+    def test_slider_change_finite_extremes_dispatched(self):
+        """Encodings adjacent to the non-finite ones must still pass."""
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append(v))
+        for bits in (0x7F7FFFFF, 0xFF7FFFFF, 0x00000001, 0x80000000):
+            self._feed_slider_bits(dev, bits)
+        flt_max = struct.unpack("<f", struct.pack("<I", 0x7F7FFFFF))[0]
+        assert events[0] == flt_max
+        assert events[1] == -flt_max
+        assert events[2] > 0.0
+        assert events[3] == 0.0
+        assert len(events) == 4
+
+    def test_slider_change_drop_does_not_wedge_later_events(self):
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        self._feed_slider_bits(dev, 0x7FC00000)  # NaN -- dropped
+        self._feed_slider_bits(dev, 0x3F800000)  # 1.0
+        assert events == [(0x11, UDISPLAY_EVENT_SLIDER_CHANGE, 1.0)]
+
     def test_toggle_change(self):
         events = []
         dev = self._active_device(lambda w, t, v: events.append((w, t, v)))

@@ -455,7 +455,17 @@ class UDisplayDevice:
         widget_id = in_.widget_id
 
         if event_type == UDISPLAY_EVENT_SLIDER_CHANGE:
-            value = struct.unpack("<f", payload[0:4])[0] if len(payload) >= 4 else 0.0
+            if len(payload) >= 4:
+                # Drop NaN/+-Inf (exponent bits all set) before they reach
+                # the application: NaN slips past ordinary range clamps
+                # since every comparison with it is False. Same raw-bit
+                # check as udisplay.c's dispatch_event, so it needs no
+                # math module. TODO-058.
+                if (struct.unpack("<I", payload[0:4])[0] & 0x7F800000) == 0x7F800000:
+                    return
+                value = struct.unpack("<f", payload[0:4])[0]
+            else:
+                value = 0.0
         elif event_type == UDISPLAY_EVENT_TOGGLE_CHANGE:
             value = payload[0] if len(payload) >= 1 else 0
         elif event_type == UDISPLAY_EVENT_TEXT_SUBMIT:
