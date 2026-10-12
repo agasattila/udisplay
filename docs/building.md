@@ -336,8 +336,10 @@ The public header lives under a `libudisplay/` prefix: the include directory is
 ```
 
 That header also defines the version macros (`UDISPLAY_VERSION_MAJOR`/`_MINOR`/`_PATCH`,
-`UDISPLAY_VERSION_STRING`, `UDISPLAY_VERSION` and `UDISPLAY_VERSION_ENCODE()`); there is no
-separate version header. In a framework package the header carries the release version; in
+`UDISPLAY_VERSION_STRING`, `UDISPLAY_VERSION`, `UDISPLAY_VERSION_ENCODE()` and
+`UDISPLAY_MINIMUM_VERSION()`); there is no separate version header.
+`UDISPLAY_MINIMUM_VERSION(1, 2, 0)` is true for 1.2.0 and later and for a `0.0.0` git
+checkout, and works in `#if`. In a framework package the header carries the release version; in
 a git checkout it defaults to `0.0.0`. A CMake build (host or ESP-IDF) also passes the
 configured `UDISPLAY_VERSION`/`UDISPLAY_VERSION_FULL` to libudisplay and its consumers as
 compile definitions, which take precedence over the header defaults.

@@ -86,10 +86,13 @@ extern "C" {
  * UDISPLAY_VERSION_FULL) to the library and its consumers as compile
  * definitions, which take precedence over these defaults.
  *
- * Example version guard:
+ * Example version guard (UDISPLAY_MINIMUM_VERSION also accepts a 0.0.0 git
+ * checkout, which tracks the latest sources):
  *
- *   #if UDISPLAY_VERSION >= UDISPLAY_VERSION_ENCODE(1, 2, 0)
+ *   #if UDISPLAY_MINIMUM_VERSION(1, 2, 0)
  *       // API available since 1.2.0
+ *   #else
+ *       // handle the older library at compile time
  *   #endif
  */
 #ifndef UDISPLAY_VERSION_MAJOR
@@ -113,6 +116,11 @@ extern "C" {
         UDISPLAY_VERSION_MAJOR, \
         UDISPLAY_VERSION_MINOR, \
         UDISPLAY_VERSION_PATCH)
+
+/** True when the library is at least major.minor.patch, or a 0.0.0 git checkout. */
+#define UDISPLAY_MINIMUM_VERSION(major, minor, patch) \
+    (UDISPLAY_VERSION == 0 || \
+     UDISPLAY_VERSION >= UDISPLAY_VERSION_ENCODE(major, minor, patch))
 
 /** Version string of the compiled library (UDISPLAY_VERSION_STRING). */
 const char *udisplay_version(void);
