@@ -118,7 +118,7 @@ ESP-IDF lwIP, or a demo helper like [`demos/shared/demo_tcp`](../demos/shared/) 
 demo01–03 use). Swap them for real I/O and this becomes a working device.
 
 ```cpp
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 
 using namespace udisplay_ui;

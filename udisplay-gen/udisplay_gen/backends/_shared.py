@@ -188,7 +188,7 @@ def _config_fields(
     """
     Canonical udisplay_config_t field -> value-expression list, shared by both
     codegen backends (c_backend.py, cpp_backend.py). Every field of
-    udisplay_config_t (libudisplay/include/udisplay.h) MUST appear here --
+    udisplay_config_t (libudisplay/include/libudisplay/udisplay.h) MUST appear here --
     this is the single place to update when the struct grows a field, instead
     of the two backends drifting independently (the bug this list fixes:
     2026-07-07 plan-eng-review found transport/ble_mtu_payload/auth_* left

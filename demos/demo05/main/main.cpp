@@ -29,7 +29,7 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.hpp"
 
 #if CONFIG_DEMO05_LED_IS_WS2812

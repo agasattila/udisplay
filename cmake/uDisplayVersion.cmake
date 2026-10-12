@@ -24,13 +24,23 @@ set(UDISPLAY_VERSION_MAJOR "${CMAKE_MATCH_1}")
 set(UDISPLAY_VERSION_MINOR "${CMAKE_MATCH_2}")
 set(UDISPLAY_VERSION_PATCH "${CMAKE_MATCH_3}")
 
+# UDISPLAY_VERSION_FULL ends up in a C string literal (libudisplay's
+# UDISPLAY_VERSION_STRING), a compile-definition list, file names and a
+# generated .cmake file; keep it to characters that are safe in all of them.
+if(NOT UDISPLAY_VERSION_FULL MATCHES "^[A-Za-z0-9._+-]+$")
+    message(FATAL_ERROR
+        "UDISPLAY_VERSION_FULL may only contain [A-Za-z0-9._+-], "
+        "got: '${UDISPLAY_VERSION_FULL}'"
+    )
+endif()
+
 message(STATUS
     "uDisplay version: ${UDISPLAY_VERSION_FULL}"
 )
 
 # ── Git-derived display version (udisplay-client UI only) ──────────────────
 # Distinct from UDISPLAY_VERSION_FULL (the numeric MAJOR.MINOR.PATCH consumed
-# by libudisplay's firmware version.h) so this never leaks into the ESP-IDF
+# by libudisplay's version macros) so this never leaks into the ESP-IDF
 # build path. Exact tag match -> use the tag as-is. Otherwise ->
 # v0.0.0-<short-hash>. git unavailable / not a repo -> v0.0.0-unknown.
 #

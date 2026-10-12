@@ -35,16 +35,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _write_version_header(tmp_path: pathlib.Path) -> pathlib.Path:
-    """Stub udisplay/version.h (normally produced by CMake configure_file())."""
-    ver_dir = tmp_path / "generated" / "udisplay"
-    ver_dir.mkdir(parents=True, exist_ok=True)
-    (ver_dir / "version.h").write_text(
-        '#pragma once\n#define UDISPLAY_VERSION_STRING "test"\n'
-    )
-    return tmp_path / "generated"
-
-
 def _build_two_namespaces(tmp_path: pathlib.Path, lang: str) -> pathlib.Path:
     """Generate the SAME full-vocab YAML under two different --namespace
     values into one output directory, proving the namespace flag alone
@@ -83,14 +73,13 @@ def _build_two_namespaces(tmp_path: pathlib.Path, lang: str) -> pathlib.Path:
 
 def test_c_two_namespaces_compile_link_and_run(tmp_path):
     out = _build_two_namespaces(tmp_path, "c")
-    gen_include = _write_version_header(tmp_path)
 
     main_c = tmp_path / "main.c"
     main_c.write_text(
         """
 #include <stdint.h>
 #include <stdio.h>
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "ble/udisplay_ui.h"
 #include "wifi/udisplay_ui.h"
 
@@ -127,7 +116,6 @@ int main(void) {
     cmd = [
         CC, "-std=c11", "-Wall", "-Wextra",
         "-I", str(LIBUDISPLAY_INCLUDE),
-        "-I", str(gen_include),
         "-I", str(out),
         str(main_c),
         str(out / "ble" / "udisplay_ui.c"),
@@ -154,14 +142,13 @@ def test_cpp_two_namespaces_compile_in_one_tu_and_run(tmp_path):
     that would fail with a duplicate 'class UDisplay' / ODR violation if the
     outer namespace weren't parameterized (see Design Decision, Next Steps #6)."""
     out = _build_two_namespaces(tmp_path, "cpp")
-    gen_include = _write_version_header(tmp_path)
 
     main_cpp = tmp_path / "main.cpp"
     main_cpp.write_text(
         """
 #include <cstdint>
 #include <cstdio>
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "ble/udisplay_ui.hpp"
 #include "wifi/udisplay_ui.hpp"
 
@@ -207,7 +194,6 @@ int main() {
         cc_cmd = [
             CC, "-std=c11", "-c",
             "-I", str(LIBUDISPLAY_INCLUDE),
-            "-I", str(gen_include),
             str(LIBUDISPLAY_SRC / src_name),
             "-o", str(obj),
         ]
@@ -219,7 +205,6 @@ int main() {
     cmd = [
         CXX, "-std=c++14", "-Wall", "-Wextra",
         "-I", str(LIBUDISPLAY_INCLUDE),
-        "-I", str(gen_include),
         "-I", str(out),
         str(main_cpp),
         *c_objs,

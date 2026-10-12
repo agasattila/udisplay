@@ -55,7 +55,7 @@ def _generate_header(ctx: BuildContext) -> str:
     ]
 
     if widget_types is not None:
-        lines.append('#include "udisplay.h"')
+        lines.append('#include "libudisplay/udisplay.h"')
 
     lines += [
         "",

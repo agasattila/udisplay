@@ -11,8 +11,7 @@ find_package(ZLIB REQUIRED)
 
 # ── Generated client version header ─────────────────────────────────────
 # UDISPLAY_CLIENT_DISPLAY_VERSION is computed in cmake/uDisplayVersion.cmake
-# (included above). Generated into the build dir (never the source tree),
-# mirroring libudisplay's version.h.in/generated convention exactly.
+# (included above). Generated into the build dir (never the source tree).
 set(UDISPLAY_CLIENT_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/client_version.h.in"

@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "udisplay.h"
+#include "libudisplay/udisplay.h"
 #include "udisplay_ui.h"
 #include "demo_tcp.h"
 

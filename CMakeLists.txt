@@ -16,15 +16,6 @@ cmake_minimum_required(VERSION 3.21)
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/uDisplayVersion.cmake")
 project(udisplay-framework VERSION ${UDISPLAY_VERSION} LANGUAGES C CXX)
 
-# UDISPLAY_VERSION_FULL ends up in file names and in a generated .cmake file;
-# keep it to characters that are safe in both.
-if(NOT UDISPLAY_VERSION_FULL MATCHES "^[A-Za-z0-9._+-]+$")
-    message(FATAL_ERROR
-        "UDISPLAY_VERSION_FULL may only contain [A-Za-z0-9._+-], "
-        "got: '${UDISPLAY_VERSION_FULL}'"
-    )
-endif()
-
 option(UDISPLAY_BUILD_CLIENT "Build udisplay-client (requires Qt 6)" ON)
 option(UDISPLAY_BUILD_DEMOS  "Build the desktop TCP demos (demo01-demo03)" ON)
 # Same cache variable libudisplay's standalone build uses for its own tests.
@@ -99,6 +90,18 @@ if(UDISPLAY_BUILD_TESTS)
         NAME udisplay-gen-pytest
         COMMAND "${Python3_EXECUTABLE}" -m pytest -q -p no:cacheprovider tests
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/udisplay-gen"
+    )
+endif()
+
+# ── Framework install: version-stamped libudisplay header ────────────────
+if(UDISPLAY_BUILD_TESTS)
+    add_test(
+        NAME framework-version-header
+        COMMAND "${CMAKE_COMMAND}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-framework-version-header"
+            "-DC_COMPILER=${CMAKE_C_COMPILER}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/framework_version_header.cmake"
     )
 endif()
 
@@ -214,14 +217,27 @@ install(
     COMPONENT framework
 )
 
-# libudisplay without its gtest suite; its CMakeLists.txt skips test/ when
-# the directory is absent.
+# libudisplay without its gtest suite (its CMakeLists.txt skips test/ when
+# the directory is absent), with the version-stamped main header.
 install(
     DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/libudisplay/"
     DESTINATION "libudisplay"
     COMPONENT framework
     ${_framework_source_excludes}
     REGEX "/libudisplay/test$" EXCLUDE
+    REGEX "/libudisplay/include/libudisplay/udisplay\\.h$" EXCLUDE
+)
+install(
+    CODE "
+        set(SOURCE \"${CMAKE_CURRENT_SOURCE_DIR}/libudisplay/include/libudisplay/udisplay.h\")
+        set(DESTINATION \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/libudisplay/include/libudisplay/udisplay.h\")
+        set(MAJOR ${UDISPLAY_VERSION_MAJOR})
+        set(MINOR ${UDISPLAY_VERSION_MINOR})
+        set(PATCH ${UDISPLAY_VERSION_PATCH})
+        set(FULL ${UDISPLAY_VERSION_FULL})
+        include(\"${CMAKE_CURRENT_SOURCE_DIR}/cmake/uDisplayStampVersionHeader.cmake\")
+    "
+    COMPONENT framework
 )
 
 install(

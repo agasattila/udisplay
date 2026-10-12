@@ -396,7 +396,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         "#pragma once",
         "#include <stdint.h>",
         "#include <stddef.h>",
-        '#include "udisplay.h"',
+        '#include "libudisplay/udisplay.h"',
     ]
     if variant == "modern":
         lines.append("#include <functional>")
