@@ -212,7 +212,7 @@ const char *udisplay_version(void);
 typedef enum {
     UDISPLAY_TRANSPORT_NONE = 0,
     UDISPLAY_TRANSPORT_TCP  = 1,
-    UDISPLAY_TRANSPORT_BLE  = 2,
+    UDISPLAY_TRANSPORT_BLE  = 2
 } udisplay_transport_t;
 
 /** One live protocol session — defined below (see "Internal state layout"). */
