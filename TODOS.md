@@ -243,9 +243,11 @@ design call.
 rather than per application: both libudisplay's `dispatch_event` (which had
 the same gap) and the MicroPython runtime's `_dispatch_event` drop a
 SLIDER_CHANGE whose float32 has all exponent bits set (NaN, ±Inf) before any
-callback runs. The check is on the raw bits, so it needs no libm/`math`
-module and the C check survives `-ffast-math`; the MicroPython check works
-per byte so it never allocates a bigint. Regression tests in `libudisplay/test/test_udisplay.cpp`
+callback runs, and also drop one whose payload is shorter than 4 bytes
+(previously delivered as a fabricated `0.0`; PR #57 review). The check is
+on the raw bits, so it needs no libm/`math` module and the C check survives
+`-ffast-math`; the MicroPython check works per byte so it never allocates a
+bigint. Regression tests in `libudisplay/test/test_udisplay.cpp`
 (`SliderChange_*`) and `udisplay-gen/tests/test_python_runtime.py`.
 **Effort:** S (human: ~1-2h / CC: ~15 min)
 **Priority:** P2
@@ -263,9 +265,10 @@ silently (slider moves, no STATE_UPDATE comes back). Reject non-finite /
 out-of-float32-range `min`/`max`/`step` in both validators and clamp before
 narrowing. (2) `udisplay_send_float`/`send_float` forward NaN/Inf from the
 application to the client unchecked; only `DisplayWidget.qml` handles NaN.
-(3) A SLIDER_CHANGE with a 0-3 byte payload still reaches the handler as a
-fabricated `0.0` (both runtimes, pinned by tests); rejecting it like
-NaN is a separate, compatibility-visible change.
+(3) SLIDER_CHANGE now drops a <4-byte payload (PR #57 review), but
+TOGGLE_CHANGE and SELECTION_CHANGE with an empty payload are still delivered
+as a fabricated `0` (off / first item) in both runtimes; drop those the same
+way.
 **Why:** Found by the Claude and Codex adversarial reviews of the TODO-058
 fix (2026-10-09).
 **Effort:** S
