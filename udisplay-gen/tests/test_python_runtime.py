@@ -414,6 +414,24 @@ class TestUDisplayDeviceEvents:
             self._feed_slider_bits(dev, bits)
         assert len(events) == 4
 
+    def test_slider_change_truncated_payload_dropped(self):
+        """A payload shorter than the 4-byte float32 is malformed: it must
+        be dropped, not delivered as 0.0 (indistinguishable from a real
+        move to zero)."""
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        head = bytes([MSG_EVENT, 0x11, UDISPLAY_EVENT_SLIDER_CHANGE])
+        for n in range(4):
+            dev.feed(tcp_frame(head + bytes([0x00, 0x00, 0x80][:n])))
+        assert events == []
+
+    def test_slider_change_truncated_drop_does_not_wedge_later_events(self):
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        dev.feed(tcp_frame(bytes([MSG_EVENT, 0x11, UDISPLAY_EVENT_SLIDER_CHANGE, 0x01, 0x02])))
+        self._feed_slider_bits(dev, 0x3F800000)  # 1.0
+        assert events == [(0x11, UDISPLAY_EVENT_SLIDER_CHANGE, 1.0)]
+
     def test_slider_change_drop_does_not_wedge_later_events(self):
         events = []
         dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
@@ -652,8 +670,8 @@ class TestDispatchEventFallbacks:
 
     def test_truncated_payloads_fall_back_to_defaults(self):
         """Each event type's payload-too-short guard in _dispatch_event:
-        slider_change<4 bytes -> 0.0, toggle_change empty -> 0,
-        selection_change empty -> 0, text_submit empty -> ''."""
+        slider_change<4 bytes -> dropped (no callback), toggle_change
+        empty -> 0, selection_change empty -> 0, text_submit empty -> ''."""
         events = []
         dev, sent = _make_device(on_event=lambda w, t, v: events.append((t, v)))
         dev.on_connect()
@@ -665,7 +683,6 @@ class TestDispatchEventFallbacks:
         dev.feed(tcp_frame(bytes([MSG_EVENT, 0x13, UDISPLAY_EVENT_TEXT_SUBMIT])))
 
         assert events == [
-            (UDISPLAY_EVENT_SLIDER_CHANGE, 0.0),
             (UDISPLAY_EVENT_TOGGLE_CHANGE, 0),
             (UDISPLAY_EVENT_SELECTION_CHANGE, 0),
             (UDISPLAY_EVENT_TEXT_SUBMIT, ""),

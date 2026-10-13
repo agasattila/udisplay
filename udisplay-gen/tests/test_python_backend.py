@@ -298,6 +298,9 @@ class TestGeneratedOutputEndToEndOtherEventTypes:
             for bad in (float("nan"), float("inf"), float("-inf")):
                 u.feed(tcp_frame(bytes([MSG_EVENT, generated_ui.WIDGET_ID_SLIDER_RATE,
                                          UDISPLAY_EVENT_SLIDER_CHANGE]) + struct.pack("<f", bad)))
+            # A truncated (<4-byte) payload is dropped too, not delivered as 0.0.
+            u.feed(tcp_frame(bytes([MSG_EVENT, generated_ui.WIDGET_ID_SLIDER_RATE,
+                                     UDISPLAY_EVENT_SLIDER_CHANGE, 0x01, 0x02])))
             assert len(slid) == 1
         finally:
             sys.path.remove(str(tmp_path))

@@ -238,14 +238,27 @@ TEST_F(UDisplayTest, SliderChange_DropDoesNotWedgeLaterEvents)
     EXPECT_FLOAT_EQ(g_last_event.slider_value, 1.0f);
 }
 
-TEST_F(UDisplayTest, SliderChange_TruncatedPayloadStillDefaultsToZero)
+TEST_F(UDisplayTest, SliderChange_TruncatedPayloadDropped)
 {
-    /* Short-payload fallback is unchanged by the non-finite check. */
+    /* A payload shorter than the 4-byte float32 is malformed: it must be
+     * dropped, not delivered as 0.0 (which looks like a real move to zero). */
     udisplay_on_connect(&ctx_);
     feed({ 0x02u });
-    feed({ 0x31u, 0x11u, 0x02u, 0x01u, 0x02u });
+    feed({ 0x31u, 0x11u, 0x02u });                          /* 0 bytes */
+    feed({ 0x31u, 0x11u, 0x02u, 0x00u });                   /* 1 byte  */
+    feed({ 0x31u, 0x11u, 0x02u, 0x00u, 0x00u });            /* 2 bytes */
+    feed({ 0x31u, 0x11u, 0x02u, 0x00u, 0x00u, 0x80u });     /* 3 bytes */
+    EXPECT_EQ(g_event_calls, 0);
+}
+
+TEST_F(UDisplayTest, SliderChange_TruncatedDropDoesNotWedgeLaterEvents)
+{
+    udisplay_on_connect(&ctx_);
+    feed({ 0x02u });
+    feed({ 0x31u, 0x11u, 0x02u, 0x01u, 0x02u });            /* dropped */
+    feed_slider_bits(&ctx_, 0x3F800000u);                   /* 1.0f */
     ASSERT_EQ(g_event_calls, 1);
-    EXPECT_EQ(g_last_event.slider_value, 0.0f);
+    EXPECT_FLOAT_EQ(g_last_event.slider_value, 1.0f);
 }
 
 TEST_F(UDisplayTest, SendFloat_DroppedBeforeActive)

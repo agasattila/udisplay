@@ -77,7 +77,11 @@ static void dispatch_event(udisplay_t* ctx, const proto_inbound_t* in)
 
     switch (ev.event_type) {
         case UDISPLAY_EVENT_SLIDER_CHANGE:
-            if (plen >= 4u) {
+            /* Drop a truncated payload rather than substituting 0.0: a
+             * malformed event must not look like a real move to zero.
+             * Trailing bytes past the float32 are ignored. */
+            if (plen < 4u) return;
+            {
                 uint32_t bits = (uint32_t)payload[0]
                               | ((uint32_t)payload[1] << 8u)
                               | ((uint32_t)payload[2] << 16u)
@@ -89,8 +93,6 @@ static void dispatch_event(udisplay_t* ctx, const proto_inbound_t* in)
                  * libm. TODO-058. */
                 if ((bits & 0x7F800000u) == 0x7F800000u) return;
                 memcpy(&ev.slider_value, &bits, 4);
-            } else {
-                ev.slider_value = 0.0f;
             }
             break;
 
