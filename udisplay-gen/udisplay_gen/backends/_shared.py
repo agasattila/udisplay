@@ -246,9 +246,9 @@ def _config_designated_initializer(
 def _config_sequential_assignment(var_name: str, fields: list[tuple[str, str]]) -> list[str]:
     """
     Render fields as sequential assignment statements: `var.field = expr;`.
-    Used by cpp_backend.py, which targets C++11 (demo02/demo03 pin
-    CMAKE_CXX_STANDARD 11) -- C99 designated initializers aren't standard
-    C++ until C++20, so this backend can't use _config_designated_initializer.
+    Used by cpp_backend.py, whose default variant targets C++98 (--modern:
+    C++11) -- C99 designated initializers aren't standard C++ until C++20,
+    so this backend can't use _config_designated_initializer.
     """
     return [f"{var_name}.{name} = {value};" for name, value in fields]
 

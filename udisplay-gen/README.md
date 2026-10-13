@@ -36,10 +36,10 @@ udisplay-gen validate device.yaml
 # Generate C code (default)
 udisplay-gen build device.yaml -o ./generated
 
-# Generate C++ code (C++11 compatible)
+# Generate C++ code (C++98 compatible, function-pointer handlers)
 udisplay-gen build device.yaml --lang cpp -o ./generated
 
-# Generate C++ code with std::function handlers
+# Generate C++ code with std::function handlers (C++11+)
 udisplay-gen build device.yaml --lang cpp --modern -o ./generated
 
 # Generate MicroPython code
