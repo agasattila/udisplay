@@ -372,12 +372,15 @@ def _cpp_dispatch_cases(
             # libudisplay passes the selection byte through unvalidated, and
             # casting an out-of-range value to a C++98 enum is unspecified:
             # ignore it, like an unknown widget ID. Indices are 0..N-1 (YAML
-            # order, see collect_dropdown_items()), so N bounds the range.
+            # order, see collect_dropdown_items()), so N bounds the range. With
+            # 256 items every byte is valid, and `< 256u` on a uint8_t would
+            # trip -Wtype-limits (-Wextra), so the check is left out.
             option = f"{_cpp_class_name(path)}::{_cpp_enum_type('Option', variant)}"
             count = len(dropdown_items.get(node.path, []))
+            in_range = f"ev->selection_index < {count}u && " if count < 256 else ""
             lines += [
                 f"    case 0x{wid:02X}u:",
-                f"        if (ev->selection_index < {count}u && self->{path}.on_change)",
+                f"        if ({in_range}self->{path}.on_change)",
                 f"            self->{path}.on_change(static_cast<{option}>(ev->selection_index));",
                 "        break;",
             ]

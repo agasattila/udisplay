@@ -79,7 +79,9 @@ declaration order (so `-Wreorder` stays quiet). A small helper
 ```
 
 The bound is `len(items)`, from the same `collect_dropdown_items()` list the
-enum is emitted from, so the check and the enumerators can't drift apart.
+enum is emitted from, so the check and the enumerators can't drift apart. With
+exactly 256 items every byte is a valid index and the check is omitted: an
+always-true `uint8_t < 256u` fails `-Wtype-limits` (`-Wextra -Werror`).
 
 ### 1.6 Contiguous dropdown indices
 

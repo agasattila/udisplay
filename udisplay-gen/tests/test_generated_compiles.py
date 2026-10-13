@@ -252,3 +252,19 @@ def test_generated_cpp98_rejects_misuse(tmp_path, case):
     assert proc.returncode != 0, f"{case} compiled, but must not"
     # Fails on the misuse itself, not on some unrelated header error.
     assert "bad.cpp:3" in proc.stderr, proc.stderr
+
+
+@pytest.mark.skipif(shutil.which("c++") is None, reason="no C++ compiler")
+@pytest.mark.parametrize("modern", [False, True])
+def test_generated_cpp_full_uint8_dropdown_compiles(tmp_path, modern):
+    """256 items (the validator's maximum): every selection byte is in range,
+    so the dispatch must not emit an always-true `< 256u` (-Wtype-limits)."""
+    items = "".join(f"      i{n}: Item {n}\n" for n in range(256))
+    src = tmp_path / "big.yaml"
+    src.write_text("device:\n  name: big\nwidgets:\n  dd:\n    type: dropdown\n    items:\n" + items)
+    out = tmp_path / "out"
+    args = ["build", str(src), "--lang", "cpp", "-o", str(out)] + (["--modern"] if modern else [])
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code == 0, result.output
+    (out / "use.cpp").write_text('#include "udisplay_ui.hpp"\n')
+    _compile("c++", _cpp_args("c++11" if modern else "c++98", "use.cpp"), out)
