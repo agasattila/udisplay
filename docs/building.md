@@ -27,8 +27,8 @@ sudo apt install -y \
     build-essential cmake git pkg-config \
     qt6-base-dev qt6-declarative-dev \
     libqt6quickcontrols2-6 qml6-module-qtquick-controls \
-    zlib1g-dev libavahi-client-dev \
-    python3 python3-pip python3-venv
+    zlib1g-dev libavahi-client-dev librsvg2-bin \
+    python3 python3-pip python3-venv   
 ```
 
 Then build:
