@@ -353,6 +353,92 @@ class TestUDisplayDeviceEvents:
         assert events[0][0:2] == (0x11, UDISPLAY_EVENT_SLIDER_CHANGE)
         assert abs(events[0][2] - 75.0) < 1e-4
 
+    def _feed_slider_bits(self, dev, bits):
+        payload = bytes([MSG_EVENT, 0x11, UDISPLAY_EVENT_SLIDER_CHANGE]) + struct.pack("<I", bits)
+        dev.feed(tcp_frame(payload))
+
+    def test_slider_change_nan_dropped(self):
+        """TODO-058: NaN slips past ordinary range clamps (every NaN
+        comparison is False), so the runtime must drop it before on_event."""
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        for bits in (0x7FC00000, 0xFFC00000, 0x7F800001, 0xFFFFFFFF):
+            self._feed_slider_bits(dev, bits)
+        assert events == []
+
+    def test_slider_change_positive_infinity_dropped(self):
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        self._feed_slider_bits(dev, 0x7F800000)
+        assert events == []
+
+    def test_slider_change_negative_infinity_dropped(self):
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        self._feed_slider_bits(dev, 0xFF800000)
+        assert events == []
+
+    def test_slider_change_finite_extremes_dispatched(self):
+        """Encodings adjacent to the non-finite ones must still pass."""
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append(v))
+        for bits in (0x7F7FFFFF, 0xFF7FFFFF, 0x00000001, 0x80000000):
+            self._feed_slider_bits(dev, bits)
+        flt_max = struct.unpack("<f", struct.pack("<I", 0x7F7FFFFF))[0]
+        assert events[0] == flt_max
+        assert events[1] == -flt_max
+        assert events[2] > 0.0
+        assert struct.pack("<f", events[3]) == struct.pack("<I", 0x80000000)  # -0.0 keeps its sign
+        assert len(events) == 4
+
+    def test_slider_change_trailing_bytes_ignored(self):
+        """Only payload[0:4] is the float; extra bytes don't affect the check."""
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append(v))
+        head = bytes([MSG_EVENT, 0x11, UDISPLAY_EVENT_SLIDER_CHANGE])
+        dev.feed(tcp_frame(head + struct.pack("<I", 0x7FC00000) + b"\xaa"))
+        dev.feed(tcp_frame(head + struct.pack("<f", 1.0) + b"\xff"))
+        assert events == [1.0]
+
+    def test_slider_change_every_exponent_all_ones_pattern_dropped(self):
+        """The per-byte exponent test must agree with the 32-bit mask
+        for every sign/mantissa combination at the byte boundaries."""
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append(v))
+        for sign in (0, 0x80000000):
+            for mant in (0, 1, 0x7FFF, 0x8000, 0x400000, 0x7FFFFF):
+                self._feed_slider_bits(dev, sign | 0x7F800000 | mant)
+        assert events == []
+        # One exponent bit short of all-ones on either side of the byte split.
+        for bits in (0x7F000000, 0x00800000, 0x7F7FFFFF, 0xFF000000):
+            self._feed_slider_bits(dev, bits)
+        assert len(events) == 4
+
+    def test_slider_change_truncated_payload_dropped(self):
+        """A payload shorter than the 4-byte float32 is malformed: it must
+        be dropped, not delivered as 0.0 (indistinguishable from a real
+        move to zero)."""
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        head = bytes([MSG_EVENT, 0x11, UDISPLAY_EVENT_SLIDER_CHANGE])
+        for n in range(4):
+            dev.feed(tcp_frame(head + bytes([0x00, 0x00, 0x80][:n])))
+        assert events == []
+
+    def test_slider_change_truncated_drop_does_not_wedge_later_events(self):
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        dev.feed(tcp_frame(bytes([MSG_EVENT, 0x11, UDISPLAY_EVENT_SLIDER_CHANGE, 0x01, 0x02])))
+        self._feed_slider_bits(dev, 0x3F800000)  # 1.0
+        assert events == [(0x11, UDISPLAY_EVENT_SLIDER_CHANGE, 1.0)]
+
+    def test_slider_change_drop_does_not_wedge_later_events(self):
+        events = []
+        dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
+        self._feed_slider_bits(dev, 0x7FC00000)  # NaN -- dropped
+        self._feed_slider_bits(dev, 0x3F800000)  # 1.0
+        assert events == [(0x11, UDISPLAY_EVENT_SLIDER_CHANGE, 1.0)]
+
     def test_toggle_change(self):
         events = []
         dev = self._active_device(lambda w, t, v: events.append((w, t, v)))
@@ -584,8 +670,8 @@ class TestDispatchEventFallbacks:
 
     def test_truncated_payloads_fall_back_to_defaults(self):
         """Each event type's payload-too-short guard in _dispatch_event:
-        slider_change<4 bytes -> 0.0, toggle_change empty -> 0,
-        selection_change empty -> 0, text_submit empty -> ''."""
+        slider_change<4 bytes -> dropped (no callback), toggle_change
+        empty -> 0, selection_change empty -> 0, text_submit empty -> ''."""
         events = []
         dev, sent = _make_device(on_event=lambda w, t, v: events.append((t, v)))
         dev.on_connect()
@@ -597,7 +683,6 @@ class TestDispatchEventFallbacks:
         dev.feed(tcp_frame(bytes([MSG_EVENT, 0x13, UDISPLAY_EVENT_TEXT_SUBMIT])))
 
         assert events == [
-            (UDISPLAY_EVENT_SLIDER_CHANGE, 0.0),
             (UDISPLAY_EVENT_TOGGLE_CHANGE, 0),
             (UDISPLAY_EVENT_SELECTION_CHANGE, 0),
             (UDISPLAY_EVENT_TEXT_SUBMIT, ""),

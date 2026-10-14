@@ -292,6 +292,16 @@ class TestGeneratedOutputEndToEndOtherEventTypes:
                        + struct.pack("<f", 42.0))
             u.feed(tcp_frame(payload))
             assert len(slid) == 1 and abs(slid[0] - 42.0) < 1e-4
+
+            # TODO-058: the runtime drops non-finite values before the
+            # generated widget handler ever sees them.
+            for bad in (float("nan"), float("inf"), float("-inf")):
+                u.feed(tcp_frame(bytes([MSG_EVENT, generated_ui.WIDGET_ID_SLIDER_RATE,
+                                         UDISPLAY_EVENT_SLIDER_CHANGE]) + struct.pack("<f", bad)))
+            # A truncated (<4-byte) payload is dropped too, not delivered as 0.0.
+            u.feed(tcp_frame(bytes([MSG_EVENT, generated_ui.WIDGET_ID_SLIDER_RATE,
+                                     UDISPLAY_EVENT_SLIDER_CHANGE, 0x01, 0x02])))
+            assert len(slid) == 1
         finally:
             sys.path.remove(str(tmp_path))
             for mod in ("ui", "udisplay_runtime"):
