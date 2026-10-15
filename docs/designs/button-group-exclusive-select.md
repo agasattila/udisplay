@@ -25,7 +25,10 @@ items are permanently unselected.
 - No wire-format change and no PROTO_VERSION bump: reuse STATE_UPDATE with the
   existing `uint8` value type.
 - Three codegen backends (C, C++, Python/MicroPython) must stay in lockstep.
-- C++ backend targets C++11 (no C++17 features).
+- C++ backend targets C++11 (no C++17 features). *Superseded for the default
+  (non-`--modern`) variant by [cpp98-default-output.md](cpp98-default-output.md)
+  (issue #48): it targets C++98 and spells the group's enum type
+  `ModeSelWidget::Item::Value`.*
 
 ## Premises
 

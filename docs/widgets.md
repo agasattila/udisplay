@@ -197,6 +197,9 @@ call through it. Handlers differ by build flag: the default build (`--lang cpp`)
 stores them as raw function pointers; adding `--modern` switches every handler to
 `std::function<...>` instead, which is what makes lambda handlers possible (see
 `button` below). Setters are unaffected by that flag — identical in both variants.
+The default build compiles as C++98; `--modern` requires C++11. The two variants
+also spell the `button-group` / `dropdown` enum *types* differently — see
+[C++ API: default vs `--modern`](#c-api-default-vs---modern).
 
 ```cpp
 #include "libudisplay/udisplay.h"
@@ -650,9 +653,44 @@ static const udisplay_ui_handlers_t g_handlers = {
 **Generated C++ API:**
 
 The group gets its own derived class holding one `ButtonItem` member per item,
-plus a scoped `Item` enum (the values are the items' widget IDs) and
-`set(Item)` / `clear()`. Lambda handlers require `--lang cpp --modern` (see
-`button` above for why).
+plus an `Item` enum (the values are the items' widget IDs) and
+`set()` / `clear()`. The enumerators are `ModeSelWidget::Item::fast` in both
+variants; the enum *type* is `ModeSelWidget::Item::Value` in the default (C++98)
+build and `ModeSelWidget::Item` with `--modern` (see
+[C++ API: default vs `--modern`](#c-api-default-vs---modern)).
+
+Default build (`--lang cpp`), function-pointer handlers:
+
+```cpp
+#include "libudisplay/udisplay.h"
+#include "udisplay_ui.hpp"
+
+using namespace udisplay_ui;
+
+static UDisplay ui;
+
+static ModeSelWidget::Item::Value g_mode = ModeSelWidget::Item::slow;
+
+static void select_mode(ModeSelWidget::Item::Value item)
+{
+    g_mode = item;
+    ui.mode_sel.set(g_mode);   // confirm selection
+}
+
+static void on_ready()   { ui.mode_sel.set(g_mode); }
+static void on_fast()    { select_mode(ModeSelWidget::Item::fast); }
+static void on_slow()    { select_mode(ModeSelWidget::Item::slow); }
+
+int main(/* ... */) {
+    ui.on_client_ready        = on_ready;
+    ui.mode_sel.fast.on_press = on_fast;
+    ui.mode_sel.slow.on_press = on_slow;
+
+    // ui.mode_sel.clear();   // no item selected
+}
+```
+
+With `--modern`, lambda handlers (see `button` above for why they need it):
 
 ```cpp
 #include "libudisplay/udisplay.h"
@@ -1046,8 +1084,37 @@ static const udisplay_ui_handlers_t g_handlers = {
 
 **Generated C++ API:**
 
-Dropdowns get their own derived class with a scoped `Option` enum instead of the C
-API's `#define` index constants:
+Dropdowns get their own derived class with an `Option` enum instead of the C
+API's `#define` index constants. As with `button-group`, the enumerators are
+`WifiModeWidget::Option::sta` in both variants, while the enum *type* is
+`WifiModeWidget::Option::Value` in the default (C++98) build and
+`WifiModeWidget::Option` with `--modern`. A selection index outside the item list
+(only possible from a misbehaving client) is ignored, like an event for an unknown
+widget ID: `on_change` is not called.
+
+Default build (`--lang cpp`):
+
+```cpp
+#include "libudisplay/udisplay.h"
+#include "udisplay_ui.hpp"
+
+using namespace udisplay_ui;
+
+static UDisplay ui;
+static WifiModeWidget::Option::Value g_wifi_mode = WifiModeWidget::Option::sta;
+
+static void handle_wifi_mode(WifiModeWidget::Option::Value selection)
+{
+    g_wifi_mode = selection;
+    ui.wifi_mode.set(g_wifi_mode);   // echo confirmed selection
+}
+
+int main(/* ... */) {
+    ui.wifi_mode.on_change = handle_wifi_mode;
+}
+```
+
+With `--modern` (lambda handlers):
 
 ```cpp
 #include "libudisplay/udisplay.h"
@@ -1065,8 +1132,6 @@ int main(/* ... */) {
     };
 }
 ```
-
-Lambda handlers require `--lang cpp --modern` (see `button` above for why).
 
 ---
 
@@ -1394,6 +1459,68 @@ child buttons as its members (`ui.<dpad>.<button>.on_click = ...`), like a
 [`section`](#section) with `namespace: true`.
 
 ---
+
+## C++ API: default vs `--modern`
+
+`--lang cpp` generates one of two variants of `udisplay_ui.hpp`:
+
+| | Default (`--lang cpp`) | `--modern` |
+|---|---|---|
+| Language level | C++98 (also compiles unchanged as C++11/17/20) | C++11 or newer |
+| Handlers | function pointers | `std::function` (lambdas with captures) |
+| Needs `<functional>` | no | yes |
+| `button-group` enum type | `ModeSelWidget::Item::Value` | `ModeSelWidget::Item` (`enum class`) |
+| `dropdown` enum type | `WifiModeWidget::Option::Value` | `WifiModeWidget::Option` (`enum class`) |
+| Enumerators | `ModeSelWidget::Item::fast` | `ModeSelWidget::Item::fast` |
+| Non-copyable `UDisplay` | private copy operations | `= delete` |
+
+The default variant is for toolchains without full C++11 support (ARM
+Compiler 5, older IAR, GCC < 4.7) or without a C++ standard library (where
+`<functional>` is missing, e.g. AVR). C++98 has no `enum class`, so the default
+variant nests a plain enum in a struct, `struct Item { enum Value { ... }; };`:
+the struct keeps the enumerators scoped (`Item::fast` does not collide with the
+`ButtonItem` member `ui.mode_sel.fast`), and the enum is named so `set()` and
+handlers keep a typed parameter. `--modern` keeps `enum class` for its stronger
+type safety, which is why the type spelling differs between the variants.
+
+**Migrating default-variant code written before C++98 support.** Only code that
+names an enum *type* changes; enumerator values, `set()` calls and handler
+assignments compile as before:
+
+```diff
+-static ModeSelWidget::Item g_mode = ModeSelWidget::Item::slow;
++static ModeSelWidget::Item::Value g_mode = ModeSelWidget::Item::slow;
+
+-static void select_mode(ModeSelWidget::Item item, float multiplier)
++static void select_mode(ModeSelWidget::Item::Value item, float multiplier)
+
+-static void on_wifi(WifiModeWidget::Option selection) { ... }
++static void on_wifi(WifiModeWidget::Option::Value selection) { ... }
+```
+
+Code that keeps the old spelling fails to compile (`conversion from
+'ModeSelWidget::Item::Value' to non-scalar type 'ModeSelWidget::Item'`); it never
+misbehaves silently. Switching a project between the variants needs the same
+edit in the other direction.
+
+**Differences from `enum class`.** Compared with the `--modern` enum, the default
+variant's enum:
+
+- **converts implicitly to `int`**: `ModeSelWidget::Item::fast + 1` and
+  `if (g_mode)` compile. Comparing enumerators of two *different* widgets compiles
+  too; GCC and Clang warn (`-Wenum-compare`). Passing a raw integer or another
+  widget's enumerator to `set()` is still a compile error.
+- **has no fixed underlying type**: `sizeof(ModeSelWidget::Item::Value)` is
+  usually `sizeof(int)`, not 1. The wire format is unaffected (`set()` sends a
+  `uint8_t`); a RAM-tight sketch can store the value in a `uint8_t` and
+  `static_cast` it back.
+- **leaves `Item` / `Option` as an empty struct**: it is a scope, not a value
+  type. `ModeSelWidget::Item x;` compiles but is meaningless.
+- works as before for `switch` (including `-Wswitch` coverage warnings), `==` /
+  `!=`, function parameters and overload resolution.
+
+The default variant includes `<stdint.h>`, which C++98 does not standardize but
+every supported toolchain ships.
 
 ## capabilities field
 
