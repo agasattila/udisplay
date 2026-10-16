@@ -712,6 +712,24 @@ private slots:
             "line 2, column 5: mapping key is a mapping or sequence; keys must be strings"));
     }
 
+    /* A tampered key long enough to overflow a matcher that recurses per
+     * character (libstdc++'s std::regex does) is still just an integer.
+     * An explicit `? ` key, since both YAML loaders cap implicit keys at
+     * 1024 characters. */
+    void mappingKeys_longImplicitKeyRejectedWithoutCrash()
+    {
+        const std::string key = "1" + std::string(200000, '_');
+        const std::string yaml = "? " + key + "\n: x\nwidgets:\n  lamp:\n    type: led\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(QByteArray::fromStdString(yaml), widgets, name, version));
+        QVERIFY2(p.errorString().endsWith(QStringLiteral(
+                     "reads as an integer in YAML 1.1, not a string; quote it: \"")
+                     + QString::fromStdString(key) + QStringLiteral("\"")),
+                 qPrintable(p.errorString().left(120)));
+    }
+
     /* Before this check yaml-cpp kept the first of two duplicate keys and
      * udisplay-gen the last, so the two tools showed different widgets. */
     void mappingKeys_duplicateWidgetRejected()

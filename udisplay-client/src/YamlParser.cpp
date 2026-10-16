@@ -7,11 +7,11 @@
 #include <yaml-cpp/eventhandler.h>
 #include <algorithm>
 #include <array>
-#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
 #include <utility>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
@@ -191,29 +191,36 @@ static bool isTransparentContainer(const std::string& type, const YAML::Node& w)
 
 /* What PyYAML's YAML 1.1 implicit resolvers read a plain scalar as, tried
  * in PyYAML's order (resolver.py; the first match wins), or nullptr for a
- * string. Null and the merge key are handled by the caller. */
-static const char* implicitKeyKind(const std::string& v)
+ * string. Null and the merge key are handled by the caller.
+ * QRegularExpression, not std::regex: libstdc++'s matcher recurses once
+ * per character, so a long tampered key (`1___...`) overflows the stack. */
+static const char* implicitKeyKind(const std::string& value)
 {
-    static const std::regex boolRe(
+    static const auto re = [](const char* pattern) {
+        return QRegularExpression(QRegularExpression::anchoredPattern(
+            QString::fromLatin1(pattern)));
+    };
+    static const QRegularExpression boolRe = re(
         "yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF");
-    static const std::regex floatRe(
+    static const QRegularExpression floatRe = re(
         R"([-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?)"
         R"(|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?)"
         R"(|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*)"
         R"(|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))");
-    static const std::regex intRe(
+    static const QRegularExpression intRe = re(
         R"([-+]?0b[0-1_]+|[-+]?0[0-7_]+|[-+]?(?:0|[1-9][0-9_]*))"
         R"(|[-+]?0x[0-9a-fA-F_]+|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)");
-    static const std::regex timestampRe(
+    static const QRegularExpression timestampRe = re(
         R"([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])"
         R"(|[0-9][0-9][0-9][0-9]-[0-9][0-9]?-[0-9][0-9]?(?:[Tt]|[ \t]+))"
         R"([0-9][0-9]?:[0-9][0-9]:[0-9][0-9](?:\.[0-9]*)?)"
         R"((?:[ \t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?)");
-    if (std::regex_match(v, boolRe))      return "a boolean";
-    if (std::regex_match(v, floatRe))     return "a float";
-    if (std::regex_match(v, intRe))       return "an integer";
-    if (std::regex_match(v, timestampRe)) return "a timestamp";
-    if (v == "=")                         return "a value key";
+    const QString v = qs(value);
+    if (boolRe.match(v).hasMatch())      return "a boolean";
+    if (floatRe.match(v).hasMatch())     return "a float";
+    if (intRe.match(v).hasMatch())       return "an integer";
+    if (timestampRe.match(v).hasMatch()) return "a timestamp";
+    if (value == "=")                    return "a value key";
     return nullptr;
 }
 

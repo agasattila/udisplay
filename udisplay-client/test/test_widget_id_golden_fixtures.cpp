@@ -150,16 +150,17 @@ private slots:
         QVERIFY2(!keys.isEmpty(), "mapping_key_fixtures.plain_keys must not be empty");
 
         for (auto it = keys.begin(); it != keys.end(); ++it) {
-            /* `widgets:` makes every accepted key parse (a non-widget
-             * value is skipped); only the key check can fail it. */
-            const QByteArray yaml = (it.key() + QStringLiteral(": x\nwidgets: {}\n")).toUtf8();
+            /* A valid widget makes every accepted key parse (the client
+             * ignores unknown top-level keys); only the key check can
+             * fail it. */
+            const QByteArray yaml = (it.key()
+                + QStringLiteral(": x\nwidgets:\n  lamp:\n    type: led\n")).toUtf8();
             YamlParser p;
             QList<WidgetDef> widgets;
             QString name, version;
             const bool ok = p.parse(yaml, widgets, name, version);
             if (it.value().isNull()) {
-                QVERIFY2(ok || !p.errorString().startsWith(QStringLiteral("line 1,")),
-                         qPrintable(it.key() + ": " + p.errorString()));
+                QVERIFY2(ok, qPrintable(it.key() + ": " + p.errorString()));
             } else {
                 QVERIFY2(!ok, qPrintable(it.key() + ": parsed, expected a key error"));
                 QCOMPARE(p.errorString(), it.value().toString());
