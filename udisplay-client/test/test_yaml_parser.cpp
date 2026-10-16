@@ -646,6 +646,107 @@ private slots:
         QVERIFY(p.errorString().contains(QStringLiteral("241")));
     }
 
+    /* ── Nesting depth cap (issue #24, TODO-036) ─────────────────────
+     * The boundary cases (exactly at / one over kMaxWidgetNestingDepth,
+     * button-group items, mixed containers) are shared with udisplay-gen in
+     * protocol_vectors.json (test_widget_id_golden_fixtures.cpp). These
+     * cover what only the client can get wrong: inputs whose recursive
+     * walks would exhaust the stack. */
+
+    /* 200 nested rows: shallow enough for YAML::Load (yaml-cpp's scanner
+     * gives up at roughly 250), so only the parser's cap stops it. */
+    void nesting_farPastMaxDepth_rejectedByDepthCap()
+    {
+        std::string yaml = "widgets:\n";
+        std::string indent = "  ";
+        for (int i = 1; i <= 200; ++i) {
+            yaml += indent + "l" + std::to_string(i) + ":\n"
+                  + indent + "  type: row\n"
+                  + indent + "  widgets:\n";
+            indent += "    ";
+        }
+        yaml += indent + "leaf:\n" + indent + "  type: led\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(QByteArray::fromStdString(yaml), widgets, name, version));
+        QVERIFY2(p.errorString().startsWith(QStringLiteral(
+                     "widgets.l1.l2.l3.l4.l5.l6.l7.l8.l9.l10.l11: nested 11 levels deep")),
+                 qPrintable(p.errorString()));
+        QVERIFY(widgets.isEmpty());
+    }
+
+    /* An alias to an enclosing anchor makes the node graph cyclic: without
+     * the cap, every recursive walk over it would never end. */
+    void nesting_aliasCycle_rejectedByDepthCap()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  loop: &loop\n"
+            "    type: row\n"
+            "    widgets:\n"
+            "      again: *loop\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(yaml, widgets, name, version));
+        QVERIFY2(p.errorString().contains(QStringLiteral("levels deep")),
+                 qPrintable(p.errorString()));
+    }
+
+    /* ── Mapping keys ───────────────────────────────────────────────── *
+     * The shared cases live in protocol_vectors.json (mapping_key_fixtures,
+     * test_widget_id_golden_fixtures.cpp). PyYAML can't load a collection
+     * key at all (udisplay-gen fails to parse it), so it isn't one. */
+    void mappingKeys_collectionKeyRejected()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  ? [a, b]\n"
+            "  : {type: led}\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(yaml, widgets, name, version));
+        QCOMPARE(p.errorString(), QStringLiteral(
+            "line 2, column 5: mapping key is a mapping or sequence; keys must be strings"));
+    }
+
+    /* A tampered key long enough to overflow a matcher that recurses per
+     * character (libstdc++'s std::regex does) is still just an integer.
+     * An explicit `? ` key, since both YAML loaders cap implicit keys at
+     * 1024 characters. */
+    void mappingKeys_longImplicitKeyRejectedWithoutCrash()
+    {
+        const std::string key = "1" + std::string(200000, '_');
+        const std::string yaml = "? " + key + "\n: x\nwidgets:\n  lamp:\n    type: led\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(QByteArray::fromStdString(yaml), widgets, name, version));
+        QVERIFY2(p.errorString().endsWith(QStringLiteral(
+                     "reads as an integer in YAML 1.1, not a string; quote it: \"")
+                     + QString::fromStdString(key) + QStringLiteral("\"")),
+                 qPrintable(p.errorString().left(120)));
+    }
+
+    /* Before this check yaml-cpp kept the first of two duplicate keys and
+     * udisplay-gen the last, so the two tools showed different widgets. */
+    void mappingKeys_duplicateWidgetRejected()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  a:\n"
+            "    type: led\n"
+            "  a:\n"
+            "    type: button\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(yaml, widgets, name, version));
+        QCOMPARE(p.errorString(), QStringLiteral("line 4, column 3: duplicate mapping key 'a'"));
+    }
+
     /* ── New widget types: dropdown ───────────────────────────────── */
 
     void dropdown_items_populated()

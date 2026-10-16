@@ -203,7 +203,7 @@ class TestAssign:
         leaves = {f"w{i:03d}": {"type": "led"} for i in range(MAX_WIDGETS - 1)}
         assert len(assign({"sec": {"type": "section", "widgets": leaves}})) == MAX_WIDGETS
         leaves[f"w{MAX_WIDGETS:03d}"] = {"type": "led"}
-        with pytest.raises(ValueError, match="exceeds maximum"):
+        with pytest.raises(ValueError, match="widget number 241; the maximum widget count is 240"):
             assign({"sec": {"type": "section", "widgets": leaves}})
 
 
@@ -573,5 +573,5 @@ class TestShipAuditGaps:
         widgets = {f"w{i:03d}": {"type": "led"} for i in range(MAX_WIDGETS)}
         assert len(assign(widgets)) == MAX_WIDGETS
         widgets["zz_note"] = {"type": "label", "text": "x"}
-        with pytest.raises(ValueError, match="exceeds maximum"):
+        with pytest.raises(ValueError, match="widget number 241; the maximum widget count is 240"):
             assign(widgets)

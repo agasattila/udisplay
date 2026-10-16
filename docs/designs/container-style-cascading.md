@@ -77,12 +77,13 @@ Approach A — smallest diff, reuses a pattern this codebase already trusts (sam
 
 ## Scope Decisions (resolving the issue's open "considerations")
 
-- **Ancestor-walk depth cap:** bound the walk at 10 levels — consistent with TODO-036's
-  proposed 8-10 level nesting cap for the *parser's* recursion (TODO-036 itself is still
-  open; this cap is a local defensive bound on this specific runtime walk, not a substitute
-  for TODO-036's parse-time fix). A widget nested deeper than 10 containers falls back to
-  `activeStyle` rather than walking further — matches "safe ancestor-walk depth limit,
-  consistent with TODO-036" from the issue.
+- **Ancestor-walk depth cap:** bound the walk at 10 levels, the parser's maximum nesting
+  depth (`kMaxWidgetNestingDepth`, TODO-036 / issue #24), which this walk shares. The
+  parser rejects any document deeper than that, so a parsed widget's whole ancestor chain
+  always fits; falling back to `activeStyle` past the cap only guards a widget list that
+  did not come from the parser — matches "safe ancestor-walk depth limit, consistent with
+  TODO-036" from the issue. (When this design was written TODO-036 was still open and
+  this cap was a local bound on the runtime walk alone.)
 - **`style:` on transparent containers:** lift the rejection for `row`/`grid`/`dpad` (they
   become valid cascade roots; their own rendering is unaffected — still `color:"transparent"`,
   no own chrome). `button` stays rejected — not a general subtree container.

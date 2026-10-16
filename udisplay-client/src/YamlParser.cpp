@@ -4,9 +4,14 @@
 #include "YamlParser.h"
 #include "udisplay_schema_enums.h"
 #include <yaml-cpp/yaml.h>
+#include <yaml-cpp/eventhandler.h>
 #include <algorithm>
 #include <array>
+#include <set>
+#include <sstream>
+#include <string>
 #include <utility>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
@@ -174,6 +179,177 @@ static bool isTransparentContainer(const std::string& type, const YAML::Node& w)
     return !(ns && ns.IsScalar() && YAML::convert<bool>::decode(ns, flag) && flag);
 }
 
+/* ── Mapping keys ──────────────────────────────────────────────────────────
+ *
+ * udisplay-gen loads YAML with PyYAML, which reads YAML 1.1 implicit keys
+ * as booleans, numbers or dates (`yes:` is True, so its widget would be
+ * WIDGET_ID_TRUE), applies `<<` merge keys and keeps the last of two
+ * duplicate keys. yaml-cpp keeps the text, doesn't merge and keeps the
+ * first. Both tools reject such keys instead, with the same text
+ * (validate.py mapping_key_error()), so they derive the same widget paths.
+ */
+
+/* What PyYAML's YAML 1.1 implicit resolvers read a plain scalar as, tried
+ * in PyYAML's order (resolver.py; the first match wins), or nullptr for a
+ * string. Null and the merge key are handled by the caller.
+ * QRegularExpression, not std::regex: libstdc++'s matcher recurses once
+ * per character, so a long tampered key (`1___...`) overflows the stack. */
+static const char* implicitKeyKind(const std::string& value)
+{
+    static const auto re = [](const char* pattern) {
+        return QRegularExpression(QRegularExpression::anchoredPattern(
+            QString::fromLatin1(pattern)));
+    };
+    static const QRegularExpression boolRe = re(
+        "yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF");
+    static const QRegularExpression floatRe = re(
+        R"([-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?)"
+        R"(|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?)"
+        R"(|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*)"
+        R"(|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))");
+    static const QRegularExpression intRe = re(
+        R"([-+]?0b[0-1_]+|[-+]?0[0-7_]+|[-+]?(?:0|[1-9][0-9_]*))"
+        R"(|[-+]?0x[0-9a-fA-F_]+|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)");
+    static const QRegularExpression timestampRe = re(
+        R"([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])"
+        R"(|[0-9][0-9][0-9][0-9]-[0-9][0-9]?-[0-9][0-9]?(?:[Tt]|[ \t]+))"
+        R"([0-9][0-9]?:[0-9][0-9]:[0-9][0-9](?:\.[0-9]*)?)"
+        R"((?:[ \t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?)");
+    const QString v = qs(value);
+    if (boolRe.match(v).hasMatch())      return "a boolean";
+    if (floatRe.match(v).hasMatch())     return "a float";
+    if (intRe.match(v).hasMatch())       return "an integer";
+    if (timestampRe.match(v).hasMatch()) return "a timestamp";
+    if (value == "=")                    return "a value key";
+    return nullptr;
+}
+
+/* Walks yaml-cpp's event stream for the first mapping key that isn't a
+ * plain string, throwing KeyError at it. Events visit every node once, so
+ * aliases are never expanded and nothing recurses. */
+class MappingKeyChecker : public YAML::EventHandler
+{
+public:
+    struct KeyError { std::string message; };
+
+    void OnDocumentStart(const YAML::Mark&) override {}
+    void OnDocumentEnd() override {}
+
+    void OnNull(const YAML::Mark& mark, YAML::anchor_t) override
+    {
+        if (expectingKey())
+            fail(mark, "mapping key is null (empty, ~ or null); keys must be strings");
+        nodeDone();
+    }
+    void OnAlias(const YAML::Mark& mark, YAML::anchor_t) override
+    {
+        if (expectingKey())
+            fail(mark, "mapping key is an alias; keys must be strings");
+        nodeDone();
+    }
+    void OnScalar(const YAML::Mark& mark, const std::string& tag,
+                  YAML::anchor_t, const std::string& value) override
+    {
+        if (expectingKey())
+            checkScalarKey(mark, tag, value);
+        nodeDone();
+    }
+    void OnSequenceStart(const YAML::Mark& mark, const std::string&,
+                         YAML::anchor_t, YAML::EmitterStyle::value) override
+    {
+        collectionStart(mark);
+        m_stack.push_back({ false, false, {} });
+    }
+    void OnSequenceEnd() override { m_stack.pop_back(); nodeDone(); }
+    void OnMapStart(const YAML::Mark& mark, const std::string&,
+                    YAML::anchor_t, YAML::EmitterStyle::value) override
+    {
+        collectionStart(mark);
+        m_stack.push_back({ true, true, {} });
+    }
+    void OnMapEnd() override { m_stack.pop_back(); nodeDone(); }
+
+private:
+    /* One per open collection: whether it is a mapping, whether its next
+     * node is a key, and its keys so far. */
+    struct Frame { bool isMap; bool expectKey; std::set<std::string> keys; };
+    std::vector<Frame> m_stack;
+
+    bool expectingKey() const
+    {
+        return !m_stack.empty() && m_stack.back().isMap && m_stack.back().expectKey;
+    }
+    void nodeDone()
+    {
+        if (!m_stack.empty() && m_stack.back().isMap)
+            m_stack.back().expectKey = !m_stack.back().expectKey;
+    }
+    void collectionStart(const YAML::Mark& mark)
+    {
+        if (expectingKey())
+            fail(mark, "mapping key is a mapping or sequence; keys must be strings");
+    }
+    [[noreturn]] static void fail(const YAML::Mark& mark, const std::string& problem)
+    {
+        throw KeyError{ "line " + std::to_string(mark.line + 1) + ", column "
+                        + std::to_string(mark.column + 1) + ": " + problem };
+    }
+    void checkScalarKey(const YAML::Mark& mark, const std::string& tag,
+                        const std::string& value)
+    {
+        /* yaml-cpp tags an untagged plain scalar "?" and an untagged
+         * quoted one "!". */
+        if (tag != "?" && tag != "!" && tag != "tag:yaml.org,2002:str")
+            fail(mark, "mapping key '" + value + "' has an explicit non-string tag; "
+                       "keys must be strings");
+        if (tag == "?") {
+            if (YAML::IsNullString(value))
+                fail(mark, "mapping key is null (empty, ~ or null); keys must be strings");
+            if (value == "<<")
+                fail(mark, "YAML merge keys (<<) are not supported; write the keys out");
+            if (const char* kind = implicitKeyKind(value))
+                fail(mark, "mapping key '" + value + "' reads as " + kind
+                           + " in YAML 1.1, not a string; quote it: \"" + value + "\"");
+        }
+        if (!m_stack.back().keys.insert(value).second)
+            fail(mark, "duplicate mapping key '" + value + "'");
+    }
+};
+
+/* The error text for the first mapping key in `yaml`'s first document,
+ * in document order, that isn't a plain string, or "" if every key is one
+ * (validate.py mapping_key_error()). */
+static std::string mappingKeyError(const std::string& yaml)
+{
+    std::istringstream in(yaml);
+    YAML::Parser parser(in);
+    MappingKeyChecker checker;
+    try {
+        parser.HandleNextDocument(checker);
+    } catch (const MappingKeyChecker::KeyError& e) {
+        return e.message;
+    }
+    return {};
+}
+
+/* udisplay-gen validate's error text for a widget nested past
+ * kMaxWidgetNestingDepth (widget_ids.py widget_limit_error()). */
+static std::string nestingDepthError(const std::string& path, int depth)
+{
+    return "widgets." + path + ": nested " + std::to_string(depth)
+           + " levels deep; the maximum widget nesting depth is "
+           + std::to_string(kMaxWidgetNestingDepth);
+}
+
+/* udisplay-gen validate's error text for the widget past kMaxWidgets
+ * (widget_ids.py widget_limit_error()). */
+static std::string widgetCountError(const std::string& path)
+{
+    return "widgets." + path + ": widget number " + std::to_string(kMaxWidgets + 1)
+           + "; the maximum widget count is " + std::to_string(kMaxWidgets)
+           + " (widget IDs 0x10-0xFF)";
+}
+
 /* Mirrors widget_ids.py's _collect(). Every widget map entry gets a path
  * (issue #43): `<prefix>.<key>`, where the prefix is the parent widget's own
  * path. Every widget with `widgets:` (containers and button faces alike) is
@@ -181,12 +357,27 @@ static bool isTransparentContainer(const std::string& type, const YAML::Node& w)
  * the top level: `section.row.leaf`. A container's `namespace:` key does not
  * change this: it only shapes each widget's name path (namePrefix), the
  * identifier udisplay-gen generates for firmware, never the wire IDs.
- * Entries are appended in YAML declaration order, parents first. */
-static void collectPathsRecursive(const YAML::Node& widgets,
+ * Entries are appended in YAML declaration order, parents first.
+ *
+ * `depth` is the nesting depth of the widgets in `widgets` (1 at the top
+ * level). The first widget found past kMaxWidgetNestingDepth, or past
+ * kMaxWidgets, stops the walk with overLimit set to the error and false
+ * returned, so the recursion never goes deeper than the depth cap however
+ * deep the YAML nests, and never visits more than kMaxWidgets widgets
+ * however many a YAML alias expands to. These are the only depth and count
+ * checks: the walk follows every `widgets:` map and every button-group
+ * item, a superset of what buildAndAppendWidgets()/buildWidget() and
+ * warnExcludedButtonFaceTypes() recurse into, and parse() runs it first. */
+static bool collectPathsRecursive(const YAML::Node& widgets,
                                   const std::string& prefix,
                                   const std::string& namePrefix,
-                                  std::vector<PathEntry>& entries)
+                                  int depth,
+                                  std::vector<PathEntry>& entries,
+                                  std::string& overLimit)
 {
+    const auto full = [&entries] {
+        return entries.size() >= static_cast<size_t>(kMaxWidgets);
+    };
     for (auto it = widgets.begin(); it != widgets.end(); ++it) {
         std::string key = it->first.as<std::string>();
         YAML::Node  w   = it->second;
@@ -199,22 +390,40 @@ static void collectPathsRecursive(const YAML::Node& widgets,
         std::string path = prefix.empty() ? key : prefix + "." + key;
         std::string namePath = namePrefix.empty() ? key : namePrefix + "." + key;
 
+        if (depth > kMaxWidgetNestingDepth) {
+            overLimit = nestingDepthError(path, depth);
+            return false;
+        }
+        if (full()) {
+            overLimit = widgetCountError(path);
+            return false;
+        }
         entries.push_back({ path, !prefix.empty(), prefix, key, namePath });
 
-        if (w["widgets"] && w["widgets"].IsMap())
-            collectPathsRecursive(w["widgets"], path,
-                                  isTransparentContainer(type, w) ? namePrefix : namePath,
-                                  entries);
+        if (w["widgets"] && w["widgets"].IsMap()
+            && !collectPathsRecursive(w["widgets"], path,
+                                      isTransparentContainer(type, w) ? namePrefix : namePath,
+                                      depth + 1, entries, overLimit))
+            return false;
 
         if (type == "button-group" && w["items"] && w["items"].IsMap()) {
             for (auto ii = w["items"].begin();
                  ii != w["items"].end(); ++ii) {
                 std::string itemKey = ii->first.as<std::string>();
+                if (depth + 1 > kMaxWidgetNestingDepth) {
+                    overLimit = nestingDepthError(path + "." + itemKey, depth + 1);
+                    return false;
+                }
+                if (full()) {
+                    overLimit = widgetCountError(path + "." + itemKey);
+                    return false;
+                }
                 entries.push_back({ path + "." + itemKey, true, path, itemKey,
                                     namePath + "." + itemKey });
             }
         }
     }
+    return true;
 }
 
 /* The first name path two or more widgets share, as udisplay-gen
@@ -245,12 +454,13 @@ static std::string firstNameCollision(const std::vector<PathEntry>& entries)
 }
 
 /* Every widget's path in YAML declaration order (collectPathsRecursive());
- * sortedPaths() orders them for ID assignment. */
-static std::vector<PathEntry> collectPaths(const YAML::Node& widgets)
+ * sortedPaths() orders them for ID assignment. Returns false, with
+ * overLimit set, if a widget nests past kMaxWidgetNestingDepth or there are
+ * more than kMaxWidgets widgets. */
+static bool collectPaths(const YAML::Node& widgets,
+                         std::vector<PathEntry>& entries, std::string& overLimit)
 {
-    std::vector<PathEntry> entries;
-    collectPathsRecursive(widgets, {}, {}, entries);
-    return entries;
+    return collectPathsRecursive(widgets, {}, {}, 1, entries, overLimit);
 }
 
 static std::vector<PathEntry> sortedPaths(std::vector<PathEntry> entries)
@@ -275,6 +485,8 @@ static std::vector<PathEntry> sortedPaths(std::vector<PathEntry> entries)
  *  Returns the row index this call appended, so callers can post-process
  *  that specific row (flex/align/position overrides) after any nested
  *  children have already been appended after it.
+ *  The recursion is at most kMaxWidgetNestingDepth deep: parse() rejects
+ *  any deeper document in collectPathsRecursive() before building.
  * ══════════════════════════════════════════════════════════════════════════ */
 
 static int buildWidget(const std::string& key,
@@ -841,7 +1053,16 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
     stylesOut.clear();
     YAML::Node doc;
     try {
-        doc = YAML::Load(std::string(yamlBytes.constData(), yamlBytes.size()));
+        const std::string yaml(yamlBytes.constData(), yamlBytes.size());
+        doc = YAML::Load(yaml);
+
+        /* Before anything reads a key: a key that isn't a plain string
+         * would give a different widget path here than in udisplay-gen. */
+        const std::string keyError = mappingKeyError(yaml);
+        if (!keyError.empty()) {
+            m_error = qs(keyError);
+            return false;
+        }
 
         if (!doc.IsMap()) {
             m_error = QStringLiteral("YAML root is not a mapping");
@@ -874,17 +1095,20 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
     }
     const YAML::Node& widgets = doc["widgets"];
 
-    auto declared = collectPaths(widgets);
+    /* Nesting depth and widget count first: every other walk over
+     * `widgets` recurses once per level and visits every widget an alias
+     * expands to; collectPaths() alone stops at the caps. */
+    std::vector<PathEntry> declared;
+    std::string overLimit;
+    if (!collectPaths(widgets, declared, overLimit)) {
+        m_error = qs(overLimit);
+        return false;
+    }
     /* Name collisions are reported in declaration order (see
      * firstNameCollision()), so find one before sorting; the check itself
      * runs below, after the path-level ones. */
     const std::string nameCollision = firstNameCollision(declared);
     auto entries = sortedPaths(std::move(declared));
-    if (entries.size() > 240) {
-        m_error = QStringLiteral("Too many widget paths (%1); maximum is 240")
-                      .arg(static_cast<int>(entries.size()));
-        return false;
-    }
     /* Duplicate id-paths: two widgets resolving to the same protocol ID.
      * Every parent's key is a segment of its children's paths, so valid
      * YAML can't produce one; a key containing a dot (`a.b` next to a
