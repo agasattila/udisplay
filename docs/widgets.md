@@ -71,6 +71,22 @@ widgets:
 | `description` | string | no | 255 chars | Shown in client detail view |
 | `capabilities` | array of strings | no | — | List of capability tokens required by this definition. The client rejects connection with "Device requires app update" if any token is unrecognised. Omit for base v1 widgets only. Known values: `dropdown`, `label`, `layout-v2`. |
 
+### YAML keys
+
+Every mapping key in the document must be a plain string, the same for
+`udisplay-gen validate` and the client:
+
+- Quote keys that YAML 1.1 would read as something else: booleans (`yes`,
+  `no`, `on`, `off`, `true`, `false` in any of their spellings), numbers
+  (`10`, `0x10`, `1.5`), dates (`2026-01-01`) and null (`~`, `null`). Write
+  `"off": "Disabled"`, not `off: "Disabled"`.
+- YAML merge keys (`<<: *defaults`) are not supported; write the keys out.
+- A key may appear only once per mapping.
+- Aliases, sequences and mappings can't be keys.
+
+Both tools report the first offending key by line and column, as the only
+error.
+
 ### `widgets` block
 
 - Keys must be **lowercase snake_case** identifiers matching `^[a-z][a-z0-9_]*$`
@@ -1009,8 +1025,11 @@ items:
   sta:   "Station"
   ap:    "Access Point"
   apsta: "AP + Station"
-  off:   "Disabled"
+  "off": "Disabled"
 ```
+
+`off` is quoted because YAML 1.1 reads a bare `off:` as the boolean false
+(see [YAML keys](#yaml-keys)).
 
 The selection index is 0-based in YAML declaration order (`sta`=0, `ap`=1, `apsta`=2, `off`=3).
 Items do **not** get individual widget IDs — only the dropdown itself gets one.
@@ -1025,7 +1044,7 @@ wifi_mode:
     sta:   "Station"
     ap:    "Access Point"
     apsta: "AP + Station"
-    off:   "Disabled"
+    "off": "Disabled"
 ```
 
 **Generated C API:**

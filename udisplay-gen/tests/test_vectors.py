@@ -110,11 +110,14 @@ class TestNameCollisionFixtures:
 
 
 class TestNestingDepthFixtures:
-    """Maximum widget nesting depth: udisplay-gen's validate and the client's
-    YamlParser (test_widget_id_golden_fixtures.cpp) check the same cases."""
+    """Maximum widget nesting depth and widget count: udisplay-gen's
+    validate and the client's YamlParser (test_widget_id_golden_fixtures.cpp)
+    check the same cases."""
+    fixtures = "nesting_depth_fixtures"
+
     def test_fixtures_match_validate(self, vectors):
         import yaml as pyyaml
-        cases = vectors["nesting_depth_fixtures"]["cases"]
+        cases = vectors[self.fixtures]["cases"]
         assert any(c["error"] for c in cases.values())
         assert any(not c["error"] for c in cases.values())
         for name, case in cases.items():
@@ -122,6 +125,12 @@ class TestNestingDepthFixtures:
             errors = validate(doc, yaml_text=case["yaml"])
             expected = [f"  {case['error']}"] if case["error"] else []
             assert errors == expected, name
+
+
+class TestMappingKeyFixtures(TestNestingDepthFixtures):
+    """Mapping keys that aren't plain strings: the same cases again, against
+    the client's mappingKeyError()."""
+    fixtures = "mapping_key_fixtures"
 
 # ── Message encoding vectors ──────────────────────────────────────────────────
 
