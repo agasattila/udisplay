@@ -123,9 +123,9 @@ private slots:
     }
 
     /* nesting_depth_fixtures: the same cases udisplay-gen's validate()
-     * checks (test_vectors.py). A YAML nested past kMaxWidgetNestingDepth
-     * fails to parse with udisplay-gen's error, verbatim; the others
-     * parse. */
+     * checks (test_vectors.py). A YAML nested past kMaxWidgetNestingDepth,
+     * or with more than kMaxWidgets widgets, fails to parse with
+     * udisplay-gen's error, verbatim; the others parse. */
     void nestingDepthFixtures_matchCodegen()
     {
         QFile f(QStringLiteral(UDISPLAY_PROTOCOL_VECTORS_JSON));

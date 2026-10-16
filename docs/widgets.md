@@ -75,7 +75,10 @@ widgets:
 
 - Keys must be **lowercase snake_case** identifiers matching `^[a-z][a-z0-9_]*$`
 - At least one widget is required
-- Maximum **240 widgets** per device (IDs `0x10`–`0xFF`)
+- Maximum **240 widgets** per device (IDs `0x10`–`0xFF`), containers,
+  decorations and button-group items included. `udisplay-gen validate` and
+  the client both reject a 241st widget, naming it (in declaration order,
+  parents before their children)
 - Maximum nesting depth of **10**: the number of keys in a widget's path, so
   a top-level widget is at depth 1, a widget inside a top-level row at
   depth 2, and a button-group item one deeper than its group. Every

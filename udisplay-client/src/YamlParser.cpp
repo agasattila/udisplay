@@ -184,6 +184,15 @@ static std::string nestingDepthError(const std::string& path, int depth)
            + std::to_string(kMaxWidgetNestingDepth);
 }
 
+/* udisplay-gen validate's error text for the widget past kMaxWidgets
+ * (widget_ids.py widget_limit_error()). */
+static std::string widgetCountError(const std::string& path)
+{
+    return "widgets." + path + ": widget number " + std::to_string(kMaxWidgets + 1)
+           + "; the maximum widget count is " + std::to_string(kMaxWidgets)
+           + " (widget IDs 0x10-0xFF)";
+}
+
 /* Mirrors widget_ids.py's _collect(). Every widget map entry gets a path
  * (issue #43): `<prefix>.<key>`, where the prefix is the parent widget's own
  * path. Every widget with `widgets:` (containers and button faces alike) is
@@ -194,10 +203,12 @@ static std::string nestingDepthError(const std::string& path, int depth)
  * Entries are appended in YAML declaration order, parents first.
  *
  * `depth` is the nesting depth of the widgets in `widgets` (1 at the top
- * level). The first widget found past kMaxWidgetNestingDepth stops the walk
- * with tooDeep set to the error and false returned, so the recursion never
- * goes deeper than the cap however deep the YAML nests. This is the only
- * depth check: the walk follows every `widgets:` map and every button-group
+ * level). The first widget found past kMaxWidgetNestingDepth, or past
+ * kMaxWidgets, stops the walk with overLimit set to the error and false
+ * returned, so the recursion never goes deeper than the depth cap however
+ * deep the YAML nests, and never visits more than kMaxWidgets widgets
+ * however many a YAML alias expands to. These are the only depth and count
+ * checks: the walk follows every `widgets:` map and every button-group
  * item, a superset of what buildAndAppendWidgets()/buildWidget() and
  * warnExcludedButtonFaceTypes() recurse into, and parse() runs it first. */
 static bool collectPathsRecursive(const YAML::Node& widgets,
@@ -205,8 +216,11 @@ static bool collectPathsRecursive(const YAML::Node& widgets,
                                   const std::string& namePrefix,
                                   int depth,
                                   std::vector<PathEntry>& entries,
-                                  std::string& tooDeep)
+                                  std::string& overLimit)
 {
+    const auto full = [&entries] {
+        return entries.size() >= static_cast<size_t>(kMaxWidgets);
+    };
     for (auto it = widgets.begin(); it != widgets.end(); ++it) {
         std::string key = it->first.as<std::string>();
         YAML::Node  w   = it->second;
@@ -220,7 +234,11 @@ static bool collectPathsRecursive(const YAML::Node& widgets,
         std::string namePath = namePrefix.empty() ? key : namePrefix + "." + key;
 
         if (depth > kMaxWidgetNestingDepth) {
-            tooDeep = nestingDepthError(path, depth);
+            overLimit = nestingDepthError(path, depth);
+            return false;
+        }
+        if (full()) {
+            overLimit = widgetCountError(path);
             return false;
         }
         entries.push_back({ path, !prefix.empty(), prefix, key, namePath });
@@ -228,7 +246,7 @@ static bool collectPathsRecursive(const YAML::Node& widgets,
         if (w["widgets"] && w["widgets"].IsMap()
             && !collectPathsRecursive(w["widgets"], path,
                                       isTransparentContainer(type, w) ? namePrefix : namePath,
-                                      depth + 1, entries, tooDeep))
+                                      depth + 1, entries, overLimit))
             return false;
 
         if (type == "button-group" && w["items"] && w["items"].IsMap()) {
@@ -236,7 +254,11 @@ static bool collectPathsRecursive(const YAML::Node& widgets,
                  ii != w["items"].end(); ++ii) {
                 std::string itemKey = ii->first.as<std::string>();
                 if (depth + 1 > kMaxWidgetNestingDepth) {
-                    tooDeep = nestingDepthError(path + "." + itemKey, depth + 1);
+                    overLimit = nestingDepthError(path + "." + itemKey, depth + 1);
+                    return false;
+                }
+                if (full()) {
+                    overLimit = widgetCountError(path + "." + itemKey);
                     return false;
                 }
                 entries.push_back({ path + "." + itemKey, true, path, itemKey,
@@ -275,12 +297,13 @@ static std::string firstNameCollision(const std::vector<PathEntry>& entries)
 }
 
 /* Every widget's path in YAML declaration order (collectPathsRecursive());
- * sortedPaths() orders them for ID assignment. Returns false, with tooDeep
- * set, if a widget nests past kMaxWidgetNestingDepth. */
+ * sortedPaths() orders them for ID assignment. Returns false, with
+ * overLimit set, if a widget nests past kMaxWidgetNestingDepth or there are
+ * more than kMaxWidgets widgets. */
 static bool collectPaths(const YAML::Node& widgets,
-                         std::vector<PathEntry>& entries, std::string& tooDeep)
+                         std::vector<PathEntry>& entries, std::string& overLimit)
 {
-    return collectPathsRecursive(widgets, {}, {}, 1, entries, tooDeep);
+    return collectPathsRecursive(widgets, {}, {}, 1, entries, overLimit);
 }
 
 static std::vector<PathEntry> sortedPaths(std::vector<PathEntry> entries)
@@ -906,12 +929,13 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
     }
     const YAML::Node& widgets = doc["widgets"];
 
-    /* Nesting depth first: every other walk over `widgets` recurses once
-     * per level, collectPaths() alone stops at the cap. */
+    /* Nesting depth and widget count first: every other walk over
+     * `widgets` recurses once per level and visits every widget an alias
+     * expands to; collectPaths() alone stops at the caps. */
     std::vector<PathEntry> declared;
-    std::string tooDeep;
-    if (!collectPaths(widgets, declared, tooDeep)) {
-        m_error = qs(tooDeep);
+    std::string overLimit;
+    if (!collectPaths(widgets, declared, overLimit)) {
+        m_error = qs(overLimit);
         return false;
     }
     /* Name collisions are reported in declaration order (see
@@ -919,11 +943,6 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
      * runs below, after the path-level ones. */
     const std::string nameCollision = firstNameCollision(declared);
     auto entries = sortedPaths(std::move(declared));
-    if (entries.size() > 240) {
-        m_error = QStringLiteral("Too many widget paths (%1); maximum is 240")
-                      .arg(static_cast<int>(entries.size()));
-        return false;
-    }
     /* Duplicate id-paths: two widgets resolving to the same protocol ID.
      * Every parent's key is a segment of its children's paths, so valid
      * YAML can't produce one; a key containing a dot (`a.b` next to a

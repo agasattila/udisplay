@@ -674,11 +674,15 @@ Widget IDs are assigned by `udisplay-gen build` at code generation time (ID sche
    naming scope (`ui.advanced.rate.set(2.5)`; `ui.advanced.tuning` for the
    row itself), containers included, with `set_property()` /
    `reset_property()`.
-4. Maximum 240 widgets per device (0x10–0xFF) — containers and decorations count.
+4. Maximum 240 widgets per device (0x10–0xFF) — containers, decorations and
+   button-group items count (`udisplay-gen` `MAX_WIDGETS`, client
+   `kMaxWidgets`).
 5. Maximum nesting depth 10: a widget's structural path has at most 10
    keys (`udisplay-gen` `MAX_NESTING_DEPTH`, client
-   `kMaxWidgetNestingDepth`). Both sides reject deeper YAML before walking
-   it recursively.
+   `kMaxWidgetNestingDepth`). Both sides check rules 4 and 5 in one walk
+   in declaration order (parents first) that stops at the first widget past
+   either limit, before any other walk: YAML aliases can't make it recurse
+   deeper than 10 levels or visit more than 240 widgets.
 
 The Qt client derives the same mapping by parsing the YAML blob (same sort order). Both sides use `widget_id` as the sole identifier in all STATE_UPDATE, EVENT, SET_PROPERTY and RESET_PROPERTY messages.
 
