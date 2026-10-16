@@ -15,28 +15,22 @@ from udisplay_gen.cli import cli
 from udisplay_gen.validate import mapping_key_error
 
 
-@pytest.mark.parametrize("key, kind", [
-    ("yes", "a boolean"), ("No", "a boolean"), ("TRUE", "a boolean"),
-    ("off", "a boolean"), ("On", "a boolean"),
-    ("0", "an integer"), ("-12", "an integer"), ("0x1F", "an integer"),
-    ("0b101", "an integer"), ("017", "an integer"), ("1_000", "an integer"),
-    ("1:30", "an integer"),
-    ("1.5", "a float"), ("-1.5e+3", "a float"), (".inf", "a float"), (".NaN", "a float"),
-    ("2026-10-16", "a timestamp"), ("2026-10-16 12:00:00", "a timestamp"),
-    ("=", "a value key"),
-])
-def test_implicit_non_string_keys_rejected(key, kind):
-    assert mapping_key_error(f"{key}: x\n") == (
-        f"line 1, column 1: mapping key '{key}' reads as {kind} in YAML 1.1, "
-        f"not a string; quote it: \"{key}\"")
+def test_plain_key_fixtures(vectors):
+    """The YAML 1.1 implicit resolver, key by key; the client checks the
+    same table (test_widget_id_golden_fixtures.cpp)."""
+    plain = vectors["mapping_key_fixtures"]["plain_keys"]
+    for kind in ("a boolean", "an integer", "a float", "a timestamp", "a value key",
+                 "is null", "merge keys"):
+        assert any(error and kind in error for error in plain.values()), kind
+    assert any(error is None for error in plain.values())
+    for key, error in plain.items():
+        assert mapping_key_error(f"{key}: x\n") == error, key
 
 
-@pytest.mark.parametrize("key", [
-    "lamp", "y", "n", "1e3", "-.5", "yes_no", "on_off", "x0x10", "1a", "v1.5", "null_mode",
-    '"yes"', "'0x10'", "!!str off", "! on", '"<<"', '"~"',
-])
-def test_string_keys_accepted(key):
-    assert mapping_key_error(f"{key}: x\n") is None
+def test_implicit_key_message():
+    assert mapping_key_error("0x10: x\n") == (
+        "line 1, column 1: mapping key '0x10' reads as an integer in YAML 1.1, "
+        "not a string; quote it: \"0x10\"")
 
 
 @pytest.mark.parametrize("key", ["~", "null", "Null", "NULL"])

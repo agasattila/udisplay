@@ -244,6 +244,7 @@ def collect_dropdown_items(widgets: dict) -> dict[str, list[tuple[str, str]]]:
     constants.
     """
     # str() guards against YAML 1.1 boolean/int key coercion (e.g. `off:` → False)
+    # for callers that skip validate (mapping_key_error() rejects such keys)
     return {
         node.path: [(str(k), str(v)) for k, v in node.widget.get("items", {}).items()]
         for node in walk(widget_tree(widgets))

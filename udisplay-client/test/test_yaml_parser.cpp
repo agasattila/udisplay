@@ -694,6 +694,41 @@ private slots:
                  qPrintable(p.errorString()));
     }
 
+    /* ── Mapping keys ───────────────────────────────────────────────── *
+     * The shared cases live in protocol_vectors.json (mapping_key_fixtures,
+     * test_widget_id_golden_fixtures.cpp). PyYAML can't load a collection
+     * key at all (udisplay-gen fails to parse it), so it isn't one. */
+    void mappingKeys_collectionKeyRejected()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  ? [a, b]\n"
+            "  : {type: led}\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(yaml, widgets, name, version));
+        QCOMPARE(p.errorString(), QStringLiteral(
+            "line 2, column 5: mapping key is a mapping or sequence; keys must be strings"));
+    }
+
+    /* Before this check yaml-cpp kept the first of two duplicate keys and
+     * udisplay-gen the last, so the two tools showed different widgets. */
+    void mappingKeys_duplicateWidgetRejected()
+    {
+        const char* yaml =
+            "widgets:\n"
+            "  a:\n"
+            "    type: led\n"
+            "  a:\n"
+            "    type: button\n";
+        YamlParser p;
+        QList<WidgetDef> widgets;
+        QString name, version;
+        QVERIFY(!p.parse(yaml, widgets, name, version));
+        QCOMPARE(p.errorString(), QStringLiteral("line 4, column 3: duplicate mapping key 'a'"));
+    }
+
     /* ── New widget types: dropdown ───────────────────────────────── */
 
     void dropdown_items_populated()

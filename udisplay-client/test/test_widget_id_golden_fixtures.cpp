@@ -128,12 +128,56 @@ private slots:
      * udisplay-gen's error, verbatim; the others parse. */
     void nestingDepthFixtures_matchCodegen()
     {
+        checkParseFixtures(QStringLiteral("nesting_depth_fixtures"));
+    }
+
+    /* mapping_key_fixtures: a mapping key that isn't a plain string fails
+     * to parse with udisplay-gen's error (mapping_key_error()), verbatim. */
+    void mappingKeyFixtures_matchCodegen()
+    {
+        checkParseFixtures(QStringLiteral("mapping_key_fixtures"));
+    }
+
+    /* mapping_key_fixtures.plain_keys: the YAML 1.1 implicit resolver
+     * (mappingKeyError()'s port of PyYAML's regexes), key by key. */
+    void mappingKeyFixtures_plainKeysMatchCodegen()
+    {
+        QFile f(QStringLiteral(UDISPLAY_PROTOCOL_VECTORS_JSON));
+        QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.errorString()));
+        const QJsonObject keys = QJsonDocument::fromJson(f.readAll()).object()
+            .value(QStringLiteral("mapping_key_fixtures")).toObject()
+            .value(QStringLiteral("plain_keys")).toObject();
+        QVERIFY2(!keys.isEmpty(), "mapping_key_fixtures.plain_keys must not be empty");
+
+        for (auto it = keys.begin(); it != keys.end(); ++it) {
+            /* `widgets:` makes every accepted key parse (a non-widget
+             * value is skipped); only the key check can fail it. */
+            const QByteArray yaml = (it.key() + QStringLiteral(": x\nwidgets: {}\n")).toUtf8();
+            YamlParser p;
+            QList<WidgetDef> widgets;
+            QString name, version;
+            const bool ok = p.parse(yaml, widgets, name, version);
+            if (it.value().isNull()) {
+                QVERIFY2(ok || !p.errorString().startsWith(QStringLiteral("line 1,")),
+                         qPrintable(it.key() + ": " + p.errorString()));
+            } else {
+                QVERIFY2(!ok, qPrintable(it.key() + ": parsed, expected a key error"));
+                QCOMPARE(p.errorString(), it.value().toString());
+            }
+        }
+    }
+
+private:
+    /* Every case of `group` in protocol_vectors.json: a null `error` must
+     * parse, anything else must fail with exactly that error. */
+    void checkParseFixtures(const QString& group)
+    {
         QFile f(QStringLiteral(UDISPLAY_PROTOCOL_VECTORS_JSON));
         QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.errorString()));
         const QJsonObject cases = QJsonDocument::fromJson(f.readAll()).object()
-            .value(QStringLiteral("nesting_depth_fixtures")).toObject()
+            .value(group).toObject()
             .value(QStringLiteral("cases")).toObject();
-        QVERIFY2(!cases.isEmpty(), "nesting_depth_fixtures.cases must not be empty");
+        QVERIFY2(!cases.isEmpty(), qPrintable(group + ".cases must not be empty"));
 
         for (auto it = cases.begin(); it != cases.end(); ++it) {
             const QJsonObject c = it.value().toObject();
@@ -146,7 +190,7 @@ private slots:
             if (error.isNull()) {
                 QVERIFY2(ok, qPrintable(it.key() + ": " + p.errorString()));
             } else {
-                QVERIFY2(!ok, qPrintable(it.key() + ": parsed, expected a depth error"));
+                QVERIFY2(!ok, qPrintable(it.key() + ": parsed, expected an error"));
                 QCOMPARE(p.errorString(), error.toString());
             }
         }

@@ -4,8 +4,12 @@
 #include "YamlParser.h"
 #include "udisplay_schema_enums.h"
 #include <yaml-cpp/yaml.h>
+#include <yaml-cpp/eventhandler.h>
 #include <algorithm>
 #include <array>
+#include <regex>
+#include <set>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <QStringList>
@@ -175,8 +179,154 @@ static bool isTransparentContainer(const std::string& type, const YAML::Node& w)
     return !(ns && ns.IsScalar() && YAML::convert<bool>::decode(ns, flag) && flag);
 }
 
+/* ── Mapping keys ──────────────────────────────────────────────────────────
+ *
+ * udisplay-gen loads YAML with PyYAML, which reads YAML 1.1 implicit keys
+ * as booleans, numbers or dates (`yes:` is True, so its widget would be
+ * WIDGET_ID_TRUE), applies `<<` merge keys and keeps the last of two
+ * duplicate keys. yaml-cpp keeps the text, doesn't merge and keeps the
+ * first. Both tools reject such keys instead, with the same text
+ * (validate.py mapping_key_error()), so they derive the same widget paths.
+ */
+
+/* What PyYAML's YAML 1.1 implicit resolvers read a plain scalar as, tried
+ * in PyYAML's order (resolver.py; the first match wins), or nullptr for a
+ * string. Null and the merge key are handled by the caller. */
+static const char* implicitKeyKind(const std::string& v)
+{
+    static const std::regex boolRe(
+        "yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF");
+    static const std::regex floatRe(
+        R"([-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?)"
+        R"(|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?)"
+        R"(|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*)"
+        R"(|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))");
+    static const std::regex intRe(
+        R"([-+]?0b[0-1_]+|[-+]?0[0-7_]+|[-+]?(?:0|[1-9][0-9_]*))"
+        R"(|[-+]?0x[0-9a-fA-F_]+|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)");
+    static const std::regex timestampRe(
+        R"([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])"
+        R"(|[0-9][0-9][0-9][0-9]-[0-9][0-9]?-[0-9][0-9]?(?:[Tt]|[ \t]+))"
+        R"([0-9][0-9]?:[0-9][0-9]:[0-9][0-9](?:\.[0-9]*)?)"
+        R"((?:[ \t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?)");
+    if (std::regex_match(v, boolRe))      return "a boolean";
+    if (std::regex_match(v, floatRe))     return "a float";
+    if (std::regex_match(v, intRe))       return "an integer";
+    if (std::regex_match(v, timestampRe)) return "a timestamp";
+    if (v == "=")                         return "a value key";
+    return nullptr;
+}
+
+/* Walks yaml-cpp's event stream for the first mapping key that isn't a
+ * plain string, throwing KeyError at it. Events visit every node once, so
+ * aliases are never expanded and nothing recurses. */
+class MappingKeyChecker : public YAML::EventHandler
+{
+public:
+    struct KeyError { std::string message; };
+
+    void OnDocumentStart(const YAML::Mark&) override {}
+    void OnDocumentEnd() override {}
+
+    void OnNull(const YAML::Mark& mark, YAML::anchor_t) override
+    {
+        if (expectingKey())
+            fail(mark, "mapping key is null (empty, ~ or null); keys must be strings");
+        nodeDone();
+    }
+    void OnAlias(const YAML::Mark& mark, YAML::anchor_t) override
+    {
+        if (expectingKey())
+            fail(mark, "mapping key is an alias; keys must be strings");
+        nodeDone();
+    }
+    void OnScalar(const YAML::Mark& mark, const std::string& tag,
+                  YAML::anchor_t, const std::string& value) override
+    {
+        if (expectingKey())
+            checkScalarKey(mark, tag, value);
+        nodeDone();
+    }
+    void OnSequenceStart(const YAML::Mark& mark, const std::string&,
+                         YAML::anchor_t, YAML::EmitterStyle::value) override
+    {
+        collectionStart(mark);
+        m_stack.push_back({ false, false, {} });
+    }
+    void OnSequenceEnd() override { m_stack.pop_back(); nodeDone(); }
+    void OnMapStart(const YAML::Mark& mark, const std::string&,
+                    YAML::anchor_t, YAML::EmitterStyle::value) override
+    {
+        collectionStart(mark);
+        m_stack.push_back({ true, true, {} });
+    }
+    void OnMapEnd() override { m_stack.pop_back(); nodeDone(); }
+
+private:
+    /* One per open collection: whether it is a mapping, whether its next
+     * node is a key, and its keys so far. */
+    struct Frame { bool isMap; bool expectKey; std::set<std::string> keys; };
+    std::vector<Frame> m_stack;
+
+    bool expectingKey() const
+    {
+        return !m_stack.empty() && m_stack.back().isMap && m_stack.back().expectKey;
+    }
+    void nodeDone()
+    {
+        if (!m_stack.empty() && m_stack.back().isMap)
+            m_stack.back().expectKey = !m_stack.back().expectKey;
+    }
+    void collectionStart(const YAML::Mark& mark)
+    {
+        if (expectingKey())
+            fail(mark, "mapping key is a mapping or sequence; keys must be strings");
+    }
+    [[noreturn]] static void fail(const YAML::Mark& mark, const std::string& problem)
+    {
+        throw KeyError{ "line " + std::to_string(mark.line + 1) + ", column "
+                        + std::to_string(mark.column + 1) + ": " + problem };
+    }
+    void checkScalarKey(const YAML::Mark& mark, const std::string& tag,
+                        const std::string& value)
+    {
+        /* yaml-cpp tags an untagged plain scalar "?" and an untagged
+         * quoted one "!". */
+        if (tag != "?" && tag != "!" && tag != "tag:yaml.org,2002:str")
+            fail(mark, "mapping key '" + value + "' has an explicit non-string tag; "
+                       "keys must be strings");
+        if (tag == "?") {
+            if (YAML::IsNullString(value))
+                fail(mark, "mapping key is null (empty, ~ or null); keys must be strings");
+            if (value == "<<")
+                fail(mark, "YAML merge keys (<<) are not supported; write the keys out");
+            if (const char* kind = implicitKeyKind(value))
+                fail(mark, "mapping key '" + value + "' reads as " + kind
+                           + " in YAML 1.1, not a string; quote it: \"" + value + "\"");
+        }
+        if (!m_stack.back().keys.insert(value).second)
+            fail(mark, "duplicate mapping key '" + value + "'");
+    }
+};
+
+/* The error text for the first mapping key in `yaml`'s first document,
+ * in document order, that isn't a plain string, or "" if every key is one
+ * (validate.py mapping_key_error()). */
+static std::string mappingKeyError(const std::string& yaml)
+{
+    std::istringstream in(yaml);
+    YAML::Parser parser(in);
+    MappingKeyChecker checker;
+    try {
+        parser.HandleNextDocument(checker);
+    } catch (const MappingKeyChecker::KeyError& e) {
+        return e.message;
+    }
+    return {};
+}
+
 /* udisplay-gen validate's error text for a widget nested past
- * kMaxWidgetNestingDepth (widget_ids.py nesting_depth_error()). */
+ * kMaxWidgetNestingDepth (widget_ids.py widget_limit_error()). */
 static std::string nestingDepthError(const std::string& path, int depth)
 {
     return "widgets." + path + ": nested " + std::to_string(depth)
@@ -896,7 +1046,16 @@ bool YamlParser::parse(const QByteArray& yamlBytes,
     stylesOut.clear();
     YAML::Node doc;
     try {
-        doc = YAML::Load(std::string(yamlBytes.constData(), yamlBytes.size()));
+        const std::string yaml(yamlBytes.constData(), yamlBytes.size());
+        doc = YAML::Load(yaml);
+
+        /* Before anything reads a key: a key that isn't a plain string
+         * would give a different widget path here than in udisplay-gen. */
+        const std::string keyError = mappingKeyError(yaml);
+        if (!keyError.empty()) {
+            m_error = qs(keyError);
+            return false;
+        }
 
         if (!doc.IsMap()) {
             m_error = QStringLiteral("YAML root is not a mapping");
