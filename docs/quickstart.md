@@ -181,6 +181,12 @@ above: assign a lambda to the generated member (`ui.<widget>.on_change`,
 `ui.<widget>.on_submit`, ...), and push state back out with `ui.<widget>.set(...)`.
 See [Widget reference](widgets.md) for the setter/handler shape of every widget type.
 
+Keep handlers short: they run inside `feed()`. Over BLE, the client drops the
+connection if a write isn't acknowledged within 5 s, and the acknowledgement only
+goes out once your handler returns. Move slow work (motor moves, `delay()`, long
+I/O) out of the handler, for example by setting a flag that the `for (;;)` loop
+above picks up. See [BLE GATT](protocol.md#ble-gatt) for details.
+
 ## What you built
 
 You now have: a device UI defined in YAML, a live preview loop for iterating on it
