@@ -506,6 +506,25 @@ def test_dropdown_single_item_rejected():
     assert errors
 
 
+@pytest.mark.parametrize("n_items, ok", [(256, True), (257, False)])
+def test_dropdown_item_count_fits_uint8_index(n_items, ok):
+    """Selection indices are 0..N-1 sent as uint8 (#48); nested in a
+    section to cover the recursive walk."""
+    items = {f"i{n}": f"Item {n}" for n in range(n_items)}
+    doc = {
+        "device": {"name": "x"},
+        "widgets": {"net": {"type": "section", "widgets": {
+            "mode": {"type": "dropdown", "items": items},
+        }}},
+    }
+    errors = validate(doc, SCHEMA)
+    if ok:
+        assert errors == []
+    else:
+        assert len(errors) == 1
+        assert "widgets.net.mode: dropdown has 257 items; at most 256" in errors[0]
+
+
 # ── TODO-018: label and separator decoration types ────────────────────────────
 
 def test_label_valid(decorations_yaml):

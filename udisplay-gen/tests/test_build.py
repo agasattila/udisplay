@@ -1060,14 +1060,25 @@ def test_cpp_buttongroup_items_nested(full_vocab_yaml):
 
 def test_cpp_buttongroup_item_enum_and_setter(full_vocab_yaml):
     """Item enum values are the items' widget IDs (the STATE_UPDATE payload
-    the client compares against each item's widgetId)."""
+    the client compares against each item's widgetId). The default variant
+    is C++98: no enum class, so the enum is nested in a struct (#48)."""
     _, wids = _load_types_and_ids(full_vocab_yaml)
     hpp = _make_cpp(full_vocab_yaml)
+    assert "    struct Item {\n        enum Value {\n" in hpp
+    assert f"            ac = 0x{wids['mode_sel.ac']:02X}u" in hpp
+    assert f"            dc = 0x{wids['mode_sel.dc']:02X}u" in hpp
+    assert "void set(Item::Value v) { udisplay_send_uint8(_ctx, _id, static_cast<uint8_t>(v)); }" in hpp
+    assert "void clear() { udisplay_send_uint8(_ctx, _id, 0u); }" in hpp
+    assert "enum class" not in hpp
+
+
+def test_cpp_modern_buttongroup_item_enum_class(full_vocab_yaml):
+    _, wids = _load_types_and_ids(full_vocab_yaml)
+    hpp = _make_cpp(full_vocab_yaml, variant="modern")
     assert "    enum class Item : uint8_t {" in hpp
     assert f"        ac = 0x{wids['mode_sel.ac']:02X}u" in hpp
-    assert f"        dc = 0x{wids['mode_sel.dc']:02X}u" in hpp
     assert "void set(Item v) { udisplay_send_uint8(_ctx, _id, static_cast<uint8_t>(v)); }" in hpp
-    assert "void clear()     { udisplay_send_uint8(_ctx, _id, 0u); }" in hpp
+    assert "struct Item" not in hpp
 
 
 # ── Typed setters ─────────────────────────────────────────────────────────────
@@ -1114,24 +1125,37 @@ def test_cpp_dropdown_derives_own_class(dropdown_yaml):
     assert "class WifiModeWidget" in hpp
 
 
-def test_cpp_dropdown_option_enum(dropdown_yaml):
-    hpp = _make_cpp(dropdown_yaml)
-    assert "enum class Option : uint8_t" in hpp
-    assert "sta = 0u" in hpp
-    assert "ap = 1u" in hpp
-    assert "apsta = 2u" in hpp
-    assert "disabled = 3u" in hpp
+@pytest.mark.parametrize("variant, opener", [
+    ("safe", "    struct Option {\n        enum Value {\n"),
+    ("modern", "    enum class Option : uint8_t {\n"),
+])
+def test_cpp_dropdown_option_enum(dropdown_yaml, variant, opener):
+    """Indices are contiguous 0..N-1 in YAML declaration order -- the range
+    check in _dispatch relies on it."""
+    hpp = _make_cpp(dropdown_yaml, variant=variant)
+    assert opener in hpp
+    body = hpp.split(opener, 1)[1].split("}", 1)[0]
+    assert [line.strip() for line in body.strip().splitlines()] == [
+        "sta = 0u,", "ap = 1u,", "apsta = 2u,", "disabled = 3u",
+    ]
 
 
 def test_cpp_dropdown_setter_takes_enum(dropdown_yaml):
-    hpp = _make_cpp(dropdown_yaml)
-    assert "void set(Option v)" in hpp
+    assert "void set(Option::Value v)" in _make_cpp(dropdown_yaml)
+    assert "void set(Option v)" in _make_cpp(dropdown_yaml, variant="modern")
 
 
 def test_cpp_dropdown_handler_takes_enum(dropdown_yaml):
-    hpp = _make_cpp(dropdown_yaml)
-    assert "on_change" in hpp
-    assert "Option" in hpp
+    assert "    void (*on_change)(Option::Value selection);" in _make_cpp(dropdown_yaml)
+    assert "    std::function<void(Option)> on_change;" in _make_cpp(dropdown_yaml, variant="modern")
+
+
+@pytest.mark.parametrize("variant", ["safe", "modern"])
+def test_cpp_dropdown_explicit_constructor(dropdown_yaml, variant):
+    """Inheriting constructors are C++11."""
+    hpp = _make_cpp(dropdown_yaml, variant=variant)
+    assert "using OutputWidget::OutputWidget;" not in hpp
+    assert "    WifiModeWidget(udisplay_t* ctx, uint8_t id) : OutputWidget<uint8_t>(ctx, id)" in hpp
 
 
 # ── cpp-safe vs modern ────────────────────────────────────────────────────────
@@ -1139,6 +1163,40 @@ def test_cpp_dropdown_handler_takes_enum(dropdown_yaml):
 def test_cpp_safe_handlers_are_function_pointers(full_vocab_yaml):
     hpp = _make_cpp(full_vocab_yaml, variant="safe")
     assert "void (*on_change)" in hpp or "void (*on_press)" in hpp
+
+
+def test_cpp_safe_handlers_null_initialized_in_constructor(full_vocab_yaml):
+    """C++98: no nullptr, no in-class member initializers (#48)."""
+    hpp = _make_cpp(full_vocab_yaml, variant="safe")
+    assert "nullptr" not in hpp
+    assert ") = " not in hpp
+    assert "    void (*on_change)(bool state);" in hpp
+    assert "ToggleWidget(udisplay_t* ctx, uint8_t id) : OutputWidget<bool>(ctx, id), on_change(0) {}" in hpp
+    assert "Widget(ctx, id), on_press(0), on_release(0), on_click(0) {}" in hpp
+    assert "        , on_client_ready(0)\n        , on_comms_error(0)\n    {}" in hpp
+
+
+def test_cpp_safe_handlers_initialized_without_widget_members(tmp_path):
+    p = tmp_path / "empty.yaml"
+    p.write_text("device:\n  name: x\nwidgets:\n  sep:\n    type: separator\n")
+    hpp = _make_cpp(p, variant="safe")
+    assert "        : sep(&_ctx, 0x10u)\n        , on_client_ready(0)\n" in hpp
+
+
+def test_cpp_safe_noncopyable_cpp98_idiom(full_vocab_yaml):
+    """No `= delete`: copy operations are private and never defined."""
+    hpp = _make_cpp(full_vocab_yaml, variant="safe")
+    assert "= delete" not in hpp
+    assert "&&" not in hpp
+    private = hpp.split("class UDisplay {", 1)[1].split("};", 1)[0].rsplit("private:", 1)[1]
+    assert "    UDisplay(const UDisplay&);\n    UDisplay& operator=(const UDisplay&);\n" in private
+
+
+def test_cpp_modern_keeps_deleted_copy_and_move(full_vocab_yaml):
+    hpp = _make_cpp(full_vocab_yaml, variant="modern")
+    assert "    UDisplay(UDisplay&&) = delete;" in hpp
+    assert "    UDisplay(const UDisplay&) = delete;" in hpp
+    assert "on_client_ready(0)" not in hpp
 
 
 def test_cpp_safe_no_functional_include(full_vocab_yaml):
@@ -1220,9 +1278,18 @@ def test_cpp_dispatch_button_group_items(full_vocab_yaml):
     assert "self->mode_sel.dc.on_press" in hpp
 
 
-def test_cpp_dispatch_dropdown_casts_to_enum(dropdown_yaml):
-    hpp = _make_cpp(dropdown_yaml)
-    assert "static_cast<WifiModeWidget::Option>" in hpp
+@pytest.mark.parametrize("variant, enum_type", [
+    ("safe", "WifiModeWidget::Option::Value"),
+    ("modern", "WifiModeWidget::Option"),
+])
+def test_cpp_dispatch_dropdown_casts_to_enum(dropdown_yaml, variant, enum_type):
+    """An out-of-range selection byte is dropped before the cast (#48); the
+    bound is the item count (4 here)."""
+    hpp = _make_cpp(dropdown_yaml, variant=variant)
+    assert (
+        "        if (ev->selection_index < 4u && self->wifi_mode.on_change)\n"
+        f"            self->wifi_mode.on_change(static_cast<{enum_type}>(ev->selection_index));\n"
+    ) in hpp
 
 
 def test_cpp_dispatch_toggle_uses_toggle_state(full_vocab_yaml):

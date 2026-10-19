@@ -108,18 +108,63 @@ def _validate_cpp_identifiers(ctx: BuildContext) -> None:
         )
 
 
-def _cpp_base_classes(variant: str) -> list:
-    def handler(sig: str) -> str:
-        name, _, rest = sig.partition("(")
-        args = rest.rstrip(")")
-        if variant == "safe":
-            return f"    void (*{name})({args}) = nullptr;"
-        if args and args != "void":
-            arg_types = ", ".join(p.strip().rsplit(" ", 1)[0] for p in args.split(","))
-        else:
-            arg_types = ""
-        return f"    std::function<void({arg_types})> {name};"
+def _cpp_handler(sig: str, variant: str) -> tuple:
+    """(member declaration, constructor initializer or None) for an event
+    handler member. The default ("safe") variant is C++98: a raw function
+    pointer, null-initialized in the constructor (no in-class initializer,
+    no nullptr). A std::function default-constructs empty."""
+    name, _, rest = sig.partition("(")
+    args = rest.rstrip(")")
+    if variant == "safe":
+        return f"    void (*{name})({args});", f"{name}(0)"
+    if args and args != "void":
+        arg_types = ", ".join(p.strip().rsplit(" ", 1)[0] for p in args.split(","))
+    else:
+        arg_types = ""
+    return f"    std::function<void({arg_types})> {name};", None
 
+
+def _cpp_class_with_handlers(cls: str, base: str, sigs: list, variant: str, body: list = ()) -> list:
+    """A widget class whose constructor forwards to `base` and null-initializes
+    its handler members (in declaration order, so -Wreorder stays quiet)."""
+    handlers = [_cpp_handler(sig, variant) for sig in sigs]
+    inits = [f"{base}(ctx, id)"] + [init for _, init in handlers if init]
+    return [
+        f"class {cls} : public {base} {{",
+        "public:",
+        f"    {cls}(udisplay_t* ctx, uint8_t id) : {', '.join(inits)} {{}}",
+        *body,
+        *(decl for decl, _ in handlers),
+        "};",
+    ]
+
+
+def _cpp_enum_type(name: str, variant: str) -> str:
+    """How generated code spells a widget's value enum type: an enum nested
+    in a struct for the C++98 default variant (`Item::Value`), an
+    `enum class` for --modern (`Item`). Enumerators are `Item::x` in both."""
+    return f"{name}::Value" if variant == "safe" else name
+
+
+def _cpp_enum(name: str, entries: list, variant: str) -> list:
+    """Declare a widget's value enum; `entries` is [(enumerator, value)].
+    C++98 has no scoped enums. The wrapping struct scopes the enumerators
+    (`Item::fast`) so they can't collide with same-named members of the
+    enclosing class (a button-group's item members are also called `fast`)."""
+    body = [
+        f"{key} = {value}" + ("," if i < len(entries) - 1 else "")
+        for i, (key, value) in enumerate(entries)
+    ]
+    if variant == "safe":
+        return (
+            [f"    struct {name} {{", "        enum Value {"]
+            + [f"            {line}" for line in body]
+            + ["        };", "    };"]
+        )
+    return [f"    enum class {name} : uint8_t {{"] + [f"        {line}" for line in body] + ["    };"]
+
+
+def _cpp_base_classes(variant: str) -> list:
     lines = [
         "/* -- Widget base classes ---------------------------------------------------- */",
         "",
@@ -152,44 +197,22 @@ def _cpp_base_classes(variant: str) -> list:
         "",
         "/* -- Standard concrete widget classes --------------------------------------- */",
         "",
-        "class DisplayWidget : public OutputWidget<float>    { public: DisplayWidget(udisplay_t* ctx, uint8_t id)    : OutputWidget(ctx, id) {} };",
-        "class LedWidget     : public OutputWidget<bool>     { public: LedWidget(udisplay_t* ctx, uint8_t id)     : OutputWidget(ctx, id) {} };",
-        "class RgbLedWidget  : public OutputWidget<uint32_t> { public: RgbLedWidget(udisplay_t* ctx, uint8_t id)  : OutputWidget(ctx, id) {} };",
+        "class DisplayWidget : public OutputWidget<float>    { public: DisplayWidget(udisplay_t* ctx, uint8_t id)    : OutputWidget<float>(ctx, id) {} };",
+        "class LedWidget     : public OutputWidget<bool>     { public: LedWidget(udisplay_t* ctx, uint8_t id)     : OutputWidget<bool>(ctx, id) {} };",
+        "class RgbLedWidget  : public OutputWidget<uint32_t> { public: RgbLedWidget(udisplay_t* ctx, uint8_t id)  : OutputWidget<uint32_t>(ctx, id) {} };",
         "",
-        "class ToggleWidget : public OutputWidget<bool> {",
-        "public:",
-        "    ToggleWidget(udisplay_t* ctx, uint8_t id) : OutputWidget(ctx, id) {}",
-        handler("on_change(bool state)"),
-        "};",
+        *_cpp_class_with_handlers("ToggleWidget", "OutputWidget<bool>", ["on_change(bool state)"], variant),
         "",
-        "class SliderWidget : public OutputWidget<float> {",
-        "public:",
-        "    SliderWidget(udisplay_t* ctx, uint8_t id) : OutputWidget(ctx, id) {}",
-        handler("on_change(float value)"),
-        "};",
+        *_cpp_class_with_handlers("SliderWidget", "OutputWidget<float>", ["on_change(float value)"], variant),
         "",
-        "class ButtonWidget : public Widget {",
-        "public:",
-        "    ButtonWidget(udisplay_t* ctx, uint8_t id) : Widget(ctx, id) {}",
-        handler("on_press()"),
-        handler("on_release()"),
-        handler("on_click()"),
-        "};",
+        *_cpp_class_with_handlers("ButtonWidget", "Widget", ["on_press()", "on_release()", "on_click()"], variant),
         "",
-        "class ButtonItem : public Widget {",
-        "public:",
-        "    ButtonItem(udisplay_t* ctx, uint8_t id) : Widget(ctx, id) {}",
-        handler("on_press()"),
-        handler("on_release()"),
-        handler("on_click()"),
-        "};",
+        *_cpp_class_with_handlers("ButtonItem", "Widget", ["on_press()", "on_release()", "on_click()"], variant),
         "",
-        "class TextRwWidget : public Widget {",
-        "public:",
-        "    TextRwWidget(udisplay_t* ctx, uint8_t id) : Widget(ctx, id) {}",
-        "    void set(const char* s, uint8_t n) { udisplay_send_string(_ctx, _id, s, n); }",
-        handler("on_submit(const char* str, uint8_t len)"),
-        "};",
+        *_cpp_class_with_handlers(
+            "TextRwWidget", "Widget", ["on_submit(const char* str, uint8_t len)"], variant,
+            ["    void set(const char* s, uint8_t n) { udisplay_send_string(_ctx, _id, s, n); }"],
+        ),
         "",
         "class TextRoWidget : public Widget {",
         "public:",
@@ -214,17 +237,6 @@ def _cpp_generated_classes(
     (`ui.settings.rate`); a transparent container is a plain Widget whose
     children are members of the enclosing scope. Emitted children-first: a
     member's class must be complete before the class that holds it."""
-    def handler(sig: str) -> str:
-        name, _, rest = sig.partition("(")
-        args = rest.rstrip(")")
-        if variant == "safe":
-            return f"    void (*{name})({args}) = nullptr;"
-        if args and args != "void":
-            arg_types = ", ".join(p.strip().rsplit(" ", 1)[0] for p in args.split(","))
-        else:
-            arg_types = ""
-        return f"    std::function<void({arg_types})> {name};"
-
     lines: list = []
 
     def emit(node) -> None:
@@ -236,22 +248,12 @@ def _cpp_generated_classes(
 
         if type_str == "dropdown":
             items = dropdown_items.get(node.path, [])
-            lines += [
-                f"class {cn} : public OutputWidget<uint8_t> {{",
-                "    using OutputWidget::OutputWidget;",
-                "public:",
-                "    enum class Option : uint8_t {",
-            ]
-            for idx, (item_key, _) in enumerate(items):
-                comma = "," if idx < len(items) - 1 else ""
-                lines.append(f"        {item_key} = {idx}u{comma}")
-            lines += [
-                "    };",
-                f"    void set(Option v) {{ OutputWidget<uint8_t>::set(static_cast<uint8_t>(v)); }}",
-                handler("on_change(Option selection)"),
-                "};",
-                "",
-            ]
+            option = _cpp_enum_type("Option", variant)
+            lines += _cpp_class_with_handlers(
+                cn, "OutputWidget<uint8_t>", [f"on_change({option} selection)"], variant,
+                _cpp_enum("Option", [(key, f"{idx}u") for idx, (key, _) in enumerate(items)], variant)
+                + [f"    void set({option} v) {{ OutputWidget<uint8_t>::set(static_cast<uint8_t>(v)); }}"],
+            ) + [""]
             return
 
         if not _cpp_has_class(node, type_str):
@@ -264,14 +266,14 @@ def _cpp_generated_classes(
             # fires that item's handlers; firmware confirms via set(), which
             # pushes STATE_UPDATE(group, uint8 item widget ID). Item values
             # ARE the items' widget IDs; clear() sends 0 (reserved, no item).
-            lines.append("    enum class Item : uint8_t {")
-            for idx, child in enumerate(node.children):
-                comma = "," if idx < len(node.children) - 1 else ""
-                lines.append(f"        {child.key} = 0x{widget_ids[child.path]:02X}u{comma}")
+            lines += _cpp_enum(
+                "Item",
+                [(child.key, f"0x{widget_ids[child.path]:02X}u") for child in node.children],
+                variant,
+            )
             lines += [
-                "    };",
-                "    void set(Item v) { udisplay_send_uint8(_ctx, _id, static_cast<uint8_t>(v)); }",
-                "    void clear()     { udisplay_send_uint8(_ctx, _id, 0u); }",
+                f"    void set({_cpp_enum_type('Item', variant)} v) {{ udisplay_send_uint8(_ctx, _id, static_cast<uint8_t>(v)); }}",
+                "    void clear() { udisplay_send_uint8(_ctx, _id, 0u); }",
             ]
         members = scope_members(node.children)
         for child in members:
@@ -325,6 +327,8 @@ def _cpp_dispatch_cases(
     nodes: list,
     widget_types: dict,
     widget_ids: dict,
+    dropdown_items: dict,
+    variant: str,
 ) -> list:
     """One `case` per widget that raises events, at any depth. The member
     expression is the name path itself (`self->settings.rate`)."""
@@ -365,10 +369,19 @@ def _cpp_dispatch_cases(
                 "        break;",
             ]
         elif type_str == "dropdown":
-            cn = _cpp_class_name(path)
+            # libudisplay passes the selection byte through unvalidated, and
+            # casting an out-of-range value to a C++98 enum is unspecified:
+            # ignore it, like an unknown widget ID. Indices are 0..N-1 (YAML
+            # order, see collect_dropdown_items()), so N bounds the range. With
+            # 256 items every byte is valid, and `< 256u` on a uint8_t would
+            # trip -Wtype-limits (-Wextra), so the check is left out.
+            option = f"{_cpp_class_name(path)}::{_cpp_enum_type('Option', variant)}"
+            count = len(dropdown_items.get(node.path, []))
+            in_range = f"ev->selection_index < {count}u && " if count < 256 else ""
             lines += [
                 f"    case 0x{wid:02X}u:",
-                f"        if (self->{path}.on_change) self->{path}.on_change(static_cast<{cn}::Option>(ev->selection_index));",
+                f"        if ({in_range}self->{path}.on_change)",
+                f"            self->{path}.on_change(static_cast<{option}>(ev->selection_index));",
                 "        break;",
             ]
     return lines
@@ -471,31 +484,40 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         cpp_type = _cpp_member_type(node, widget_types.get(node.path, ""))
         lines.append(f"    {cpp_type} {node.key};")
 
-    lines.append("")
-    if variant == "safe":
-        lines.append("    void (*on_client_ready)() = nullptr;")
-        lines.append("    void (*on_comms_error)() = nullptr;")
-    else:
-        lines.append("    std::function<void()> on_client_ready;")
-        lines.append("    std::function<void()> on_comms_error;")
-    lines.append("")
-    lines.append("    UDisplay()")
-    for i, node in enumerate(top_members):
-        prefix = "        : " if i == 0 else "        , "
-        lines.append(f"{prefix}{node.key}(&_ctx, 0x{widget_ids[node.path]:02X}u)")
-    lines += [
-        "    {}",
-        "",
+    ready_decl, ready_init = _cpp_handler("on_client_ready()", variant)
+    error_decl, error_init = _cpp_handler("on_comms_error()", variant)
+    lines += ["", ready_decl, error_decl, "", "    UDisplay()"]
+    inits = [f"{node.key}(&_ctx, 0x{widget_ids[node.path]:02X}u)" for node in top_members]
+    inits += [init for init in (ready_init, error_init) if init]
+    for i, init in enumerate(inits):
+        lines.append(("        : " if i == 0 else "        , ") + init)
+    lines += ["    {}", ""]
+
+    no_copy_comment = [
         "    /* Non-copyable, non-movable: widgets above cache a raw pointer to _ctx's",
         "     * storage (taken at construction, see the member list above). Moving or",
         "     * copying this object would leave every widget's cached pointer dangling",
         "     * or aliased to the wrong instance -- so its address must stay fixed for",
         "     * its whole lifetime. Construct once (static, global, or in-place). */",
-        "    UDisplay(const UDisplay&) = delete;",
-        "    UDisplay& operator=(const UDisplay&) = delete;",
-        "    UDisplay(UDisplay&&) = delete;",
-        "    UDisplay& operator=(UDisplay&&) = delete;",
-        "",
+    ]
+    if variant == "modern":
+        lines += no_copy_comment + [
+            "    UDisplay(const UDisplay&) = delete;",
+            "    UDisplay& operator=(const UDisplay&) = delete;",
+            "    UDisplay(UDisplay&&) = delete;",
+            "    UDisplay& operator=(UDisplay&&) = delete;",
+            "",
+        ]
+        no_copy_private = []
+    else:
+        # C++98 idiom: declared private, never defined. A user-declared copy
+        # constructor also suppresses the implicit move operations (C++11+).
+        no_copy_private = [""] + no_copy_comment + [
+            "    UDisplay(const UDisplay&);",
+            "    UDisplay& operator=(const UDisplay&);",
+        ]
+
+    lines += [
         "    void init(udisplay_send_fn send, udisplay_transport_t transport);",
         "    void feed(const uint8_t* data, uint16_t len);",
         "    int ble_set_mtu(uint16_t mtu_payload);",
@@ -510,6 +532,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         "    static void _dispatch(const udisplay_event_t* ev, void* ud);",
         "    static void _on_ready(void* ud);",
         "    static void _on_comms_error(void* ud);",
+    ] + no_copy_private + [
         "};",
         "",
         "inline void UDisplay::init(udisplay_send_fn send, udisplay_transport_t transport)",
@@ -556,7 +579,7 @@ def _generate_header_cpp(ctx: BuildContext) -> str:
         "    UDisplay* self = static_cast<UDisplay*>(ud);",
     ]
 
-    dispatch = _cpp_dispatch_cases(walk(tree), widget_types, widget_ids)
+    dispatch = _cpp_dispatch_cases(walk(tree), widget_types, widget_ids, dropdown_items, variant)
     if dispatch:
         lines.append("    switch (ev->widget_id) {")
         lines.extend(dispatch)

@@ -36,6 +36,12 @@ from .widget_ids import (  # noqa: E402
 BUTTON_GROUP_RESERVED_ITEM_KEYS = {"set", "clear"}
 
 
+# A dropdown selection is its item's 0-based position (0..N-1), sent as a
+# uint8 -- so at most 256 items are addressable. The generated C++ dispatch
+# range-checks the index against N before casting it to the enum.
+MAX_DROPDOWN_ITEMS = 256
+
+
 def load_schema() -> dict:
     with _BUNDLED_SCHEMA.open() as f:
         try:
@@ -259,6 +265,7 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
     """
     Recursive semantic check for a widget map.
     - slider min < max
+    - dropdown has at most MAX_DROPDOWN_ITEMS items
     - dpad's button children must all have position
     - style: names a declared stylesheet (containers, button face children
       and button-group items included)
@@ -312,6 +319,14 @@ def _semantic_errors_in_map(widgets: dict, path_prefix: str,
                         f"`{item_key}()` methods); rename this item"
                     )
 
+        if wtype == "dropdown":
+            n_items = len(widget.get("items", {}))
+            if n_items > MAX_DROPDOWN_ITEMS:
+                errors.append(
+                    f"  {widget_path}: dropdown has {n_items} items; at most "
+                    f"{MAX_DROPDOWN_ITEMS} fit the uint8 selection index"
+                )
+
         if wtype == "slider":
             mn, mx = widget.get("min"), widget.get("max")
             if mn is not None and mx is not None and mn >= mx:
@@ -326,6 +341,7 @@ def semantic_errors(doc: dict) -> list[str]:
     """
     Semantic checks not expressible in JSON Schema:
     - slider min < max
+    - dropdown has at most MAX_DROPDOWN_ITEMS items
     - dpad's button children must all have position
     - style: names a declared stylesheet
     - every widget has a distinct name path: a key appears once per naming
