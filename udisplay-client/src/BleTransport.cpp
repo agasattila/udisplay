@@ -26,9 +26,15 @@ BleTransport::BleTransport(const QBluetoothDeviceInfo& deviceInfo,
 {
     connect(&m_writeQueue, &BleWriteQueue::writeRequested,
             this, [this](const QByteArray& fragment) {
-                if (m_service)
-                    m_service->writeCharacteristic(
-                        m_ctrlChar, fragment, QLowEnergyService::WriteWithResponse);
+                /* Not reachable today (sendFramed() and the reset paths keep
+                 * the queue empty without a service), but if it ever is, fail
+                 * now instead of reporting a misleading timeout 5 s later. */
+                if (!m_service) {
+                    failLink(QStringLiteral("BLE write with no GATT service"));
+                    return;
+                }
+                m_service->writeCharacteristic(
+                    m_ctrlChar, fragment, QLowEnergyService::WriteWithResponse);
             });
     connect(&m_writeQueue, &BleWriteQueue::timedOut, this, [this]() {
         failLink(QStringLiteral("BLE write timeout"));

@@ -4,7 +4,7 @@ Non-interactive session; decisions made autonomously.
 Branch: feat/ble-att-write-timeout
 Repo: agasattila/udisplay
 Issue: #23
-Status: DRAFT
+Status: IMPLEMENTED (PR pending)
 
 ## Problem Statement
 `BleTransport` sends client-to-device data one ATT write at a time
@@ -75,6 +75,11 @@ A, with these decisions:
   clears the queue, emits `errorOccurred`, and disconnects the controller. That
   error reaches `BootstrapManager::failed` → `DeviceController` in any state,
   the same path `CharacteristicWriteError` already uses.
+- Firmware contract (found in /review): NimBLE sends the write response only
+  after the GATT write callback returns, and `udisplay_feed()` runs the
+  firmware's event handlers inside that callback (`demos/demo05` `ctrl_access`).
+  A handler that blocks for more than 5 s now loses the BLE link. This is
+  documented in `docs/protocol.md` (v2.7).
 - One timeout per fragment, not per message: each ATT write is its own
   transaction, and a long message just means more 5 s windows, each of which
   normally takes milliseconds.

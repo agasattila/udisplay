@@ -76,19 +76,21 @@ private slots:
 
     void timer_restartsForEachFragment()
     {
-        BleWriteQueue q(1'000);
+        /* Each wait is 2/3 of the timeout: 500 ms of slack on both sides,
+         * and the two waits together (2 s) are well past one timeout. */
+        BleWriteQueue q(1'500);
         QSignalSpy writes(&q, &BleWriteQueue::writeRequested);
         QSignalSpy timeouts(&q, &BleWriteQueue::timedOut);
 
         q.enqueue("a");
         q.enqueue("b");
-        QTest::qWait(700);
+        QTest::qWait(1'000);
         q.confirm();                     /* "b" goes out with a fresh window */
         QCOMPARE(writes.count(), 2);
-        QTest::qWait(700);               /* 1.4 s since "a", 0.7 s since "b" */
+        QTest::qWait(1'000);             /* 2 s since "a", 1 s since "b" */
         QCOMPARE(timeouts.count(), 0);
 
-        QVERIFY(timeouts.wait(2'000));   /* "b" itself is never confirmed */
+        QVERIFY(timeouts.wait(3'000));   /* "b" itself is never confirmed */
         QCOMPARE(timeouts.count(), 1);
     }
 
