@@ -23,7 +23,17 @@ BleTransport::BleTransport(const QBluetoothDeviceInfo& deviceInfo,
                            QObject* parent)
     : Transport(parent)
     , m_deviceInfo(deviceInfo)
-{}
+{
+    connect(&m_writeQueue, &BleWriteQueue::writeRequested,
+            this, [this](const QByteArray& fragment) {
+                if (m_service)
+                    m_service->writeCharacteristic(
+                        m_ctrlChar, fragment, QLowEnergyService::WriteWithResponse);
+            });
+    connect(&m_writeQueue, &BleWriteQueue::timedOut, this, [this]() {
+        failLink(QStringLiteral("BLE write timeout"));
+    });
+}
 
 BleTransport::~BleTransport()
 {
@@ -44,7 +54,6 @@ void BleTransport::connectToDevice()
     }
 
     m_connected     = false;
-    m_writeInFlight = false;
     m_writeQueue.clear();
     m_txPacketId    = 0xFF;
     m_rxState       = Proto::BleRxState{};
@@ -71,8 +80,7 @@ void BleTransport::connectToDevice()
 
 void BleTransport::disconnectFromDevice()
 {
-    m_connected     = false;
-    m_writeInFlight = false;
+    m_connected = false;
     m_writeQueue.clear();
 
     if (m_service) {
@@ -101,20 +109,6 @@ void BleTransport::sendFramed(const QByteArray& msg, uint8_t flags)
 
     for (const QByteArray& frag : fragments)
         m_writeQueue.enqueue(frag);
-
-    drainWriteQueue();
-}
-
-void BleTransport::drainWriteQueue()
-{
-    if (m_writeInFlight || m_writeQueue.isEmpty() || !m_service)
-        return;
-
-    m_writeInFlight = true;
-    m_service->writeCharacteristic(
-        m_ctrlChar,
-        m_writeQueue.dequeue(),
-        QLowEnergyService::WriteWithResponse);
 }
 
 /* ── QLowEnergyController slots ─────────────────────────────────────────── */
@@ -215,7 +209,8 @@ void BleTransport::onServiceError(QLowEnergyService::ServiceError error)
         break;
     case QLowEnergyService::CharacteristicWriteError:
         /* A confirmed control write failed: the fragment is lost and the
-         * in-flight slot would never be released. */
+         * in-flight slot would never be released. (A write that never
+         * reports at all is caught by the BleWriteQueue timeout.) */
         failLink(QStringLiteral("BLE write to control characteristic failed"));
         break;
     default:
@@ -225,8 +220,7 @@ void BleTransport::onServiceError(QLowEnergyService::ServiceError error)
 
 void BleTransport::failLink(const QString& reason)
 {
-    m_connected     = false;
-    m_writeInFlight = false;
+    m_connected = false;
     m_writeQueue.clear();
     emit errorOccurred(reason);
     if (m_controller)
@@ -274,8 +268,7 @@ void BleTransport::onCharacteristicWritten(const QLowEnergyCharacteristic& c,
     /* Only a confirmed control write releases the one-in-flight slot. */
     if (c.uuid() != kCtrlCharUuid)
         return;
-    m_writeInFlight = false;
-    drainWriteQueue();
+    m_writeQueue.confirm();
 }
 
 #endif /* HAVE_BLE */
