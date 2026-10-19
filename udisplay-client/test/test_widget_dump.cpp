@@ -325,6 +325,39 @@ private slots:
         QVERIFY(leadingSpaces(leafIndent) > leadingSpaces(sectionIndent));
     }
 
+    /* Recursion cap (issue #24): a chain at kMaxWidgetNestingDepth dumps in
+     * full; one level deeper, the widget at the cap lists its children as
+     * not shown instead of recursing into them. */
+    void nestedRows_atMaxDepth_dumpsEveryLevel()
+    {
+        QList<WidgetDef> widgets;
+        int parent = -1;
+        for (int i = 1; i < kMaxWidgetNestingDepth; ++i)
+            parent = appendRow(widgets, QStringLiteral("r%1").arg(i), parent);
+        appendToggle(widgets, 0x20, QStringLiteral("leaf"), parent);
+
+        const QString out = dumpWidgetTree(widgets, QStringLiteral("Dev"), QStringLiteral("1.0"),
+                                            QStringLiteral("default"));
+        QVERIFY(out.contains(QStringLiteral("[0x20] toggle")));
+        QVERIFY(!out.contains(QStringLiteral("not shown")));
+    }
+
+    void nestedRows_pastMaxDepth_stopsAtCap()
+    {
+        QList<WidgetDef> widgets;
+        int parent = -1;
+        for (int i = 1; i <= kMaxWidgetNestingDepth; ++i)
+            parent = appendRow(widgets, QStringLiteral("r%1").arg(i), parent);
+        appendToggle(widgets, 0x20, QStringLiteral("leaf"), parent);
+
+        const QString out = dumpWidgetTree(widgets, QStringLiteral("Dev"), QStringLiteral("1.0"),
+                                            QStringLiteral("default"));
+        QVERIFY(out.contains(QStringLiteral("keyPath=\"r10\"")));
+        QVERIFY(!out.contains(QStringLiteral("[0x20] toggle")));
+        QVERIFY(out.contains(QStringLiteral(
+            "widgets: (1 not shown: past the maximum nesting depth of 10)")));
+    }
+
     void buttonWithFaceChildren_printsLedDisplayAndLabelChildren()
     {
         QList<WidgetDef> widgets;

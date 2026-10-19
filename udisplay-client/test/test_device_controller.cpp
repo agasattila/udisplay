@@ -93,6 +93,28 @@ static QByteArray nestedRowYaml(int depth)
     return yaml.toUtf8();
 }
 
+/* Helper: loads nestedRowYaml(9) (the deepest chain the parser accepts, so
+ * the `alarm` stylesheet is registered), then replaces the model with a
+ * hand-built chain the parser would reject: `alarm`-styled row 0, then
+ * `hops` rows each parented to the one before. The only way to reach the
+ * style walk's own depth cap now that YamlParser enforces the same limit. */
+static void injectStyledChain(DeviceController& dc, int hops)
+{
+    injectBootstrap(dc, nestedRowYaml(9).constData());
+    QList<WidgetDef> chain;
+    for (int i = 0; i <= hops; ++i) {
+        WidgetDef w;
+        w.keyPath  = QStringLiteral("l%1").arg(i);
+        w.widgetId = static_cast<uint8_t>(0x10 + i);
+        w.type     = i < hops ? WidgetType::Row : WidgetType::Toggle;
+        w.parentId = i - 1;
+        if (i == 0)
+            w.props[QStringLiteral("style")] = QStringLiteral("alarm");
+        chain.append(w);
+    }
+    dc.widgetModel()->setWidgets(chain);
+}
+
 /* Helper: capture qInfo()/qWarning() output produced while running fn().
  * --debug output goes through qInfo(), which the default Qt message handler
  * sends to stderr — installing a temporary handler is the simplest way to
@@ -820,18 +842,33 @@ private slots:
                   QStringLiteral("#00d4aa"));
     }
 
-    /* Depth cap: a leaf nested past kMaxStyleAncestorDepth (10) levels below
+    /* Depth cap: a leaf nested past kMaxWidgetNestingDepth (10) levels below
      * a styled root falls back to activeStyle instead of walking further —
-     * defensive bound on this runtime walk, consistent with TODO-036's
-     * proposed nesting limit for the separate parse-time recursion guard. */
+     * defensive bound on this runtime walk. YamlParser rejects such a
+     * document outright (issue #24), so the chain is hand-built. */
     void effectiveStyleFor_deeplyNestedBeyondCap_fallsBackToActiveStyle()
     {
         /* 12 nested rows below the styled root — deeper than the 10-level cap. */
         DeviceController dc;
-        injectBootstrap(dc, nestedRowYaml(12).constData());
-        /* Rows are pre-order: l0=0, l1=1, ..., l12=12 (the innermost toggle). */
+        injectStyledChain(dc, 12);
+        QCOMPARE(dc.widgetModel()->rowCount(), 13);
         QCOMPARE(dc.effectiveStyleFor(12).value(QStringLiteral("accent")).toString(),
                   dc.activeStyle().value(QStringLiteral("accent")).toString());
+    }
+
+    /* The parser's nesting limit and the style walk's cap are the same
+     * constant: one level deeper than the "exactly at cap" chain below is
+     * rejected at bootstrap, so no parsed widget's ancestor chain is ever
+     * cut short. */
+    void bootstrap_nestedPastMaxDepth_rejected()
+    {
+        DeviceController dc;
+        injectBootstrap(dc, nestedRowYaml(10).constData());
+        QCOMPARE(dc.widgetModel()->rowCount(), 0);
+        QVERIFY2(dc.errorString().contains(
+                     QStringLiteral("nested 11 levels deep; the maximum widget nesting "
+                                    "depth is 10")),
+                 qPrintable(dc.errorString()));
     }
 
     /* ── Button cascading (PR22 change request) — docs/designs/
@@ -929,12 +966,12 @@ private slots:
                   QStringLiteral("#e05555"));
     }
 
-    /* Exact depth-cap boundary (kMaxStyleAncestorDepth = 10 in
-     * DeviceController.cpp): the existing
+    /* Exact depth-cap boundary (kMaxWidgetNestingDepth = 10, WidgetDef.h):
+     * the existing
      * effectiveStyleFor_deeplyNestedBeyondCap_fallsBackToActiveStyle test
      * only proves "well beyond the cap (12 levels) falls back" — it does
      * not pin down where the boundary actually is. The loop condition is
-     * `depth < kMaxStyleAncestorDepth`, checking the leaf's own row at
+     * `depth < kMaxWidgetNestingDepth`, checking the leaf's own row at
      * depth 0 and each ancestor up to depth 9 (10 checks total) — so a
      * styled ancestor exactly 9 hops above the leaf is the LAST position
      * still found; 10 hops above is the FIRST position that falls back. */
@@ -954,10 +991,10 @@ private slots:
         /* 10 nested rows below the styled root — one hop deeper than the
          * "exactly at cap" case above; the leaf is now 10 hops above the
          * styled ancestor (depth 10, fails depth < 10). Minimal failing
-         * case, as opposed to the existing 12-level "well beyond cap" test. */
+         * case, as opposed to the existing 12-level "well beyond cap" test.
+         * Hand-built: the parser rejects this depth. */
         DeviceController dc;
-        injectBootstrap(dc, nestedRowYaml(10).constData());
-        /* Rows are pre-order: l0=0, l1=1, ..., l10=10 (the innermost toggle). */
+        injectStyledChain(dc, 10);
         QCOMPARE(dc.effectiveStyleFor(10).value(QStringLiteral("accent")).toString(),
                   dc.activeStyle().value(QStringLiteral("accent")).toString());
     }

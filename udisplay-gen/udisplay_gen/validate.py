@@ -28,6 +28,7 @@ SUPPORTED_TYPES = [
 # The container type set is shared with ID assignment (TODO-007).
 from .widget_ids import (  # noqa: E402
     CONTAINER_TYPES, describe_name_collision, name_path_collisions,
+    widget_limit_error,
 )
 
 # button-group item keys that would collide with the generated group's own
@@ -56,6 +57,99 @@ def parse_yaml(path: str | pathlib.Path) -> dict:
 
 def parse_yaml_text(text: str) -> dict:
     return yaml.safe_load(text)
+
+
+# What a plain mapping key that YAML 1.1 doesn't read as a string reads as
+# instead (PyYAML's implicit resolvers). The `<<` merge key and null get
+# their own messages.
+_KEY_KINDS = {
+    "tag:yaml.org,2002:bool": "a boolean",
+    "tag:yaml.org,2002:int": "an integer",
+    "tag:yaml.org,2002:float": "a float",
+    "tag:yaml.org,2002:timestamp": "a timestamp",
+    "tag:yaml.org,2002:value": "a value key",
+}
+_STR_TAG = "tag:yaml.org,2002:str"
+
+
+def mapping_key_error(yaml_text: str) -> str | None:
+    """The error text for the first mapping key, in document order, that
+    isn't a plain string, or None if every key is one. udisplay-client's
+    YamlParser.cpp mappingKeyError() rejects the same keys with the same
+    text, verbatim, so both tools derive identical widget paths:
+
+    - a YAML 1.1 implicit non-string (`yes`, `off`, `0x10`, `1.5`,
+      `2026-01-01`; PyYAML converts these, yaml-cpp keeps the text), so a
+      widget `yes:` would be WIDGET_ID_TRUE. Quoting the key or `!!str`
+      makes it a string.
+    - a null key (empty, `~`, `null`)
+    - a `<<` merge key (PyYAML merges, yaml-cpp 0.8 doesn't)
+    - an alias, mapping or sequence used as a key, or a key with any
+      explicit tag other than `!!str`
+    - the same key twice in one mapping (PyYAML keeps the last, yaml-cpp
+      the first)
+
+    Scans the event stream, so it visits every node once, never expands an
+    alias and never recurses."""
+    def error(mark, problem: str) -> str:
+        return f"line {mark.line + 1}, column {mark.column + 1}: {problem}"
+
+    def key_error(event, keys: set) -> str | None:
+        mark = event.start_mark
+        if isinstance(event, yaml.AliasEvent):
+            return error(mark, "mapping key is an alias; keys must be strings")
+        if not isinstance(event, yaml.ScalarEvent):
+            return error(mark, "mapping key is a mapping or sequence; keys must be strings")
+        value = event.value
+        if event.tag not in (None, "!", _STR_TAG):
+            return error(mark, f"mapping key '{value}' has an explicit non-string tag; "
+                               f"keys must be strings")
+        if event.tag is None and event.style is None:
+            tag = _resolver.resolve(yaml.ScalarNode, value, (True, False))
+            if tag == "tag:yaml.org,2002:null":
+                return error(mark, "mapping key is null (empty, ~ or null); "
+                                   "keys must be strings")
+            if tag == "tag:yaml.org,2002:merge":
+                return error(mark, "YAML merge keys (<<) are not supported; "
+                                   "write the keys out")
+            if tag != _STR_TAG:
+                return error(mark, f"mapping key '{value}' reads as {_KEY_KINDS[tag]} "
+                                   f"in YAML 1.1, not a string; quote it: \"{value}\"")
+        if value in keys:
+            return error(mark, f"duplicate mapping key '{value}'")
+        keys.add(value)
+        return None
+
+    # One frame per open collection: a mapping's keys so far and whether
+    # its next node is a key, or None for a sequence.
+    stack: list = []
+
+    def node_done() -> None:
+        if stack and stack[-1] is not None:
+            stack[-1][1] = not stack[-1][1]
+
+    for event in yaml.parse(yaml_text):
+        if isinstance(event, (yaml.MappingEndEvent, yaml.SequenceEndEvent)):
+            stack.pop()
+            node_done()
+            continue
+        if not isinstance(event, yaml.NodeEvent):
+            continue
+        frame = stack[-1] if stack else None
+        if frame is not None and frame[1]:
+            problem = key_error(event, frame[0])
+            if problem:
+                return problem
+        if isinstance(event, yaml.MappingStartEvent):
+            stack.append([set(), True])
+        elif isinstance(event, yaml.SequenceStartEvent):
+            stack.append(None)
+        else:
+            node_done()
+    return None
+
+
+_resolver = yaml.resolver.Resolver()
 
 
 def _yaml_line_map(yaml_text: str) -> dict[str, int]:
@@ -237,6 +331,8 @@ def semantic_errors(doc: dict) -> list[str]:
     - every widget has a distinct name path: a key appears once per naming
       scope (widget_ids.py), so two `temp` widgets in two transparent rows
       would share WIDGET_ID_TEMP / ui.temp
+    - no widget nests deeper than MAX_NESTING_DEPTH and there are at most
+      MAX_WIDGETS widgets; if either fails, that is the only error reported
     """
     # "default" is always implicitly valid, even with no style: block at all
     # — matches udisplay-client's YamlParser.cpp parseStyles(), which always
@@ -244,6 +340,11 @@ def semantic_errors(doc: dict) -> list[str]:
     # else hardcoded StyleToken C++ defaults).
     style_names = set(doc.get("style", {}).keys()) | {"default"}
     widgets = doc.get("widgets", {})
+    # Every check below recurses once per nesting level and visits every
+    # widget an alias expands to (validate()).
+    limit_error = widget_limit_error(widgets)
+    if limit_error:
+        return [f"  {limit_error}"]
     errors = _semantic_errors_in_map(widgets, "", style_names)
     if isinstance(widgets, dict):
         errors += [f"  {describe_name_collision(name, paths)}"
@@ -253,7 +354,24 @@ def semantic_errors(doc: dict) -> list[str]:
 
 def validate(doc: dict, schema: dict | None = None,
              yaml_text: str | None = None) -> list[str]:
-    """Combined schema + semantic validation. Returns all errors."""
+    """Combined schema + semantic validation. Returns all errors.
+
+    Given the YAML text, a mapping key that isn't a plain string
+    (mapping_key_error()) is the only error reported: it would change the
+    widget paths every other check derives, and differently in the client.
+    Then a widget nested deeper than MAX_NESTING_DEPTH, or past MAX_WIDGETS
+    (widget_ids.py widget_limit_error()), is the only error reported: the
+    line map, the schema check and the semantic checks all recurse once per
+    nesting level and visit every widget a YAML alias expands to, so they
+    run only on a document known to be small and shallow enough."""
+    if yaml_text:
+        key_error = mapping_key_error(yaml_text)
+        if key_error:
+            return [f"  {key_error}"]
+    widgets = doc.get("widgets") if isinstance(doc, dict) else None
+    limit_error = widget_limit_error(widgets)
+    if limit_error:
+        return [f"  {limit_error}"]
     if schema is None:
         schema = load_schema()
     line_map = _yaml_line_map(yaml_text) if yaml_text else {}
