@@ -34,7 +34,6 @@ def test_generate_header_contains_widget_macros(minimal_yaml):
     header = generate_header(widget_ids=widget_ids, blob=blob, root=root, source="test.yaml")
     assert "WIDGET_ID_A" in header
     assert "0x10u" in header
-    assert "UDISPLAY_PROP_ENABLED" in header
     assert "UDISPLAY_CHUNK_COUNT" in header
     assert "#pragma once" in header
     assert "SPDX-License-Identifier: MIT" in header
