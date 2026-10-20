@@ -154,12 +154,6 @@ def _generate_header(ctx: BuildContext) -> str:
 
     lines += [
         "",
-        "/* -- Property IDs ---------------------------------------------------------- */",
-        "#define UDISPLAY_PROP_ENABLED   0x01u",
-        "#define UDISPLAY_PROP_VISIBLE   0x02u",
-        "#define UDISPLAY_PROP_MODE      0x03u",
-        "#define UDISPLAY_PROP_STYLE     0x04u",
-        "",
         "/* -- Blob metadata --------------------------------------------------------- */",
         f"#define UDISPLAY_CHUNK_COUNT   {n}u",
         f"#define UDISPLAY_CHUNK_SIZE    {CHUNK_SIZE}u",
