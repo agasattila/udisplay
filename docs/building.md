@@ -485,7 +485,8 @@ sudo apt install -y \
 ### demo05 — minimal ESP32 BLE demo
 
 **Status: exists and works.** A button press toggles an LED; state is pushed to a
-connected uDisplay client over BLE via NimBLE GATT indications. See
+connected uDisplay client over BLE via NimBLE GATT indications, using libudisplay's
+built-in NimBLE transport backend. See
 [`demos/demo05/README.md`](../demos/demo05/README.md) for supported ESP32 targets,
 flashing, and the manual smoke-test checklist.
 
@@ -527,6 +528,31 @@ idf.py -p /dev/ttyUSB0 flash monitor
 `libudisplay` integrates as an ESP-IDF component via `idf_component_register` in
 `libudisplay/CMakeLists.txt`. No separate library build step is needed — ESP-IDF picks it
 up automatically.
+
+### libudisplay's NimBLE transport backend
+
+The BLE GATT server (`libudisplay/udisplay_nimble.h`) is an optional part of
+libudisplay, off by default:
+
+| Build | Enable with | Notes |
+|-------|-------------|-------|
+| ESP-IDF | `CONFIG_UDISPLAY_ENABLE_NIMBLE=y` (menuconfig → uDisplay) | Needs `CONFIG_BT_NIMBLE_ENABLED=y`. `CONFIG_UDISPLAY_NIMBLE_TX_QUEUE_BYTES` sizes the outbound fragment queue (default 2048). demo05 sets both NimBLE options in `sdkconfig.defaults`. |
+| Standalone CMake | `-DUDISPLAY_ENABLE_NIMBLE=ON -DUDISPLAY_NIMBLE_TARGET=<target>` | For other NimBLE platforms. `<target>` must provide the NimBLE host headers/libraries and implement `libudisplay/src/nimble/udisplay_nimble_port.h` (three functions: bring up the stack, start the host task, return its event queue). |
+
+The backend uses legacy advertising, so `CONFIG_BT_NIMBLE_EXT_ADV` must be off (the
+build stops otherwise). libudisplay links `bt` only if the component is part of the
+build, which it is by default; projects using `MINIMAL_BUILD` or an explicit
+`COMPONENTS` list must include `bt` themselves.
+
+With the option off, no NimBLE header is included, no NimBLE source is compiled and
+nothing links against NimBLE (on ESP-IDF, libudisplay doesn't link the `bt`
+component). Firmware can still bring its own BLE code through the plain
+`udisplay_send_fn` transport. Enabling NimBLE alone doesn't enable the backend.
+
+The generic backend (`src/nimble/udisplay_nimble.c`) uses only the NimBLE host and
+NPL APIs; ESP-IDF specifics live in `src/nimble/udisplay_nimble_port_esp_idf.c`.
+Host-side unit tests run it against a fake NimBLE host
+(`libudisplay/test/nimble_fake/`, target `udisplay_nimble_test`).
 
 ### Required hardware
 
