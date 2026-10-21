@@ -14,7 +14,9 @@
  * full-featured WiFi UI on one device) means allocating two `udisplay_t`
  * instances and passing the correct one to every call.
  *
- * Usage pattern (ESP-IDF / FreeRTOS, BLE transport):
+ * Usage pattern (ESP-IDF / FreeRTOS, BLE transport, firmware-provided BLE
+ * code). On NimBLE, libudisplay/udisplay_nimble.h replaces everything below
+ * except udisplay_init() and the send_float-style calls:
  *
  *   // Provide send callback. The library calls this once per BLE ATT fragment
  *   // (BLE transport) or once per length-prefixed TCP write (TCP transport).
@@ -243,7 +245,8 @@ typedef struct {
  * connection). Silently discarding a fragment corrupts the peer's
  * reassembly. On BLE the data characteristic uses INDICATE, which allows one
  * unconfirmed indication at a time: queue the fragments and send the next one
- * when the previous is confirmed (see demos/demo05).
+ * when the previous is confirmed. On NimBLE, the optional built-in backend
+ * (libudisplay/udisplay_nimble.h) does all of this.
  */
 typedef void (*udisplay_send_fn)(const uint8_t* data, uint16_t len, void* userdata);
 

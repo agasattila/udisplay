@@ -56,6 +56,13 @@
 
 #include "libudisplay/udisplay.h"
 
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#ifndef CONFIG_UDISPLAY_ENABLE_NIMBLE
+#error "udisplay_nimble.h: enable CONFIG_UDISPLAY_ENABLE_NIMBLE (idf.py menuconfig -> uDisplay). An sdkconfig created before the option existed doesn't pick it up from sdkconfig.defaults."
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

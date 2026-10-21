@@ -37,6 +37,8 @@
 
 using namespace udisplay_ui;
 
+#define BUTTON_GPIO GPIO_NUM_9
+
 static const char* TAG = "demo05";
 
 /* ── Board-specific LED control ─────────────────────────────────────────────

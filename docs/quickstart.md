@@ -187,6 +187,41 @@ goes out once your handler returns. Move slow work (motor moves, `delay()`, long
 I/O) out of the handler, for example by setting a flag that the `for (;;)` loop
 above picks up. See [BLE GATT](protocol.md#ble-gatt) for details.
 
+### Over BLE on ESP-IDF: the built-in NimBLE transport
+
+On a NimBLE-based platform you don't write the transport at all. libudisplay ships
+an optional NimBLE backend that runs the uDisplay GATT server: stack bring-up,
+service registration, advertising, the connection lifecycle, MTU tracking, the
+indication queue, the heartbeat and the HELLO readiness timer. Enable it with
+`CONFIG_UDISPLAY_ENABLE_NIMBLE=y` (menuconfig → uDisplay; it needs NimBLE, i.e.
+`CONFIG_BT_NIMBLE_ENABLED=y`) and the whole wiring becomes:
+
+```cpp
+#include "libudisplay/udisplay_nimble.h"
+
+static UDisplay ui;
+
+extern "C" void app_main(void)
+{
+    nvs_flash_init();   // the BT controller needs NVS; yours to initialize
+
+    ui.init(udisplay_nimble_send, UDISPLAY_TRANSPORT_BLE);
+    ui.btn.on_click = []() { /* ... */ };
+
+    udisplay_nimble_config_t ble = {};
+    ble.device_name = "MyDevice";
+    ESP_ERROR_CHECK(udisplay_nimble_init(ui.ctx(), &ble));
+    ESP_ERROR_CHECK(udisplay_nimble_start());
+}
+```
+
+There is no `feed()` or heartbeat to call: handlers run in the NimBLE host task. If
+another task of yours calls `ui.<widget>.set(...)`, wrap the call in
+`udisplay_nimble_lock()` / `udisplay_nimble_unlock()`. The full API, including
+connect/disconnect callbacks, is in
+[`libudisplay/include/libudisplay/udisplay_nimble.h`](../libudisplay/include/libudisplay/udisplay_nimble.h);
+[demos/demo05](../demos/demo05/) uses it.
+
 ## What you built
 
 You now have: a device UI defined in YAML, a live preview loop for iterating on it
@@ -201,7 +236,7 @@ From here:
   (§ Development Tools) demo01–03, the reference TCP implementations — including one
   in this same `--lang cpp --modern` mode — that this quickstart's sketch was
   abstracted from
-- [demos/demo05](../demos/demo05/) — the same `init`/handler-lambda/`feed` wiring
-  pattern running for real, over BLE, on physical ESP32 hardware
+- [demos/demo05](../demos/demo05/) — the same `init`/handler-lambda pattern running
+  for real, over BLE (the built-in NimBLE transport), on physical ESP32 hardware
 - [Building from source](building.md) — full dependency and build instructions for
   `udisplay-client` and `udisplay-gen`
