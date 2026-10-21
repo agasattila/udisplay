@@ -31,6 +31,7 @@ struct FakeNimble {
     /* Injected results */
     int port_init_rc = 0;
     int indicate_rc = 0;
+    int add_svcs_rc = 0;
     bool mbuf_alloc_fails = false;
 
     static constexpr uint16_t kDataValHandle = 42;

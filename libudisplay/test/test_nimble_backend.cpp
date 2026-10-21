@@ -205,6 +205,15 @@ TEST_F(NimbleBackendTest, InitPropagatesPortFailure)
     EXPECT_EQ(udisplay_nimble_start(), UDISPLAY_NIMBLE_ESTATE);
 }
 
+TEST_F(NimbleBackendTest, InitFailureLeavesInstanceUntouched)
+{
+    g_fake.add_svcs_rc = BLE_HS_ENOMEM;
+    EXPECT_EQ(udisplay_nimble_init(&ctx_, &ble_), BLE_HS_ENOMEM);
+    EXPECT_EQ(ctx_.cfg.on_comms_error, app_comms_error);
+    EXPECT_EQ(ctx_.cfg.timer_start, nullptr);
+    EXPECT_EQ(udisplay_nimble_start(), UDISPLAY_NIMBLE_ESTATE);
+}
+
 TEST_F(NimbleBackendTest, InitRegistersUDisplayService)
 {
     ASSERT_EQ(udisplay_nimble_init(&ctx_, &ble_), UDISPLAY_NIMBLE_OK);
@@ -450,6 +459,27 @@ TEST_F(NimbleBackendTest, MtuEventUpdatesFragmentSize)
     ASSERT_EQ(write_ctrl(kHelloEcho), 0);
     drain();
     EXPECT_EQ(g_fake.indications.size(), 1u) << "HANDSHAKE fits one fragment at MTU 247";
+}
+
+TEST_F(NimbleBackendTest, ReconnectStartsAtDefaultMtu)
+{
+    bring_up();
+    connect();
+    mtu(247);
+    ASSERT_EQ(ctx_.ble_mtu_payload, 244u);
+    disconnect();
+
+    /* A new link runs at ATT_MTU 23 until its own exchange: fragments sized
+     * for the old link would not fit. */
+    connect();
+    EXPECT_EQ(ctx_.ble_mtu_payload, UDISPLAY_BLE_MTU_PAYLOAD_DEFAULT);
+    subscribe();
+    confirm();
+    g_fake.indications.clear();
+    ASSERT_EQ(write_ctrl(kHelloEcho), 0);
+    drain();
+    EXPECT_EQ(g_fake.indications.size(), 3u);
+    for (const auto& f : g_fake.indications) EXPECT_LE(f.size(), 20u);
 }
 
 TEST_F(NimbleBackendTest, DisconnectResetsAndReadvertises)

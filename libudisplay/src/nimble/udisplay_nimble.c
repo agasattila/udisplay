@@ -20,10 +20,14 @@
  * Anything that would lose or reorder a fragment (ring full, mbuf exhausted,
  * indicate error, confirmation timeout) is a link error: disconnect.
  *
- * Locking. s.lock (recursive) guards the ring, the in-flight flag and every
- * call into the udisplay_t instance. BLE calls happen outside it where
- * ordering allows. Whoever flips tx_inflight false -> true owns the next
- * indicate call, which keeps fragments in order across tasks.
+ * Locking. s.lock (recursive) guards the link state, the ring, the
+ * in-flight flag and every call into the udisplay_t instance. tx_pump()
+ * holds it across ble_gatts_indicate_custom() too, so the fragment buffer
+ * has one user and a fragment can't go out on a connection that replaced
+ * the one it was queued for. That is deadlock-free because NimBLE never
+ * calls the GAP/GATT callbacks (which take s.lock) with its own host lock
+ * held; the only callback indicate runs synchronously is the "sent"
+ * NOTIFY_TX, in the same task, and the lock is recursive.
  */
 
 #include "libudisplay/udisplay_nimble.h"
@@ -100,9 +104,7 @@ static struct {
 } s;
 
 static uint8_t s_tx_storage[UDISPLAY_NIMBLE_TX_QUEUE_BYTES];
-/* Only the task that owns the false -> true tx_inflight flip touches it; it
- * is fully copied into an mbuf before the confirmation that lets the next
- * owner in. Static: too big for the host task stack. */
+/* Used by tx_pump() under s.lock. Static: too big for the host task stack. */
 static uint8_t s_tx_frag[TX_FRAG_MAX];
 /* Control writes arrive only in the host task. */
 static uint8_t s_rx_buf[RX_WRITE_MAX];
@@ -126,42 +128,37 @@ static void link_error(const char* why)
 
 /* ── Outbound queue ─────────────────────────────────────────────────────── */
 
-static void tx_reset(void)
-{
-    lock();
-    tx_ring_reset(&s.tx);
-    s.tx_inflight = 0;
-    unlock();
-}
-
 /* Send the next queued fragment if no indication is unconfirmed. */
 static void tx_pump(void)
 {
-    uint16_t len = 0;
-    uint16_t conn;
+    uint16_t len;
     struct os_mbuf* om;
     int rc;
 
     lock();
-    if (!s.tx_inflight && !tx_ring_empty(&s.tx)) {
-        len = tx_ring_pop(&s.tx, s_tx_frag, sizeof(s_tx_frag));
-        s.tx_inflight = (len != 0u);
+    if (s.tx_inflight || s.conn_handle == BLE_HS_CONN_HANDLE_NONE ||
+        tx_ring_empty(&s.tx)) {
+        unlock();
+        return;
     }
-    conn = s.conn_handle;
-    unlock();
-
-    if (len == 0u) return;
+    len = tx_ring_pop(&s.tx, s_tx_frag, sizeof(s_tx_frag));
+    if (len == 0u) {
+        unlock();
+        return;
+    }
+    s.tx_inflight = 1;
 
     om = ble_hs_mbuf_from_flat(s_tx_frag, len);
     if (!om) {
         link_error("mbuf alloc failed");
-        return;
+    } else {
+        rc = ble_gatts_indicate_custom(s.conn_handle, s.data_attr_handle, om);
+        if (rc != 0) {
+            MODLOG_DFLT(ERROR, "udisplay: ble_gatts_indicate_custom rc=%d", rc);
+            link_error("indicate failed");
+        }
     }
-    rc = ble_gatts_indicate_custom(conn, s.data_attr_handle, om);
-    if (rc != 0) {
-        MODLOG_DFLT(ERROR, "udisplay: ble_gatts_indicate_custom rc=%d", rc);
-        link_error("indicate failed");
-    }
+    unlock();
 }
 
 void udisplay_nimble_send(const uint8_t* data, uint16_t len, void* userdata)
@@ -344,9 +341,12 @@ static void start_adv(void)
     }
 }
 
-static void reset_link_state(void)
+/* Caller holds s.lock. */
+static void reset_link_state(uint16_t conn_handle)
 {
-    tx_reset();
+    s.conn_handle          = conn_handle;
+    tx_ring_reset(&s.tx);
+    s.tx_inflight          = 0;
     s.session_started      = 0;
     s.subscribe_wait_ticks = 0;
 }
@@ -361,19 +361,23 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
             start_adv();
             break;
         }
-        reset_link_state();
-        s.conn_handle = ev->connect.conn_handle;
         MODLOG_DFLT(INFO, "udisplay: connected handle=%d", ev->connect.conn_handle);
+        lock();
+        reset_link_state(ev->connect.conn_handle);
+        /* Every connection starts at the default ATT MTU. The library
+         * keeps the last value it was given, which belongs to the previous
+         * connection; BLE_GAP_EVENT_MTU raises it again. */
+        udisplay_ble_set_mtu(s.ctx, UDISPLAY_BLE_MTU_PAYLOAD_DEFAULT);
         /* No session yet: an indication sent before the peer writes the
          * CCCD is silently dropped. It starts on BLE_GAP_EVENT_SUBSCRIBE. */
         if (s.cfg.on_connect) s.cfg.on_connect(s.cfg.userdata);
+        unlock();
         break;
 
     case BLE_GAP_EVENT_DISCONNECT:
         MODLOG_DFLT(INFO, "udisplay: disconnected reason=%d", ev->disconnect.reason);
-        s.conn_handle = BLE_HS_CONN_HANDLE_NONE;
-        reset_link_state();
         lock();
+        reset_link_state(BLE_HS_CONN_HANDLE_NONE);
         udisplay_on_disconnect(s.ctx);
         if (s.cfg.on_disconnect) s.cfg.on_disconnect(ev->disconnect.reason, s.cfg.userdata);
         unlock();
@@ -392,14 +396,14 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
          * resets fragment/reassembly state, so a second call would corrupt
          * an in-progress bootstrap. It sends HELLO first; HANDSHAKE follows
          * once the client echoes it. */
+        lock();
         if (ev->subscribe.attr_handle == s.data_attr_handle &&
             ev->subscribe.cur_indicate && !s.session_started) {
             s.session_started = 1;
             MODLOG_DFLT(INFO, "udisplay: client subscribed, sending HELLO");
-            lock();
             udisplay_on_connect(s.ctx);
-            unlock();
         }
+        unlock();
         break;
 
     case BLE_GAP_EVENT_NOTIFY_TX:
@@ -491,10 +495,6 @@ int udisplay_nimble_init(udisplay_t* ctx, const udisplay_nimble_config_t* cfg)
     ble_npl_callout_init(&s.ud_timer, udisplay_nimble_port_eventq(), ud_timer_cb, NULL);
     ble_npl_callout_init(&s.heartbeat, udisplay_nimble_port_eventq(), heartbeat_cb, NULL);
 
-    udisplay_set_timer(ctx, ud_timer_start, ud_timer_stop);
-    s.app_comms_error       = ctx->cfg.on_comms_error;
-    ctx->cfg.on_comms_error = comms_error_cb;
-
     ble_svc_gap_init();
     ble_svc_gatt_init();
     rc = ble_svc_gap_device_name_set(cfg->device_name);
@@ -504,6 +504,11 @@ int udisplay_nimble_init(udisplay_t* ctx, const udisplay_nimble_config_t* cfg)
         MODLOG_DFLT(ERROR, "udisplay: GATT/GAP setup rc=%d", rc);
         return rc;
     }
+
+    /* The instance is only touched once nothing can fail any more. */
+    udisplay_set_timer(ctx, ud_timer_start, ud_timer_stop);
+    s.app_comms_error       = ctx->cfg.on_comms_error;
+    ctx->cfg.on_comms_error = comms_error_cb;
 
     ble_hs_cfg.sync_cb  = on_sync;
     ble_hs_cfg.reset_cb = on_reset;

@@ -104,6 +104,7 @@ int ble_hs_mbuf_to_flat(const struct os_mbuf* om, void* flat, uint16_t max_len,
 int ble_gatts_count_cfg(const struct ble_gatt_svc_def*) { return 0; }
 int ble_gatts_add_svcs(const struct ble_gatt_svc_def* svcs)
 {
+    if (g_fake.add_svcs_rc != 0) return g_fake.add_svcs_rc;
     g_fake.svcs = svcs;
     for (auto* chr = svcs[0].characteristics; chr->uuid; ++chr) {
         if (chr->val_handle) *chr->val_handle = FakeNimble::kDataValHandle;
