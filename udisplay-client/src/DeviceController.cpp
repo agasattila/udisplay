@@ -380,10 +380,7 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
     QString name, version;
     QStringList caps;
     QMap<QString, StyleToken> styles;
-    if (!m_yamlParser.parse(raw, widgets, name, version, caps, styles)) {
-        printDebugFailure(m_yamlParser.errorString());
-        return ApplyResult::ParseFailed;
-    }
+    const bool parsed = m_yamlParser.parse(raw, widgets, name, version, caps, styles);
 
     /* Diagnostics emit right after parse, before any mutation — matches
      * design mode's original ordering (TODO-034 D5). qWarning() logging is
@@ -402,7 +399,14 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
      * once fixed), but the signal itself only fires on an actual
      * transition (new diagnostics, OR prior diagnostics now cleared) —
      * preserves the existing "no signal for a clean parse with nothing to
-     * clear" contract (bootstrap_cleanYaml_noParseWarningsChanged). */
+     * clear" contract (bootstrap_cleanYaml_noParseWarningsChanged).
+     *
+     * Published for a failed parse too, so the list always describes the
+     * latest attempt: whatever the parser found before giving up (the fatal
+     * Error diagnostic included, if that's what stopped it), or nothing for
+     * a failure with no diagnostic (e.g. a YAML syntax error). Otherwise a
+     * design-mode save that breaks the file would keep showing the previous
+     * save's warnings. */
     const bool hadPriorWarnings = !m_parseWarnings.isEmpty();
     QVariantList warnings;
     for (const auto& d : diags) {
@@ -429,6 +433,11 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
         emit parseWarningsChanged(diags);
     } else if (hadPriorWarnings) {
         emit parseWarningsChanged(diags);
+    }
+
+    if (!parsed) {
+        printDebugFailure(m_yamlParser.errorString());
+        return ApplyResult::ParseFailed;
     }
 
     if (capabilityGate) {
