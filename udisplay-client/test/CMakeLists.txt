@@ -207,6 +207,17 @@ target_include_directories(test_bootstrap PRIVATE ../src)
 target_link_libraries(test_bootstrap PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME test_bootstrap COMMAND test_bootstrap -v2)
 
+# ── test_ble_write_queue ─────────────────────────────────────────────────
+# BleWriteQueue has no Qt Bluetooth dependency, so it builds and runs even
+# when HAVE_BLE is off.
+add_executable(test_ble_write_queue
+    test_ble_write_queue.cpp
+    ../src/BleWriteQueue.cpp
+)
+target_include_directories(test_ble_write_queue PRIVATE ../src)
+target_link_libraries(test_ble_write_queue PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME test_ble_write_queue COMMAND test_ble_write_queue -v2)
+
 # ── test_yaml_parser ──────────────────────────────────────────────────────
 add_executable(test_yaml_parser
     test_yaml_parser.cpp
@@ -289,7 +300,7 @@ set(_DC_TEST_SOURCES
     ../src/MockTransport.h   # listed so AUTOMOC generates moc_MockTransport.cpp
 )
 if(HAVE_BLE)
-    list(APPEND _DC_TEST_SOURCES ../src/BleTransport.cpp)
+    list(APPEND _DC_TEST_SOURCES ../src/BleTransport.cpp ../src/BleWriteQueue.cpp)
 endif()
 add_executable(test_device_controller ${_DC_TEST_SOURCES})
 target_include_directories(test_device_controller PRIVATE ../src)

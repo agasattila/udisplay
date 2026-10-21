@@ -4,6 +4,7 @@
 #pragma once
 #include "Transport.h"
 #include "Protocol.h"
+#include "BleWriteQueue.h"
 
 #ifdef HAVE_BLE
 
@@ -12,14 +13,15 @@
 #include <QLowEnergyController>
 #include <QLowEnergyDescriptor>
 #include <QLowEnergyService>
-#include <QQueue>
 
 /**
  * BLE GATT transport.
  *
  * Implements the Transport interface over a BLE GATT connection.
  * Outbound messages are fragmented via Proto::bleFrame() into ATT packets
- * written sequentially to the Control characteristic (WRITE_WITH_RESPONSE).
+ * written sequentially to the Control characteristic (WRITE_WITH_RESPONSE)
+ * through BleWriteQueue. A write not confirmed within
+ * BleWriteQueue::kDefaultTimeoutMs is a link error ("BLE write timeout").
  * Inbound ATT indications on the Data characteristic are reassembled via
  * Proto::bleFeed() and emitted as messageReceived(). A framing error is a
  * link error: the transport reports it and disconnects.
@@ -65,7 +67,6 @@ private slots:
     void onDescriptorWritten(const QLowEnergyDescriptor& d,
                              const QByteArray& value);
     void onServiceError(QLowEnergyService::ServiceError error);
-    void drainWriteQueue();
 
 private:
     void failLink(const QString& reason);
@@ -86,8 +87,7 @@ private:
     /* Updated by mtuChanged; floor of 7 (6-byte first-fragment header + 1 payload). */
     uint8_t                  m_attPayloadSize  = 20;
     Proto::BleRxState        m_rxState;
-    QQueue<QByteArray>       m_writeQueue;
-    bool                     m_writeInFlight   = false;
+    BleWriteQueue            m_writeQueue;
 };
 
 #endif /* HAVE_BLE */

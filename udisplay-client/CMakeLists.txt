@@ -185,7 +185,7 @@ set(CLIENT_SOURCES
     src/main.cpp
 )
 if(HAVE_BLE)
-    list(APPEND CLIENT_SOURCES src/BleTransport.cpp)
+    list(APPEND CLIENT_SOURCES src/BleTransport.cpp src/BleWriteQueue.cpp)
 endif()
 
 qt_add_executable(udisplay-client ${CLIENT_SOURCES})
