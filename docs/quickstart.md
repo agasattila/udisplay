@@ -65,7 +65,10 @@ only trigger one reload) and then a full re-parse.
 
 If you introduce a YAML error (try misspelling `type: buttn`), the client doesn't
 crash or navigate away — it shows the parse error in place and keeps waiting for your
-next save to fix it.
+next save to fix it. Problems that don't stop the UI from rendering (an invalid LED
+color, a deprecated key) show up in a banner at the top instead; tap it to see every
+issue with the widget and field it's about. A connected device's YAML gets the same
+banner.
 
 This edit-save-look loop is the fastest way to iterate on a device UI: no firmware
 rebuild, no flashing, no reconnect.
