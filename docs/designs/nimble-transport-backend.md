@@ -4,7 +4,7 @@ Non-interactive session; decisions made autonomously.
 Branch: feat/nimble-transport-backend
 Repo: agasattila/udisplay
 Issue: #50
-Status: IN PROGRESS
+Status: IMPLEMENTED (PR pending)
 
 ## Problem
 
@@ -99,7 +99,17 @@ ESP_ERROR_CHECK(udisplay_nimble_start());
    31 bytes only for names ≤ 8 bytes (demo05's "Demo05" does). Longer names
    go into the scan response; the UUID always stays in the advertising data
    because the client's scanner filters on it.
-9. **The control-write copy buffer is static** (512 B, the ATT attribute
+9. **Per-connection MTU reset.** Every CONNECT resets the instance to the
+   default 20-byte payload; the library otherwise keeps the previous
+   connection's MTU (a latent demo05 bug). Negotiated MTUs above the 517-byte
+   fragment buffer are clamped, not rejected.
+10. **The lock is held across `ble_gatts_indicate_custom()`** (review
+   finding): releasing it first let a disconnect + reconnect race share the
+   fragment buffer and terminate the new link. Safe because NimBLE never
+   calls GAP/GATT callbacks with its host lock held.
+11. **Legacy advertising only**: the build stops if NimBLE extended
+   advertising is enabled (the legacy `ble_gap_adv_*` calls are no-ops then).
+12. **The control-write copy buffer is static** (512 B, the ATT attribute
    max) instead of demo05's 1 KB on the host task stack.
 
 ## File layout
@@ -147,6 +157,16 @@ struct ble_npl_eventq* udisplay_nimble_port_eventq(void); /* host task's event q
 - demo05 cross-builds with `idf.py build` for every documented target.
 - Hardware smoke test (demo05 README checklist) can't run here; flagged in
   the PR.
+
+## Review (/review, 2026-10-21)
+
+Core pass found the MTU carry-over and the tx_pump reconnect race; an
+adversarial pass confirmed the lock argument against the ESP-IDF v6.1 NimBLE
+sources and found five informational issues (TX queue Kconfig minimum,
+extended advertising, name length checked after stack bring-up, MTU clamp,
+spurious link error on NOTIFY_TX from a broken link). All fixed with
+regression tests where host-testable (the race isn't: the fake is
+single-threaded).
 
 ## Not in scope
 
