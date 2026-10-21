@@ -20,6 +20,7 @@ idf_component_register(
     PRIV_REQUIRES
         libudisplay
         nvs_flash
+        esp_driver_gpio
         ${demo05_led_requires}
 )
 

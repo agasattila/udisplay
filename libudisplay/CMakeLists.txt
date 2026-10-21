@@ -15,16 +15,14 @@ set(UDISPLAY_VERSION_DEFINITIONS
 if(DEFINED IDF_VERSION_MAJOR)
     # ── ESP-IDF component build ───────────────────────────────────────────
     # The NimBLE backend is opt-in (Kconfig UDISPLAY_ENABLE_NIMBLE): without
-    # it, no NimBLE source is compiled and the bt component isn't required.
+    # it, no NimBLE source is compiled and nothing links the bt component.
     set(udisplay_nimble_srcs "")
-    set(udisplay_nimble_requires "")
     if(CONFIG_UDISPLAY_ENABLE_NIMBLE)
         list(APPEND udisplay_nimble_srcs
             "src/tx_ring.c"
             "src/nimble/udisplay_nimble.c"
             "src/nimble/udisplay_nimble_port_esp_idf.c"
         )
-        list(APPEND udisplay_nimble_requires bt)
     endif()
 
     idf_component_register(
@@ -38,13 +36,15 @@ if(DEFINED IDF_VERSION_MAJOR)
             "include"
         PRIV_INCLUDE_DIRS
             "src"
-        PRIV_REQUIRES
-            ${udisplay_nimble_requires}
     )
     target_compile_definitions(${COMPONENT_LIB} PUBLIC
         ${UDISPLAY_VERSION_DEFINITIONS}
     )
     if(CONFIG_UDISPLAY_ENABLE_NIMBLE)
+        # Not a PRIV_REQUIRES entry: ESP-IDF resolves those in an early pass
+        # that can run before sdkconfig exists, so a Kconfig-conditional
+        # requirement gets lost on a fresh build.
+        idf_component_optional_requires(PRIVATE bt)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE
             "UDISPLAY_NIMBLE_TX_QUEUE_BYTES=${CONFIG_UDISPLAY_NIMBLE_TX_QUEUE_BYTES}u"
         )
