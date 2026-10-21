@@ -131,7 +131,9 @@ public:
      * reachable via the parseWarningsChanged signal, so a QML element
      * constructed AFTER a parse (e.g. this screen loading post-bootstrap)
      * can see what already happened, not only future emissions. Each entry:
-     * { severity: "error"|"warning", widgetKey, field, message }. Empty
+     * { severity: "error"|"warning", widgetKey, field, message }. Describes
+     * the latest parse attempt, failed ones included (an "error" entry is
+     * the diagnostic that failed it). Empty
      * (not just unset) once every diagnostic from the last parse is fixed —
      * see applyParsedYaml()'s emit-on-transition comment for why the
      * NOTIFY signal still fires on that clear, even though it carries an
@@ -246,9 +248,9 @@ private:
      *  only return Success or ParseFailed.
      *
      *  Diagnostics (parseWarningsChanged, plus qWarning() in bootstrap mode)
-     *  emit right after parse, before mutation — even when a capabilityGate
-     *  subsequently rejects the connection, since the parser's findings are
-     *  independent of protocol compatibility. */
+     *  emit right after parse, before mutation — even when the parse failed
+     *  or a capabilityGate subsequently rejects the connection, since the
+     *  parser's findings are independent of protocol compatibility. */
     ApplyResult applyParsedYaml(const QByteArray& raw, bool designMode,
                                 const std::function<QString(const QStringList&)>& capabilityGate = nullptr);
 
