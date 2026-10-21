@@ -7,8 +7,10 @@
  * stack up, running the host task) goes through udisplay_nimble_port.h.
  *
  * Outbound path. The data characteristic uses INDICATE: the peer's ATT layer
- * confirms each one, and NimBLE allows one unconfirmed indication at a time
- * (ble_gatts_indicate_custom returns BLE_HS_EBUSY otherwise). The library
+ * confirms each one, and ATT allows one unconfirmed indication per
+ * connection. NimBLE doesn't enforce that (a second indicate overwrites the
+ * pending one's bookkeeping), so this file is the only guard, and firmware
+ * must not send indications of its own on the same connection. The library
  * calls udisplay_nimble_send() once per fragment, possibly many times in a
  * row, so it can neither block nor drop. Fragments go into a ring; tx_pump()
  * sends one and BLE_GAP_EVENT_NOTIFY_TX (confirmation) sends the next.
@@ -41,6 +43,22 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 #include "modlog/modlog.h"
+
+/* Legacy advertising only: with extended advertising enabled, NimBLE's
+ * ble_gap_adv_* calls return BLE_HS_ENOTSUP and the device would never
+ * advertise. */
+#ifdef MYNEWT_VAL_BLE_EXT_ADV
+#if MYNEWT_VAL_BLE_EXT_ADV
+#error "udisplay NimBLE backend: disable extended advertising (CONFIG_BT_NIMBLE_EXT_ADV); it uses legacy advertising"
+#endif
+#endif
+
+/* Longest GAP device name the host accepts. */
+#ifdef MYNEWT_VAL_BLE_SVC_GAP_DEVICE_NAME_MAX_LENGTH
+#define DEVICE_NAME_MAX MYNEWT_VAL_BLE_SVC_GAP_DEVICE_NAME_MAX_LENGTH
+#else
+#define DEVICE_NAME_MAX 31
+#endif
 
 #ifndef UDISPLAY_NIMBLE_TX_QUEUE_BYTES
 /* 1 KB message at MTU 23: ~60 fragments, ~1.3 KB with length prefixes. */
@@ -408,6 +426,10 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
 
     case BLE_GAP_EVENT_NOTIFY_TX:
         if (ev->notify_tx.attr_handle != s.data_attr_handle) break;
+        /* A link that just broke reports its in-flight indication as failed
+         * before the DISCONNECT event: nothing left to tear down. */
+        if (ev->notify_tx.conn_handle != s.conn_handle ||
+            ev->notify_tx.status == BLE_HS_ENOTCONN) break;
         if (ev->notify_tx.status == BLE_HS_EDONE) {
             /* Peer confirmed the indication: send the next fragment. */
             lock();
@@ -426,8 +448,11 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
         int ok;
         MODLOG_DFLT(INFO, "udisplay: MTU %d", ev->mtu.value);
         lock();
+        /* NimBLE allows ATT_MTU up to 527; the library's fragment buffer
+         * holds 517 bytes. Use what fits rather than staying at 20. */
         ok = ev->mtu.value > 3u &&
-             udisplay_ble_set_mtu(s.ctx, (uint16_t)(ev->mtu.value - 3u));
+             udisplay_ble_set_mtu(s.ctx, (uint16_t)(ev->mtu.value - 3u > TX_FRAG_MAX
+                                                    ? TX_FRAG_MAX : ev->mtu.value - 3u));
         unlock();
         if (!ok) {
             MODLOG_DFLT(WARN, "udisplay: MTU %d rejected, keeping previous value",
@@ -465,7 +490,8 @@ int udisplay_nimble_init(udisplay_t* ctx, const udisplay_nimble_config_t* cfg)
     int rc;
 
     if (s.initialized) return UDISPLAY_NIMBLE_ESTATE;
-    if (!ctx || !cfg || !cfg->device_name || cfg->device_name[0] == '\0') {
+    if (!ctx || !cfg || !cfg->device_name || cfg->device_name[0] == '\0' ||
+        strlen(cfg->device_name) > DEVICE_NAME_MAX) {
         return UDISPLAY_NIMBLE_EINVAL;
     }
     if (ctx->cfg.send != udisplay_nimble_send ||

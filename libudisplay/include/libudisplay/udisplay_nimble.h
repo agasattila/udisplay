@@ -77,8 +77,10 @@ extern "C" {
 
 /** Backend configuration. Zero-initialize, then fill in what you need. */
 typedef struct {
-    /** GAP device name, also advertised (required). Names longer than
-     *  8 bytes go into the scan response instead of the advertising data.
+    /** GAP device name, also advertised (required). At most the host's
+     *  GAP name limit (ESP-IDF: CONFIG_BT_NIMBLE_GAP_DEVICE_NAME_MAX_LEN,
+     *  31 by default). Names longer than 8 bytes go into the scan response
+     *  instead of the advertising data (up to 29 bytes shown).
      *  Must stay valid while the backend runs. */
     const char* device_name;
 
@@ -117,10 +119,17 @@ void udisplay_nimble_send(const uint8_t* data, uint16_t len, void* userdata);
  * (udisplay_set_timer) and interposes on its on_comms_error so a comms
  * error also terminates the link (the firmware's handler still runs first).
  *
- * Further GATT services may be registered between init and start.
+ * Further GATT services may be registered between init and start. They
+ * must not send indications on the uDisplay connection: ATT allows one
+ * outstanding indication per connection and the backend relies on it.
+ *
+ * Arguments (including the name length, see device_name) are checked
+ * before the stack is touched. A failure after that leaves the stack up
+ * with nothing to tear it down: treat it as fatal.
  *
  * @return UDISPLAY_NIMBLE_OK, UDISPLAY_NIMBLE_EINVAL/ESTATE, or a nonzero
- *         platform/NimBLE error code.
+ *         platform/NimBLE error code (on ESP-IDF, nimble_port_init()'s
+ *         esp_err_t; NimBLE host codes are small positive BLE_HS_E* values).
  */
 int udisplay_nimble_init(udisplay_t* ctx, const udisplay_nimble_config_t* cfg);
 

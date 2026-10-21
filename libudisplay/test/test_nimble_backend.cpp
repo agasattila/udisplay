@@ -188,6 +188,14 @@ TEST_F(NimbleBackendTest, InitRejectsBadArguments)
     EXPECT_EQ(g_fake.port_init_calls, 0);
 }
 
+TEST_F(NimbleBackendTest, InitRejectsOverlongNameBeforeTouchingStack)
+{
+    std::string name(32, 'n');   /* host limit is 31 */
+    ble_.device_name = name.c_str();
+    EXPECT_EQ(udisplay_nimble_init(&ctx_, &ble_), UDISPLAY_NIMBLE_EINVAL);
+    EXPECT_EQ(g_fake.port_init_calls, 0);
+}
+
 TEST_F(NimbleBackendTest, InitRejectsInstanceNotSetUpForBackend)
 {
     ctx_.cfg.transport = UDISPLAY_TRANSPORT_TCP;
@@ -309,7 +317,7 @@ TEST_F(NimbleBackendTest, LongNameMovesToScanResponse)
 
 TEST_F(NimbleBackendTest, OversizedNameTruncatedInScanResponse)
 {
-    std::string name(40, 'x');
+    std::string name(31, 'x');   /* the host's limit; the field holds 29 */
     ble_.device_name = name.c_str();
     bring_up();
     EXPECT_EQ(g_fake.rsp_name.size(), static_cast<size_t>(BLE_HS_ADV_MAX_FIELD_SZ));
@@ -450,8 +458,9 @@ TEST_F(NimbleBackendTest, MtuEventUpdatesFragmentSize)
     EXPECT_EQ(ctx_.ble_mtu_payload, 244u);
     mtu(3);       /* nonsense: keep the previous value */
     EXPECT_EQ(ctx_.ble_mtu_payload, 244u);
-    mtu(600);     /* beyond the library's fragment buffer */
-    EXPECT_EQ(ctx_.ble_mtu_payload, 244u);
+    mtu(527);     /* NimBLE's maximum, beyond the library's 517-byte fragment buffer */
+    EXPECT_EQ(ctx_.ble_mtu_payload, 517u);
+    mtu(247);
 
     subscribe();
     confirm();
@@ -536,6 +545,23 @@ TEST_F(NimbleBackendTest, IndicationTimeoutDropsLink)
     notify_tx(BLE_HS_ETIMEOUT);
     ASSERT_EQ(g_fake.terminated.size(), 1u);
     EXPECT_EQ(g_fake.terminated[0], kConn);
+}
+
+TEST_F(NimbleBackendTest, IndicationFailedByBrokenLinkIsNotALinkError)
+{
+    bring_up();
+    connect();
+    subscribe();
+    notify_tx(BLE_HS_ENOTCONN);   /* reported before DISCONNECT */
+    EXPECT_TRUE(g_fake.terminated.empty());
+
+    ble_gap_event ev{};
+    ev.type = BLE_GAP_EVENT_NOTIFY_TX;
+    ev.notify_tx.status = BLE_HS_ETIMEOUT;
+    ev.notify_tx.conn_handle = kConn + 1;   /* not our connection */
+    ev.notify_tx.attr_handle = kData;
+    gap(ev);
+    EXPECT_TRUE(g_fake.terminated.empty());
 }
 
 TEST_F(NimbleBackendTest, IndicateErrorDropsLink)

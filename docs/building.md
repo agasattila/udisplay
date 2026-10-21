@@ -539,6 +539,11 @@ libudisplay, off by default:
 | ESP-IDF | `CONFIG_UDISPLAY_ENABLE_NIMBLE=y` (menuconfig → uDisplay) | Needs `CONFIG_BT_NIMBLE_ENABLED=y`. `CONFIG_UDISPLAY_NIMBLE_TX_QUEUE_BYTES` sizes the outbound fragment queue (default 2048). demo05 sets both NimBLE options in `sdkconfig.defaults`. |
 | Standalone CMake | `-DUDISPLAY_ENABLE_NIMBLE=ON -DUDISPLAY_NIMBLE_TARGET=<target>` | For other NimBLE platforms. `<target>` must provide the NimBLE host headers/libraries and implement `libudisplay/src/nimble/udisplay_nimble_port.h` (three functions: bring up the stack, start the host task, return its event queue). |
 
+The backend uses legacy advertising, so `CONFIG_BT_NIMBLE_EXT_ADV` must be off (the
+build stops otherwise). libudisplay links `bt` only if the component is part of the
+build, which it is by default; projects using `MINIMAL_BUILD` or an explicit
+`COMPONENTS` list must include `bt` themselves.
+
 With the option off, no NimBLE header is included, no NimBLE source is compiled and
 nothing links against NimBLE (on ESP-IDF, libudisplay doesn't link the `bt`
 component). Firmware can still bring its own BLE code through the plain
