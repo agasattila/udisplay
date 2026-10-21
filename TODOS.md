@@ -765,6 +765,7 @@ keep that ship's diff focused.
 ---
 
 ### TODO-040: Parse-warning diagnostics have zero QML subscribers — invisible on real devices
+**Status:** ✅ DONE — issue #25. `DeviceScreen.qml`'s banner (both bootstrap and design mode) now opens a details popup listing every `controller.parseWarnings` entry with severity, `widgetKey.field` location and message, so nothing points at a console log any more. A single entry shows inline with its location; the banner turns red and counts errors when the list has any. `parseWarnings` now describes the latest parse attempt, failed ones included (it used to keep the previous parse's list after a failure). Tests: `test/qml/test_device_screen_warning_details.qml`, `test_design_mode.cpp` (`reload_syntaxError_clearsPreviousWarnings`, `reload_errorDiagnostic_listedWithWarnings`).
 **What:** `DeviceController::parseWarningsChanged(QList<YamlParser::ParseDiagnostic>)`
 (`DeviceController.h:133`) is emitted in two places (`DeviceController.cpp:333,461`) but
 has no QML listener anywhere in the app — confirmed via repo-wide grep for
@@ -852,6 +853,7 @@ degrades an error message rather than silently accepting or rejecting the wrong 
 ---
 
 ### TODO-046: onBootstrapSucceeded YAML-parse-failure leaves transport connected, no watchdog
+**Status:** ✅ DONE — issue #26. Policy: clean teardown, no retry. A YAML parse failure and a blob that fails to decompress now both `setError()` + `teardown()`, like capability rejection. The blob is not cached, so a manual reconnect fetches it again. `teardown()` also disconnects the old BootstrapManager/transport from the controller before closing the link, so whatever they report while going down can't overwrite the error that caused it. Tests: `test_device_controller.cpp` (`bootstrap_parseFailure_closesConnection`, `bootstrap_decompressFailure_closesConnection`, `bootstrap_parseFailure_canReconnect`, `bootstrap_capabilityRejection_keepsErrorAfterClose`), each over a real local TCP connection.
 **What:** Decide and implement the right recovery behavior when a real device sends YAML
 that fails to parse. `DeviceController::onBootstrapSucceeded` sets state to `"error"` but
 never calls `teardown()` on parse failure, and the heartbeat watchdog never starts (it only

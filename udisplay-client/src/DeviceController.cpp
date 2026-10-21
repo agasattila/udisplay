@@ -265,11 +265,17 @@ void DeviceController::disconnectDevice()
 void DeviceController::teardown()
 {
     m_watchdog.stop();
+    /* Cut the old connection's signals off before closing it: whatever it
+     * reports while going down (BootstrapManager::failed("Disconnected"),
+     * a transport error) must not overwrite the error that caused the
+     * teardown, e.g. "YAML parse failed: ...". */
     if (m_bootstrap) {
+        disconnect(m_bootstrap, nullptr, this, nullptr);
         m_bootstrap->deleteLater();
         m_bootstrap = nullptr;
     }
     if (m_transport) {
+        disconnect(m_transport, nullptr, this, nullptr);
         m_transport->disconnectFromDevice();
         m_transport->deleteLater();
         m_transport = nullptr;
@@ -374,10 +380,7 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
     QString name, version;
     QStringList caps;
     QMap<QString, StyleToken> styles;
-    if (!m_yamlParser.parse(raw, widgets, name, version, caps, styles)) {
-        printDebugFailure(m_yamlParser.errorString());
-        return ApplyResult::ParseFailed;
-    }
+    const bool parsed = m_yamlParser.parse(raw, widgets, name, version, caps, styles);
 
     /* Diagnostics emit right after parse, before any mutation — matches
      * design mode's original ordering (TODO-034 D5). qWarning() logging is
@@ -396,7 +399,14 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
      * once fixed), but the signal itself only fires on an actual
      * transition (new diagnostics, OR prior diagnostics now cleared) —
      * preserves the existing "no signal for a clean parse with nothing to
-     * clear" contract (bootstrap_cleanYaml_noParseWarningsChanged). */
+     * clear" contract (bootstrap_cleanYaml_noParseWarningsChanged).
+     *
+     * Published for a failed parse too, so the list always describes the
+     * latest attempt: whatever the parser found before giving up (the fatal
+     * Error diagnostic included, if that's what stopped it), or nothing for
+     * a failure with no diagnostic (e.g. a YAML syntax error). Otherwise a
+     * design-mode save that breaks the file would keep showing the previous
+     * save's warnings. */
     const bool hadPriorWarnings = !m_parseWarnings.isEmpty();
     QVariantList warnings;
     for (const auto& d : diags) {
@@ -423,6 +433,11 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
         emit parseWarningsChanged(diags);
     } else if (hadPriorWarnings) {
         emit parseWarningsChanged(diags);
+    }
+
+    if (!parsed) {
+        printDebugFailure(m_yamlParser.errorString());
+        return ApplyResult::ParseFailed;
     }
 
     if (capabilityGate) {
@@ -507,10 +522,16 @@ static const QStringList kKnownCapabilities = {
 void DeviceController::onBootstrapSucceeded(QByteArray merkleRoot,
                                             QByteArray compressedBlob)
 {
+    /* Every failure below ends in setError() + teardown() (TODO-046): the
+     * transport is up but there is nothing to show, and the heartbeat
+     * watchdog only starts on success, so a connection left open here would
+     * stay open forever. The blob is not cached, so reconnecting fetches it
+     * again rather than reusing a bad copy. */
     QByteArray yaml = decompressBlob(compressedBlob);
     if (yaml.isEmpty()) {
         setError(QStringLiteral("Failed to decompress YAML blob"));
         printDebugFailure(QStringLiteral("failed to decompress YAML blob"));
+        teardown();
         return;
     }
 
@@ -530,10 +551,8 @@ void DeviceController::onBootstrapSucceeded(QByteArray merkleRoot,
 
     switch (applyParsedYaml(yaml, /*designMode=*/false, capabilityGate)) {
     case ApplyResult::ParseFailed:
-        /* No teardown() here — matches historical behavior. Whether that's
-         * actually the right recovery behavior is tracked separately
-         * (TODO-046); this refactor preserves it, not decides it fresh. */
         setError(QStringLiteral("YAML parse failed: %1").arg(m_yamlParser.errorString()));
+        teardown();
         return;
     case ApplyResult::Rejected:
         setError(rejectionReason);
