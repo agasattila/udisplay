@@ -274,7 +274,10 @@ void DeviceController::teardown()
      * BootstrapManager turns into failed("Disconnected") → onBootstrapFailed
      * → teardown() again. That nested call used to null m_transport, and the
      * outer call then ran nullptr->deleteLater(): "postEvent: Unexpected null
-     * receiver" on desktop, a crash on Android. */
+     * receiver" on desktop, a crash on Android. Cutting the signals off
+     * also keeps whatever the old connection reports while going down
+     * (failed("Disconnected"), a transport error) from overwriting the error
+     * that caused the teardown, e.g. "YAML parse failed: ...". */
     BootstrapManager* bootstrap = std::exchange(m_bootstrap, nullptr);
     Transport* transport = std::exchange(m_transport, nullptr);
     if (bootstrap) {
@@ -519,10 +522,16 @@ static const QStringList kKnownCapabilities = {
 void DeviceController::onBootstrapSucceeded(QByteArray merkleRoot,
                                             QByteArray compressedBlob)
 {
+    /* Every failure below ends in setError() + teardown() (TODO-046): the
+     * transport is up but there is nothing to show, and the heartbeat
+     * watchdog only starts on success, so a connection left open here would
+     * stay open forever. The blob is not cached, so reconnecting fetches it
+     * again rather than reusing a bad copy. */
     QByteArray yaml = decompressBlob(compressedBlob);
     if (yaml.isEmpty()) {
         setError(QStringLiteral("Failed to decompress YAML blob"));
         printDebugFailure(QStringLiteral("failed to decompress YAML blob"));
+        teardown();
         return;
     }
 
@@ -542,10 +551,8 @@ void DeviceController::onBootstrapSucceeded(QByteArray merkleRoot,
 
     switch (applyParsedYaml(yaml, /*designMode=*/false, capabilityGate)) {
     case ApplyResult::ParseFailed:
-        /* No teardown() here — matches historical behavior. Whether that's
-         * actually the right recovery behavior is tracked separately
-         * (TODO-046); this refactor preserves it, not decides it fresh. */
         setError(QStringLiteral("YAML parse failed: %1").arg(m_yamlParser.errorString()));
+        teardown();
         return;
     case ApplyResult::Rejected:
         setError(rejectionReason);

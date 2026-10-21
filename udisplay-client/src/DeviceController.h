@@ -67,12 +67,13 @@
  *          │
  *          └─ onBootstrapSucceeded(merkleRoot, compressedBlob)
  *                ├─ decompressBlob(compressedBlob)
- *                │     └─ empty → setError("Failed to decompress...") + printDebugFailure, return
+ *                │     └─ empty → setError("Failed to decompress...") + printDebugFailure,
+ *                │                teardown(), return
  *                ├─ capabilityGate = lambda checking kKnownCapabilities,
  *                │                   captures rejectionReason by reference
  *                ├─ applyParsedYaml(yaml, false, capabilityGate)
- *                │     ├─ ParseFailed → setError("YAML parse failed: " + yamlParser.errorString())
- *                │     │                 (no teardown() — matches historical behavior, see TODO-046)
+ *                │     ├─ ParseFailed → setError("YAML parse failed: " + yamlParser.errorString()),
+ *                │     │                 teardown()  (TODO-046)
  *                │     ├─ Rejected    → setError(rejectionReason), teardown()
  *                │     │                 (model/name/styles left untouched — gate ran
  *                │     │                  before any mutation, see applyParsedYaml doc)
@@ -200,10 +201,10 @@ private slots:
 
 private:
     /** Result of applyParsedYaml(). ParseFailed and Rejected are distinct
-     *  because callers react differently: a capability Rejected connection
-     *  calls teardown(), a ParseFailed one does not (TODO-046 tracks whether
-     *  that historical asymmetry should change — this refactor preserves it
-     *  exactly, not decide it fresh). */
+     *  because callers report them differently: design mode shows a
+     *  ParseFailed in designErrorString, and bootstrap words the two
+     *  errors differently. Bootstrap tears the connection down on both
+     *  (TODO-046). */
     enum class ApplyResult { Success, ParseFailed, Rejected };
 
     void setState(const QString& s);
