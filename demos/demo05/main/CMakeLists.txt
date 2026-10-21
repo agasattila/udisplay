@@ -20,7 +20,6 @@ idf_component_register(
     PRIV_REQUIRES
         libudisplay
         nvs_flash
-        bt
         ${demo05_led_requires}
 )
 

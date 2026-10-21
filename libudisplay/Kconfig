@@ -1,0 +1,30 @@
+menu "uDisplay"
+
+    config UDISPLAY_ENABLE_NIMBLE
+        bool "NimBLE BLE transport backend"
+        depends on BT_NIMBLE_ENABLED
+        default n
+        help
+            Build libudisplay's built-in BLE transport (udisplay_nimble.h):
+            the uDisplay GATT service, advertising, connection lifecycle and
+            outbound indication queue on top of NimBLE. Firmware then only
+            calls udisplay_nimble_init()/udisplay_nimble_start().
+
+            Off by default, even with NimBLE enabled: firmware that runs its
+            own BLE code, or no BLE at all, gets no NimBLE dependency from
+            libudisplay.
+
+    config UDISPLAY_NIMBLE_TX_QUEUE_BYTES
+        int "Outbound fragment queue size (bytes)"
+        depends on UDISPLAY_ENABLE_NIMBLE
+        range 1040 32768
+        default 2048
+        help
+            Static buffer holding fragments waiting for their turn to be
+            indicated (one indication is in flight at a time). Each fragment
+            costs its length plus 2 bytes. It must hold the largest burst
+            the library sends between two confirmations: a 1 KB message at
+            the default 23-byte MTU is about 1.3 KB. Overflow drops the
+            link.
+
+endmenu
