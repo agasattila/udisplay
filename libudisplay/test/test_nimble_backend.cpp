@@ -20,6 +20,7 @@ extern "C" {
 void udisplay_nimble_test_reset(void);
 struct ble_npl_callout* udisplay_nimble_test_heartbeat(void);
 struct ble_npl_callout* udisplay_nimble_test_ud_timer(void);
+struct ble_npl_callout* udisplay_nimble_test_adv_retry(void);
 }
 
 namespace {
@@ -45,7 +46,24 @@ int g_app_disconnects;
 int g_last_disconnect_reason;
 int g_lock_depth_in_disconnect;
 
+int g_auth_result;
+
 void app_comms_error(void*) { ++g_app_comms_errors; }
+int app_auth_check(const uint8_t*, uint8_t, const uint8_t*, void*) { return g_auth_result; }
+void app_fill_random(uint8_t* buf, uint8_t len, void*) { std::memset(buf, 0x5A, len); }
+
+/* Client HANDSHAKE_ACK as one BLE data fragment:
+ * [u16 offset=0][u8 packet_id][u16 length][u8 flags=DATA][msg_type, proto_max, flags, credential]. */
+std::vector<uint8_t> auth_ack_fragment(uint8_t ack_flags)
+{
+    std::vector<uint8_t> msg = { 0x01 /* HANDSHAKE_ACK */, 0x04, ack_flags };
+    if (ack_flags == 0x01) msg.resize(35, 0xC3);   /* 32-byte credential */
+    std::vector<uint8_t> f = { 0x00, 0x00, 0x01,
+                               static_cast<uint8_t>(msg.size()), 0x00,
+                               UDISPLAY_BLE_FLAGS_DATA };
+    f.insert(f.end(), msg.begin(), msg.end());
+    return f;
+}
 void app_connect(void*) { ++g_app_connects; }
 void app_disconnect(int reason, void*)
 {
@@ -65,6 +83,7 @@ protected:
         udisplay_nimble_test_reset();
         g_app_comms_errors = g_app_connects = g_app_disconnects = 0;
         g_last_disconnect_reason = g_lock_depth_in_disconnect = -1;
+        g_auth_result = 1;
 
         udisplay_config_t cfg{};
         cfg.merkle_root    = kRoot;
@@ -158,7 +177,18 @@ protected:
     const ble_gatt_chr_def& ctrl_chr() const { return g_fake.svcs[0].characteristics[0]; }
     const ble_gatt_chr_def& data_chr() const { return g_fake.svcs[0].characteristics[1]; }
 
-    int write_ctrl(const std::vector<uint8_t>& data) { return fake_write(ctrl_chr(), data); }
+    int write_ctrl(const std::vector<uint8_t>& data, uint16_t conn = kConn)
+    {
+        return fake_write(ctrl_chr(), data, conn);
+    }
+
+    /* Require auth: the HANDSHAKE after the HELLO echo is the auth challenge. */
+    void enable_auth()
+    {
+        ctx_.cfg.auth_algo   = UDISPLAY_AUTH_HMAC_SHA256;
+        ctx_.cfg.auth_check  = app_auth_check;
+        ctx_.cfg.fill_random = app_fill_random;
+    }
 
     /* Connected, subscribed, HELLO echoed, HANDSHAKE fully confirmed. */
     void session_ready()
@@ -700,4 +730,176 @@ TEST_F(NimbleBackendTest, LockIsRecursiveAndBalanced)
     udisplay_nimble_unlock();
     udisplay_nimble_unlock();
     EXPECT_EQ(fake_lock_depth(), 0);
+}
+
+/* ── protocol-ended sessions (auth_check() == -1 etc.) ─────────────────── */
+
+TEST_F(NimbleBackendTest, AuthCheckDisconnectTerminatesLink)
+{
+    enable_auth();
+    session_ready();                    /* HANDSHAKE here is the auth challenge */
+    ASSERT_EQ(ctx_.awaiting_auth_ack, 1);
+
+    g_auth_result = -1;
+    ASSERT_EQ(write_ctrl(auth_ack_fragment(0x01)), 0);
+    EXPECT_EQ(ctx_.connected, 0);
+    ASSERT_EQ(g_fake.terminated.size(), 1u)
+        << "the core can't close the transport; the backend must";
+    EXPECT_EQ(g_fake.terminated[0], kConn);
+    EXPECT_TRUE(g_fake.indications.empty());
+}
+
+TEST_F(NimbleBackendTest, AuthCheckRejectKeepsLinkForRetry)
+{
+    enable_auth();
+    session_ready();
+    g_auth_result = 0;                  /* wrong password: new challenge */
+    ASSERT_EQ(write_ctrl(auth_ack_fragment(0x01)), 0);
+    EXPECT_EQ(ctx_.connected, 1);
+    EXPECT_TRUE(g_fake.terminated.empty());
+    EXPECT_FALSE(g_fake.indications.empty()) << "fresh auth challenge";
+}
+
+TEST_F(NimbleBackendTest, MalformedAuthAckTerminatesLink)
+{
+    enable_auth();
+    session_ready();
+    ASSERT_EQ(write_ctrl(auth_ack_fragment(0x00)), 0);   /* no credential during auth */
+    EXPECT_EQ(ctx_.connected, 0);
+    EXPECT_EQ(g_fake.terminated.size(), 1u);
+}
+
+TEST_F(NimbleBackendTest, SessionEndedByAppIsDroppedOnNextHeartbeat)
+{
+    session_ready();
+    udisplay_nimble_lock();
+    udisplay_on_disconnect(&ctx_);
+    udisplay_nimble_unlock();
+    EXPECT_TRUE(g_fake.terminated.empty());
+    fake_fire(udisplay_nimble_test_heartbeat());
+    ASSERT_EQ(g_fake.terminated.size(), 1u);
+    EXPECT_EQ(g_fake.terminated[0], kConn);
+}
+
+TEST_F(NimbleBackendTest, WriteBeforeSubscribeDoesNotDropLink)
+{
+    bring_up();
+    connect();
+    ASSERT_EQ(write_ctrl(kHelloEcho), 0);   /* no session yet: ctx_.connected is 0 */
+    EXPECT_TRUE(g_fake.terminated.empty());
+}
+
+/* ── stale connections and locking ─────────────────────────────────────── */
+
+TEST_F(NimbleBackendTest, WriteFromOtherConnectionIgnored)
+{
+    bring_up();
+    connect();
+    subscribe();
+    std::vector<uint8_t> bad = { 0x00, 0x00, 0x00, 0x01, 0x00, 0x7F, 0x00 };
+    EXPECT_EQ(write_ctrl(bad, kConn + 1), 0);
+    EXPECT_TRUE(g_fake.terminated.empty()) << "an error on another link must not drop ours";
+    EXPECT_EQ(ctx_.connected, 1);
+}
+
+TEST_F(NimbleBackendTest, TerminateAlwaysRunsUnderLock)
+{
+    bring_up();
+    connect();
+    udisplay_nimble_disconnect();                       /* app task */
+    std::vector<uint8_t> big(518, 0);
+    udisplay_nimble_send(big.data(), 518, nullptr);     /* link error */
+    notify_tx(BLE_HS_ETIMEOUT);                         /* GAP event */
+    ASSERT_EQ(g_fake.terminate_lock_depths.size(), 3u);
+    for (int d : g_fake.terminate_lock_depths) EXPECT_GE(d, 1);
+}
+
+/* ── advertising failures ──────────────────────────────────────────────── */
+
+TEST_F(NimbleBackendTest, AdvertisingAlreadyActiveIsNotAFailure)
+{
+    g_fake.adv_start_rcs = { BLE_HS_EALREADY };
+    bring_up();
+    EXPECT_FALSE(udisplay_nimble_test_adv_retry()->armed);
+}
+
+TEST_F(NimbleBackendTest, RecoverableAdvertisingFailureRetriesWithBackoff)
+{
+    g_fake.adv_start_rcs = { BLE_HS_EBUSY, BLE_HS_ETIMEOUT_HCI, BLE_HS_ENOMEM };
+    bring_up();
+    ble_npl_callout* retry = udisplay_nimble_test_adv_retry();
+    ASSERT_TRUE(retry->armed);
+    EXPECT_EQ(retry->ticks, 250u);
+    fake_fire(retry);
+    EXPECT_EQ(g_fake.adv_starts, 2);
+    ASSERT_TRUE(retry->armed);
+    EXPECT_EQ(retry->ticks, 500u);
+    fake_fire(retry);
+    EXPECT_EQ(retry->ticks, 1000u);
+    fake_fire(retry);                    /* succeeds */
+    EXPECT_EQ(g_fake.adv_starts, 4);
+    EXPECT_FALSE(retry->armed);
+
+    /* Backoff starts over for the next failure. */
+    g_fake.adv_start_rcs = { BLE_HS_EBUSY };
+    ble_gap_event ev{};
+    ev.type = BLE_GAP_EVENT_ADV_COMPLETE;
+    gap(ev);
+    ASSERT_TRUE(retry->armed);
+    EXPECT_EQ(retry->ticks, 250u);
+}
+
+TEST_F(NimbleBackendTest, AdvertisingRetryDelayIsCappedNotCounted)
+{
+    g_fake.adv_start_rcs.assign(12, BLE_HS_EBUSY);
+    bring_up();
+    ble_npl_callout* retry = udisplay_nimble_test_adv_retry();
+    for (int i = 0; i < 11; i++) {
+        ASSERT_TRUE(retry->armed) << "retries never give up on a recoverable error";
+        EXPECT_LE(retry->ticks, 8000u);
+        fake_fire(retry);
+    }
+    EXPECT_EQ(retry->ticks, 8000u);
+    fake_fire(retry);
+    EXPECT_FALSE(retry->armed);
+    EXPECT_EQ(g_fake.adv_starts, 13);
+}
+
+TEST_F(NimbleBackendTest, AdvertisingDataFailureAlsoRetried)
+{
+    g_fake.adv_set_fields_rc = BLE_HS_ENOMEM;
+    ASSERT_EQ(udisplay_nimble_init(&ctx_, &ble_), UDISPLAY_NIMBLE_OK);
+    ASSERT_EQ(udisplay_nimble_start(), UDISPLAY_NIMBLE_OK);
+    ble_hs_cfg.sync_cb();
+    EXPECT_EQ(g_fake.adv_starts, 0);
+    ASSERT_TRUE(udisplay_nimble_test_adv_retry()->armed);
+    g_fake.adv_set_fields_rc = 0;
+    fake_fire(udisplay_nimble_test_adv_retry());
+    EXPECT_EQ(g_fake.adv_starts, 1);
+}
+
+TEST_F(NimbleBackendTest, PermanentAdvertisingFailureNotRetried)
+{
+    g_fake.adv_start_rcs = { BLE_HS_EINVAL };
+    bring_up();
+    EXPECT_FALSE(udisplay_nimble_test_adv_retry()->armed);
+}
+
+TEST_F(NimbleBackendTest, ConnectionCancelsPendingAdvertisingRetry)
+{
+    g_fake.adv_start_rcs = { 0, BLE_HS_EBUSY };
+    bring_up();
+    disconnect();                        /* restart fails: retry armed */
+    ASSERT_TRUE(udisplay_nimble_test_adv_retry()->armed);
+    connect();
+    EXPECT_FALSE(udisplay_nimble_test_adv_retry()->armed);
+}
+
+TEST_F(NimbleBackendTest, HostResetCancelsAdvertisingRetry)
+{
+    g_fake.adv_start_rcs = { BLE_HS_EBUSY };
+    bring_up();
+    ASSERT_TRUE(udisplay_nimble_test_adv_retry()->armed);
+    ble_hs_cfg.reset_cb(0x10);
+    EXPECT_FALSE(udisplay_nimble_test_adv_retry()->armed);
 }

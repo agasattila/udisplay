@@ -33,13 +33,14 @@ void fake_fire(ble_npl_callout* co)
     co->fn(&co->ev);
 }
 
-int fake_write(const ble_gatt_chr_def& chr, const std::vector<uint8_t>& data)
+int fake_write(const ble_gatt_chr_def& chr, const std::vector<uint8_t>& data,
+               uint16_t conn_handle)
 {
     os_mbuf om{};
     om.len = static_cast<uint16_t>(data.size());
     std::memcpy(om.data, data.data(), data.size());
     ble_gatt_access_ctxt ctxt{BLE_GATT_ACCESS_OP_WRITE_CHR, &om};
-    return chr.access_cb(1, 0, &ctxt, chr.arg);
+    return chr.access_cb(conn_handle, 0, &ctxt, chr.arg);
 }
 
 int fake_lock_depth()
@@ -122,6 +123,7 @@ int ble_gatts_indicate_custom(uint16_t conn_handle, uint16_t, struct os_mbuf* om
 /* GAP */
 int ble_gap_adv_set_fields(const struct ble_hs_adv_fields* f)
 {
+    if (g_fake.adv_set_fields_rc != 0) return g_fake.adv_set_fields_rc;
     g_fake.adv = *f;
     g_fake.adv_name = f->name ? std::string(reinterpret_cast<const char*>(f->name), f->name_len)
                               : std::string();
@@ -138,12 +140,18 @@ int ble_gap_adv_start(uint8_t, const ble_addr_t*, int32_t, const struct ble_gap_
                       ble_gap_event_fn* cb, void*)
 {
     g_fake.adv_starts++;
+    if (!g_fake.adv_start_rcs.empty()) {
+        int rc = g_fake.adv_start_rcs.front();
+        g_fake.adv_start_rcs.erase(g_fake.adv_start_rcs.begin());
+        if (rc != 0) return rc;
+    }
     g_fake.gap_cb = cb;
     return 0;
 }
 int ble_gap_terminate(uint16_t conn_handle, uint8_t)
 {
     g_fake.terminated.push_back(conn_handle);
+    g_fake.terminate_lock_depths.push_back(fake_lock_depth());
     return 0;
 }
 int ble_hs_id_infer_auto(int, uint8_t* out) { *out = BLE_OWN_ADDR_PUBLIC; return 0; }

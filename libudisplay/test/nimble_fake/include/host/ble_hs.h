@@ -60,6 +60,13 @@ int ble_hs_mbuf_to_flat(const struct os_mbuf* om, void* flat, uint16_t max_len,
 #define BLE_HS_EMSGSIZE                4
 #define BLE_HS_ENOMEM                  6
 #define BLE_HS_ENOTCONN                7
+#define BLE_HS_EALREADY                2
+#define BLE_HS_EINVAL                  3
+#define BLE_HS_ENOTSUP                 8
+#define BLE_HS_EBUSY                   15
+#define BLE_HS_ETIMEOUT_HCI            19
+#define BLE_HS_ENOTSYNCED              22
+#define BLE_HS_EDISABLED               30
 #define BLE_ERR_REM_USER_CONN_TERM     0x13
 #define BLE_ATT_ERR_INSUFFICIENT_RES   0x11
 #define BLE_OWN_ADDR_PUBLIC            0x00

@@ -16,3 +16,4 @@ void udisplay_nimble_test_reset(void)
 
 struct ble_npl_callout* udisplay_nimble_test_heartbeat(void) { return &s.heartbeat; }
 struct ble_npl_callout* udisplay_nimble_test_ud_timer(void)  { return &s.ud_timer; }
+struct ble_npl_callout* udisplay_nimble_test_adv_retry(void) { return &s.adv_retry; }

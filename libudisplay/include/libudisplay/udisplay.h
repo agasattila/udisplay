@@ -317,7 +317,8 @@ typedef struct {
      * @return  1 = accepted (device sends HANDSHAKE flags=0 with merkle_root)
      *          0 = rejected (device re-issues HANDSHAKE flags=1 with a fresh salt)
      *         -1 = disconnect (library clears connection state; transport close
-     *              is the firmware's responsibility via its own transport API)
+     *              is the firmware's responsibility via its own transport API,
+     *              except with the NimBLE backend, which closes the link itself)
      *
      * The credential and salt pointers are valid only during this callback.
      * MUST NOT call udisplay_on_disconnect() from within this callback.

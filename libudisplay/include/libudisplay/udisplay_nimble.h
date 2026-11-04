@@ -9,7 +9,11 @@
  * stack bring-up, the uDisplay service and its two characteristics,
  * advertising, the connection lifecycle, MTU tracking, control writes, the
  * one-indication-in-flight outbound queue, the HELLO readiness timer, the
- * heartbeat, and link teardown on comms errors.
+ * heartbeat, and link teardown on comms errors and on sessions the protocol
+ * ends itself (auth_check() returning -1, a malformed auth reply). The
+ * firmware doesn't close the link in those cases; the backend does.
+ * Advertising that fails to start for a transient reason is retried with a
+ * backoff capped at 8 s.
  *
  * Available only when libudisplay is built with the backend enabled
  * (ESP-IDF: `idf.py menuconfig` → uDisplay → "NimBLE BLE transport
@@ -138,10 +142,11 @@ int udisplay_nimble_init(udisplay_t* ctx, const udisplay_nimble_config_t* cfg);
 int udisplay_nimble_start(void);
 
 /** Terminate the current connection, if any. Advertising restarts once the
- *  disconnect completes. Safe from any task. */
+ *  disconnect completes. Safe from any task: takes the backend lock. */
 void udisplay_nimble_disconnect(void);
 
-/** 1 while a client is connected at the link layer, else 0. */
+/** 1 while a client is connected at the link layer, else 0. Takes the
+ *  backend lock; the answer can be stale by the time it is used. */
 int udisplay_nimble_is_connected(void);
 
 /** Serialize a call into the instance from outside uDisplay callbacks (see

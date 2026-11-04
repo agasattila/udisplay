@@ -19,7 +19,8 @@ struct FakeNimble {
     std::vector<std::vector<uint8_t>> indications;    /* payload per indicate call */
     std::vector<uint16_t> indicate_conn_handles;
     std::vector<uint16_t> terminated;                 /* conn handles */
-    int adv_starts = 0;
+    std::vector<int> terminate_lock_depths;           /* backend lock depth per terminate */
+    int adv_starts = 0;                               /* attempts, failed ones included */
     ble_gap_event_fn* gap_cb = nullptr;
     ble_hs_adv_fields adv{};
     std::string adv_name;
@@ -33,6 +34,8 @@ struct FakeNimble {
     int indicate_rc = 0;
     int add_svcs_rc = 0;
     bool mbuf_alloc_fails = false;
+    std::vector<int> adv_start_rcs;     /* consumed one per ble_gap_adv_start; then 0 */
+    int adv_set_fields_rc = 0;
 
     static constexpr uint16_t kDataValHandle = 42;
 };
@@ -48,7 +51,8 @@ int fake_gap_event(ble_gap_event& ev);
 void fake_fire(ble_npl_callout* co);
 
 /* Simulate a client write to a characteristic's access callback. */
-int fake_write(const ble_gatt_chr_def& chr, const std::vector<uint8_t>& data);
+int fake_write(const ble_gatt_chr_def& chr, const std::vector<uint8_t>& data,
+               uint16_t conn_handle);
 
 /* Total lock depth across mutexes the backend created (0 = all released). */
 int fake_lock_depth();

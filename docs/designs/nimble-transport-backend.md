@@ -168,6 +168,27 @@ spurious link error on NOTIFY_TX from a broken link). All fixed with
 regression tests where host-testable (the race isn't: the fake is
 single-threaded).
 
+## PR review (2026-10-26) follow-ups
+
+- **Protocol-ended sessions.** `auth_check() == -1` and a malformed auth
+  ACK clear `ctx->connected` in the core, which can't reach the transport.
+  The backend now checks after every control write (and, as a catch-all, on
+  every heartbeat tick) whether a started session lost `ctx->connected`
+  while the link is up, and terminates it. Detection in the backend rather
+  than a new core callback: no `udisplay_config_t` change, and it also
+  covers the app calling `udisplay_on_disconnect()` itself.
+- **Locking.** Every `conn_handle` read is under `s.lock`, including
+  `udisplay_nimble_disconnect()` / `udisplay_nimble_is_connected()`. Link
+  errors carry the handle they belong to and terminate only if it is still
+  current; control writes from any other handle are ignored.
+- **Advertising retry.** `BLE_HS_EALREADY` counts as success. `EINVAL`,
+  `EMSGSIZE`, `ENOTSUP`, `EDISABLED`, `ENOTSYNCED` are not retried
+  (configuration bugs, or the host is down and `on_sync` restarts
+  advertising). Anything else retries on an NPL callout at 250 ms doubling
+  to an 8 s cap, without a retry count limit: a limit would bring back the
+  undiscoverable-until-reboot state. A connection or a host reset cancels a
+  pending retry.
+
 ## Not in scope
 
 Mynewt/Zephyr glue, multiple concurrent BLE connections, bonding/security,

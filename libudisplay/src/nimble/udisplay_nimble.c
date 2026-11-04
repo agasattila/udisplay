@@ -20,10 +20,19 @@
  *                           └── NOTIFY_TX (EDONE) ◄────────┘
  *
  * Anything that would lose or reorder a fragment (ring full, mbuf exhausted,
- * indicate error, confirmation timeout) is a link error: disconnect.
+ * indicate error, confirmation timeout) is a link error: disconnect. A link
+ * error names the connection it belongs to and is dropped if that
+ * connection has since been replaced, so it can't kill a newer one.
  *
- * Locking. s.lock (recursive) guards the link state, the ring, the
- * in-flight flag and every call into the udisplay_t instance. tx_pump()
+ * The protocol core can end a session on its own (auth_check() returning
+ * -1, a malformed auth ACK): it clears ctx->connected but has no way to
+ * close the transport. The backend checks for that after every control
+ * write and on every heartbeat tick and terminates the link, so a rejected
+ * client can't hold the only connection slot.
+ *
+ * Locking. s.lock (recursive) guards the link state (conn_handle included,
+ * also in the public helpers), the ring, the in-flight flag and every call
+ * into the udisplay_t instance. tx_pump()
  * holds it across ble_gatts_indicate_custom() too, so the fragment buffer
  * has one user and a fragment can't go out on a connection that replaced
  * the one it was queued for. That is deadlock-free because NimBLE never
@@ -81,6 +90,13 @@
  * heartbeat ticks, at the library's threshold. */
 #define SUBSCRIBE_WAIT_TICKS_MAX UDISPLAY_HB_MISS_MAX
 
+/* Advertising retry after a recoverable failure: doubles from the first
+ * delay up to the cap, and keeps going at the cap. Bounding the count
+ * instead would bring back the state the retry exists to prevent: a device
+ * nobody can find until it reboots. */
+#define ADV_RETRY_FIRST_MS 250u
+#define ADV_RETRY_MAX_MS   8000u
+
 /* ── UUIDs (128-bit, little-endian byte order) ────────────────────────────
  * Service: 29825AAA-D882-46F7-A4D6-EA8431AD3455
  * Control: 29825AAA-D882-46F7-A4D6-EA8431AD3456  (WRITE from client)
@@ -110,6 +126,8 @@ static struct {
     struct ble_npl_mutex     lock;
     struct ble_npl_callout   ud_timer;         /* library one-shot (HELLO retry) */
     struct ble_npl_callout   heartbeat;
+    struct ble_npl_callout   adv_retry;
+    uint32_t                 adv_retry_ms;     /* next retry delay; 0 = no failures in a row */
 
     uint16_t                 conn_handle;
     uint16_t                 data_attr_handle;
@@ -130,18 +148,41 @@ static uint8_t s_rx_buf[RX_WRITE_MAX];
 static void lock(void)   { ble_npl_mutex_pend(&s.lock, BLE_NPL_TIME_FOREVER); }
 static void unlock(void) { ble_npl_mutex_release(&s.lock); }
 
-static void terminate(void)
+/* Terminate @p conn_handle if it is still the current connection. Takes
+ * s.lock (recursive), so the check and the terminate see the same link. */
+static void terminate_conn(uint16_t conn_handle)
 {
-    uint16_t h = s.conn_handle;
-    if (h != BLE_HS_CONN_HANDLE_NONE) {
-        ble_gap_terminate(h, BLE_ERR_REM_USER_CONN_TERM);
+    lock();
+    if (conn_handle != BLE_HS_CONN_HANDLE_NONE && conn_handle == s.conn_handle) {
+        ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
     }
+    unlock();
 }
 
-static void link_error(const char* why)
+/* Terminate whatever connection is current. */
+static void terminate(void)
+{
+    lock();
+    terminate_conn(s.conn_handle);
+    unlock();
+}
+
+static void link_error(uint16_t conn_handle, const char* why)
 {
     MODLOG_DFLT(ERROR, "udisplay: link error: %s, disconnecting", why);
-    terminate();
+    terminate_conn(conn_handle);
+}
+
+/* The core cleared its session (auth_check() == -1, malformed auth ACK, or
+ * the app called udisplay_on_disconnect()) while the link is still up:
+ * nothing will talk on it again, so close it. Caller holds s.lock. */
+static void drop_link_if_session_ended(void)
+{
+    if (s.session_started && !s.ctx->connected &&
+        s.conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+        MODLOG_DFLT(WARN, "udisplay: session ended by the protocol, disconnecting");
+        terminate_conn(s.conn_handle);
+    }
 }
 
 /* ── Outbound queue ─────────────────────────────────────────────────────── */
@@ -168,12 +209,12 @@ static void tx_pump(void)
 
     om = ble_hs_mbuf_from_flat(s_tx_frag, len);
     if (!om) {
-        link_error("mbuf alloc failed");
+        link_error(s.conn_handle, "mbuf alloc failed");
     } else {
         rc = ble_gatts_indicate_custom(s.conn_handle, s.data_attr_handle, om);
         if (rc != 0) {
             MODLOG_DFLT(ERROR, "udisplay: ble_gatts_indicate_custom rc=%d", rc);
-            link_error("indicate failed");
+            link_error(s.conn_handle, "indicate failed");
         }
     }
     unlock();
@@ -181,24 +222,22 @@ static void tx_pump(void)
 
 void udisplay_nimble_send(const uint8_t* data, uint16_t len, void* userdata)
 {
-    int ok;
     (void)userdata;
 
-    if (!s.initialized || s.conn_handle == BLE_HS_CONN_HANDLE_NONE) return;
-    if (len == 0u || len > TX_FRAG_MAX) {
-        link_error("fragment size out of range");
-        return;
-    }
-
+    if (!s.initialized) return;
+    /* Normally called with s.lock already held (the library runs under it);
+     * taken again so the connection checked is the one queued for. */
     lock();
-    ok = tx_ring_push(&s.tx, data, len);
-    unlock();
-
-    if (!ok) {
-        link_error("TX queue overflow");
-        return;
+    if (s.conn_handle == BLE_HS_CONN_HANDLE_NONE) {
+        /* not connected: dropped */
+    } else if (len == 0u || len > TX_FRAG_MAX) {
+        link_error(s.conn_handle, "fragment size out of range");
+    } else if (!tx_ring_push(&s.tx, data, len)) {
+        link_error(s.conn_handle, "TX queue overflow");
+    } else {
+        tx_pump();
     }
-    tx_pump();
+    unlock();
 }
 
 /* ── Library timer + heartbeat (both NPL callouts in the host task) ─────────
@@ -240,6 +279,10 @@ static void heartbeat_cb(struct ble_npl_event* ev)
         MODLOG_DFLT(WARN, "udisplay: client never subscribed to indications, disconnecting");
         terminate();
     }
+    /* Catch-all for a session ended outside a control write (e.g. the app
+     * calling udisplay_on_disconnect() itself): the watchdog stops counting
+     * once ctx->connected is 0, so nothing else would notice. */
+    drop_link_if_session_ended();
     unlock();
 }
 
@@ -257,8 +300,7 @@ static int ctrl_access(uint16_t conn_handle, uint16_t attr_handle,
                        struct ble_gatt_access_ctxt* ctxt, void* arg)
 {
     uint16_t len = 0;
-    int rc;
-    (void)conn_handle; (void)attr_handle; (void)arg;
+    (void)attr_handle; (void)arg;
 
     if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return 0;
     if (ble_hs_mbuf_to_flat(ctxt->om, s_rx_buf, sizeof(s_rx_buf), &len) != 0) {
@@ -266,10 +308,15 @@ static int ctrl_access(uint16_t conn_handle, uint16_t attr_handle,
     }
 
     lock();
-    rc = udisplay_feed(s.ctx, s_rx_buf, len);
+    /* Only the current connection feeds the instance. */
+    if (conn_handle == s.conn_handle) {
+        if (udisplay_feed(s.ctx, s_rx_buf, len) != 0) {
+            link_error(conn_handle, "framing error on control write");
+        } else {
+            drop_link_if_session_ended();
+        }
+    }
     unlock();
-
-    if (rc != 0) link_error("framing error on control write");
     return 0;
 }
 
@@ -308,6 +355,44 @@ static const struct ble_gatt_svc_def s_svcs[] = {
 
 static int gap_event_cb(struct ble_gap_event* ev, void* arg);
 
+static void start_adv(void);
+
+/* Failures that a later attempt can't fix: bad parameters or data (a
+ * configuration bug), unsupported (extended advertising, caught at build
+ * time), host stopped. Not synced: on_sync() starts advertising itself. */
+static int adv_error_is_permanent(int rc)
+{
+    return rc == BLE_HS_EINVAL || rc == BLE_HS_EMSGSIZE || rc == BLE_HS_ENOTSUP ||
+           rc == BLE_HS_EDISABLED || rc == BLE_HS_ENOTSYNCED;
+}
+
+static void adv_retry_cb(struct ble_npl_event* ev)
+{
+    int connected;
+    (void)ev;
+    lock();
+    connected = s.conn_handle != BLE_HS_CONN_HANDLE_NONE;
+    unlock();
+    if (!connected) start_adv();
+}
+
+/* An advertising call returned @p rc: decide what happens next. */
+static void adv_failed(const char* what, int rc)
+{
+    if (adv_error_is_permanent(rc)) {
+        MODLOG_DFLT(ERROR, "udisplay: %s rc=%d, not retrying", what, rc);
+        s.adv_retry_ms = 0;
+        return;
+    }
+    if (s.adv_retry_ms == 0u) s.adv_retry_ms = ADV_RETRY_FIRST_MS;
+    MODLOG_DFLT(WARN, "udisplay: %s rc=%d, retrying in %u ms",
+                what, rc, (unsigned)s.adv_retry_ms);
+    ble_npl_callout_reset(&s.adv_retry, ble_npl_time_ms_to_ticks32(s.adv_retry_ms));
+    s.adv_retry_ms = s.adv_retry_ms >= ADV_RETRY_MAX_MS / 2u ? ADV_RETRY_MAX_MS
+                                                            : s.adv_retry_ms * 2u;
+}
+
+/* Runs only in the host task (GAP events, on_sync, the retry callout). */
 static void start_adv(void)
 {
     struct ble_hs_adv_fields f;
@@ -315,6 +400,8 @@ static void start_adv(void)
     size_t name_len = strlen(s.cfg.device_name);
     int name_in_adv = name_len <= ADV_NAME_MAX;
     int rc;
+
+    ble_npl_callout_stop(&s.adv_retry);
 
     memset(&f, 0, sizeof(f));
     f.flags                = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
@@ -328,7 +415,7 @@ static void start_adv(void)
     }
     rc = ble_gap_adv_set_fields(&f);
     if (rc != 0) {
-        MODLOG_DFLT(ERROR, "udisplay: ble_gap_adv_set_fields rc=%d", rc);
+        adv_failed("ble_gap_adv_set_fields", rc);
         return;
     }
 
@@ -342,7 +429,7 @@ static void start_adv(void)
         f.name_is_complete = name_len <= BLE_HS_ADV_MAX_FIELD_SZ;
         rc = ble_gap_adv_rsp_set_fields(&f);
         if (rc != 0) {
-            MODLOG_DFLT(ERROR, "udisplay: ble_gap_adv_rsp_set_fields rc=%d", rc);
+            adv_failed("ble_gap_adv_rsp_set_fields", rc);
             return;
         }
     }
@@ -352,9 +439,13 @@ static void start_adv(void)
     ap.disc_mode = BLE_GAP_DISC_MODE_GEN;
     rc = ble_gap_adv_start(s.own_addr_type, NULL, BLE_HS_FOREVER, &ap,
                            gap_event_cb, NULL);
-    if (rc != 0) {
-        MODLOG_DFLT(ERROR, "udisplay: ble_gap_adv_start rc=%d", rc);
+    if (rc == BLE_HS_EALREADY) {
+        /* Already advertising (e.g. a retry racing a GAP-event restart). */
+        s.adv_retry_ms = 0;
+    } else if (rc != 0) {
+        adv_failed("ble_gap_adv_start", rc);
     } else {
+        s.adv_retry_ms = 0;
         MODLOG_DFLT(INFO, "udisplay: advertising as \"%s\"", s.cfg.device_name);
     }
 }
@@ -380,6 +471,8 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
             break;
         }
         MODLOG_DFLT(INFO, "udisplay: connected handle=%d", ev->connect.conn_handle);
+        ble_npl_callout_stop(&s.adv_retry);
+        s.adv_retry_ms = 0;
         lock();
         reset_link_state(ev->connect.conn_handle);
         /* Every connection starts at the default ATT MTU. The library
@@ -402,9 +495,14 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
         start_adv();
         break;
 
-    case BLE_GAP_EVENT_ADV_COMPLETE:
-        if (s.conn_handle == BLE_HS_CONN_HANDLE_NONE) start_adv();
+    case BLE_GAP_EVENT_ADV_COMPLETE: {
+        int connected;
+        lock();
+        connected = s.conn_handle != BLE_HS_CONN_HANDLE_NONE;
+        unlock();
+        if (!connected) start_adv();
         break;
+    }
 
     case BLE_GAP_EVENT_SUBSCRIBE:
         /* Fires on every CCCD write, including unsubscribe and, on some
@@ -426,22 +524,23 @@ static int gap_event_cb(struct ble_gap_event* ev, void* arg)
 
     case BLE_GAP_EVENT_NOTIFY_TX:
         if (ev->notify_tx.attr_handle != s.data_attr_handle) break;
+        lock();
         /* A link that just broke reports its in-flight indication as failed
          * before the DISCONNECT event: nothing left to tear down. */
         if (ev->notify_tx.conn_handle != s.conn_handle ||
-            ev->notify_tx.status == BLE_HS_ENOTCONN) break;
-        if (ev->notify_tx.status == BLE_HS_EDONE) {
+            ev->notify_tx.status == BLE_HS_ENOTCONN) {
+            /* not ours, or already gone */
+        } else if (ev->notify_tx.status == BLE_HS_EDONE) {
             /* Peer confirmed the indication: send the next fragment. */
-            lock();
             s.tx_inflight = 0;
-            unlock();
             tx_pump();
         } else if (ev->notify_tx.status != 0) {
             /* BLE_HS_ETIMEOUT (no confirmation within the ATT timeout) or a
              * send error. Status 0 only means "sent, awaiting confirmation". */
             MODLOG_DFLT(ERROR, "udisplay: indication status=%d", ev->notify_tx.status);
-            link_error("indication not confirmed");
+            link_error(ev->notify_tx.conn_handle, "indication not confirmed");
         }
+        unlock();
         break;
 
     case BLE_GAP_EVENT_MTU: {
@@ -481,6 +580,9 @@ static void on_sync(void)
 static void on_reset(int reason)
 {
     MODLOG_DFLT(WARN, "udisplay: NimBLE host reset reason=%d", reason);
+    /* on_sync() restarts advertising once the host is back. */
+    ble_npl_callout_stop(&s.adv_retry);
+    s.adv_retry_ms = 0;
 }
 
 /* ── Public API ─────────────────────────────────────────────────────────── */
@@ -520,6 +622,8 @@ int udisplay_nimble_init(udisplay_t* ctx, const udisplay_nimble_config_t* cfg)
     ble_npl_mutex_init(&s.lock);
     ble_npl_callout_init(&s.ud_timer, udisplay_nimble_port_eventq(), ud_timer_cb, NULL);
     ble_npl_callout_init(&s.heartbeat, udisplay_nimble_port_eventq(), heartbeat_cb, NULL);
+    ble_npl_callout_init(&s.adv_retry, udisplay_nimble_port_eventq(), adv_retry_cb, NULL);
+    s.adv_retry_ms = 0;
 
     ble_svc_gap_init();
     ble_svc_gatt_init();
@@ -561,7 +665,12 @@ void udisplay_nimble_disconnect(void)
 
 int udisplay_nimble_is_connected(void)
 {
-    return s.initialized && s.conn_handle != BLE_HS_CONN_HANDLE_NONE;
+    int connected;
+    if (!s.initialized) return 0;
+    lock();
+    connected = s.conn_handle != BLE_HS_CONN_HANDLE_NONE;
+    unlock();
+    return connected;
 }
 
 void udisplay_nimble_lock(void)
