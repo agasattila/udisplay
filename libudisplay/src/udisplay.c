@@ -333,10 +333,32 @@ int udisplay_feed(udisplay_t* ctx, const uint8_t* data, uint16_t len)
     return 0;
 }
 
+/* Whether the session has reached the point where the client may speak:
+ * connected and, on BLE, past the HELLO check, so the first HANDSHAKE has
+ * gone out. Before that a well-behaved client has nothing to say. */
+static int session_open(const udisplay_t* ctx)
+{
+    if (!ctx->connected) return 0;
+    if (ctx->cfg.transport == UDISPLAY_TRANSPORT_BLE && !ctx->ble_ready) return 0;
+    return 1;
+}
+
+/* While an auth challenge is outstanding the client may only answer it
+ * (HANDSHAKE_ACK) or echo heartbeats. CLIENT_READY, chunk requests and
+ * events are dropped, so a client that skips authentication can neither
+ * read the UI nor reach on_client_ready/on_event. A legitimate client gets
+ * the merkle root only after auth, so it never sends them earlier. */
+static int allowed_during_auth(proto_inbound_type_t type)
+{
+    return type == PROTO_HANDSHAKE_ACK || type == PROTO_HEARTBEAT;
+}
+
 void udisplay_on_message(udisplay_t* ctx, const uint8_t* msg, uint16_t len)
 {
     proto_inbound_t in;
+    if (!session_open(ctx)) return;
     if (!proto_parse(msg, len, &in)) return;
+    if (ctx->awaiting_auth_ack && !allowed_during_auth(in.type)) return;
 
     switch (in.type) {
         case PROTO_HANDSHAKE_ACK:

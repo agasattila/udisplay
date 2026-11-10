@@ -286,6 +286,9 @@ CLIENT                                         DEVICE
 ```
 
 `auth_check` return values: 1 = accepted, 0 = retry (new salt issued), -1 = disconnect.
+
+While the challenge is outstanding the device accepts only `HANDSHAKE_ACK` and `HEARTBEAT`. `CLIENT_READY`, `CHUNK_HEADER_REQUEST`, `CHUNK_REQUEST` and `EVENT` are dropped, so a client that skips authentication can neither download the UI nor reach `on_client_ready` / `on_event`.
+
 No rate limiting is built into the library; firmware MUST limit retries via `auth_check`.
 
 **Security properties:**

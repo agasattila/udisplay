@@ -666,6 +666,98 @@ TEST_F(AuthTest, SaltPassedToAuthCheck)
     EXPECT_EQ(g_last_salt[31], 0x20u);
 }
 
+/* ── Handshake/auth enforcement (PR #66 review) ─────────────────────────────
+ * A client that skips the handshake must not reach on_client_ready /
+ * on_event, nor read the UI, before it has authenticated. */
+
+TEST_F(AuthTest, ClientReadyDuringAuth_Ignored)
+{
+    udisplay_on_connect(&ctx_);
+    uint8_t cr = 0x02u;
+    udisplay_on_message(&ctx_, &cr, 1u);
+    EXPECT_EQ(ctx_.active, 0);
+    EXPECT_EQ(g_ready_calls, 0);
+}
+
+TEST_F(AuthTest, ClientReadyThenEventDuringAuth_NoCallbacks)
+{
+    udisplay_on_connect(&ctx_);
+    uint8_t cr = 0x02u;
+    uint8_t ev[3] = { 0x31u, 0x10u, 0x01u };   /* button press on widget 0x10 */
+    udisplay_on_message(&ctx_, &cr, 1u);
+    udisplay_on_message(&ctx_, ev, 3u);
+    EXPECT_EQ(g_ready_calls, 0);
+    EXPECT_EQ(g_event_calls, 0);
+}
+
+TEST_F(AuthTest, ClientReadyAfterFailedAttempt_StillIgnored)
+{
+    udisplay_on_connect(&ctx_);
+    g_auth_check_result = 0;                   /* wrong credential: re-challenge */
+    uint8_t cred[32] = {};
+    feed_auth_ack(cred);
+    ASSERT_EQ(ctx_.awaiting_auth_ack, 1);
+    uint8_t cr = 0x02u;
+    udisplay_on_message(&ctx_, &cr, 1u);
+    EXPECT_EQ(ctx_.active, 0);
+    EXPECT_EQ(g_ready_calls, 0);
+}
+
+TEST_F(AuthTest, ChunkRequestsDuringAuth_NotServed)
+{
+    udisplay_on_connect(&ctx_);
+    size_t before = g_auth_sent.size();
+    uint8_t hdr_req[3]   = { 0x10u, 0x00u, 0x00u };   /* CHUNK_HEADER_REQUEST 0 */
+    uint8_t chunk_req[3] = { 0x20u, 0x00u, 0x00u };   /* CHUNK_REQUEST 0 */
+    udisplay_on_message(&ctx_, hdr_req, 3u);
+    udisplay_on_message(&ctx_, chunk_req, 3u);
+    EXPECT_EQ(g_auth_sent.size(), before) << "the UI must not leak before auth";
+}
+
+TEST_F(AuthTest, HeartbeatDuringAuth_StillCountsAsLiveness)
+{
+    udisplay_on_connect(&ctx_);
+    udisplay_heartbeat(&ctx_);
+    ASSERT_EQ(ctx_.comms_miss_count, 1u);
+    uint8_t hb = 0x40u;
+    udisplay_on_message(&ctx_, &hb, 1u);
+    EXPECT_EQ(ctx_.comms_miss_count, 0u);
+}
+
+TEST_F(AuthTest, ClientReadyAfterAuthPass_Accepted)
+{
+    udisplay_on_connect(&ctx_);
+    uint8_t cred[32] = {};
+    feed_auth_ack(cred);
+    ASSERT_EQ(ctx_.awaiting_auth_ack, 0);
+    uint8_t cr = 0x02u;
+    uint8_t ev[3] = { 0x31u, 0x10u, 0x01u };
+    udisplay_on_message(&ctx_, &cr, 1u);
+    udisplay_on_message(&ctx_, ev, 3u);
+    EXPECT_EQ(g_ready_calls, 1);
+    EXPECT_EQ(g_event_calls, 1);
+}
+
+TEST_F(UDisplayTest, MessagesBeforeConnect_Ignored)
+{
+    /* No udisplay_on_connect(): no session exists yet. */
+    feed({ 0x02u });
+    auto ev = make_event();
+    udisplay_on_message(&ctx_, ev.data(), static_cast<uint16_t>(ev.size()));
+    EXPECT_EQ(ctx_.active, 0);
+    EXPECT_EQ(g_ready_calls, 0);
+    EXPECT_EQ(g_event_calls, 0);
+}
+
+TEST_F(UDisplayTest, MessagesAfterDisconnect_Ignored)
+{
+    udisplay_on_connect(&ctx_);
+    udisplay_on_disconnect(&ctx_);
+    feed({ 0x02u });
+    EXPECT_EQ(ctx_.active, 0);
+    EXPECT_EQ(g_ready_calls, 0);
+}
+
 /* ── Transport framing tests ─────────────────────────────────────────────── */
 
 /*
@@ -1160,6 +1252,27 @@ TEST_F(BleHelloTest, TimerExpiry_ResendsHelloAndRearms)
         EXPECT_EQ(g_transport_sent[i].data[2], (uint8_t)i) << "packet_id advances per HELLO";
     }
     EXPECT_EQ(g_timer_starts.size(), 3u);
+}
+
+/* Before the HELLO echo no HANDSHAKE has gone out: protocol data from the
+ * client is a skipped handshake and must not activate the session. */
+TEST_F(BleHelloTest, ClientReadyBeforeHelloEcho_Ignored)
+{
+    init_ble(true);
+    ctx_.cfg.on_client_ready = on_ready;
+    udisplay_on_connect(&ctx_);
+    g_ready_calls = 0;
+    const uint8_t cr_frag[7] = { 0x00u, 0x00u, 0x00u, 0x01u, 0x00u,
+                                 UDISPLAY_BLE_FLAGS_DATA, 0x02u };
+    EXPECT_EQ(udisplay_feed(&ctx_, cr_frag, sizeof(cr_frag)), 0);
+    EXPECT_EQ(ctx_.active, 0);
+    EXPECT_EQ(g_ready_calls, 0);
+
+    /* Same message after the HELLO echo (no auth configured) is accepted. */
+    ASSERT_EQ(echo_hello(), 0);
+    EXPECT_EQ(udisplay_feed(&ctx_, cr_frag, sizeof(cr_frag)), 0);
+    EXPECT_EQ(ctx_.active, 1);
+    EXPECT_EQ(g_ready_calls, 1);
 }
 
 TEST_F(BleHelloTest, Echo_StopsTimerAndSendsHandshake)

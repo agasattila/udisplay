@@ -121,8 +121,11 @@ int ble_gatts_indicate_custom(uint16_t conn_handle, uint16_t, struct os_mbuf* om
 }
 
 /* GAP */
+int ble_hs_synced(void) { return g_fake.synced ? 1 : 0; }
+
 int ble_gap_adv_set_fields(const struct ble_hs_adv_fields* f)
 {
+    if (!g_fake.synced) g_fake.adv_calls_unsynced++;
     if (g_fake.adv_set_fields_rc != 0) return g_fake.adv_set_fields_rc;
     g_fake.adv = *f;
     g_fake.adv_name = f->name ? std::string(reinterpret_cast<const char*>(f->name), f->name_len)
@@ -131,6 +134,7 @@ int ble_gap_adv_set_fields(const struct ble_hs_adv_fields* f)
 }
 int ble_gap_adv_rsp_set_fields(const struct ble_hs_adv_fields* f)
 {
+    if (!g_fake.synced) g_fake.adv_calls_unsynced++;
     g_fake.rsp_set = true;
     g_fake.rsp_name = std::string(reinterpret_cast<const char*>(f->name), f->name_len);
     g_fake.rsp_name_complete = f->name_is_complete;
@@ -140,6 +144,7 @@ int ble_gap_adv_start(uint8_t, const ble_addr_t*, int32_t, const struct ble_gap_
                       ble_gap_event_fn* cb, void*)
 {
     g_fake.adv_starts++;
+    if (!g_fake.synced) g_fake.adv_calls_unsynced++;
     if (!g_fake.adv_start_rcs.empty()) {
         int rc = g_fake.adv_start_rcs.front();
         g_fake.adv_start_rcs.erase(g_fake.adv_start_rcs.begin());

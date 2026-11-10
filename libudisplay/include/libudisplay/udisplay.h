@@ -573,6 +573,11 @@ int udisplay_ble_set_mtu(udisplay_t* ctx, uint16_t mtu_payload);
  * Feed a complete (already-unframed) message directly.
  * Use this for TRANSPORT_NONE (unit tests, MockTransport pattern) or when
  * the firmware handles framing itself before calling this function.
+ *
+ * Messages are dropped unless a session is open (after udisplay_on_connect()
+ * and, on BLE, after the HELLO echo). While an auth challenge is outstanding
+ * only HANDSHAKE_ACK and HEARTBEAT are accepted, so on_client_ready and
+ * on_event can't be reached without authenticating.
  */
 void udisplay_on_message(udisplay_t* ctx, const uint8_t* msg, uint16_t len);
 

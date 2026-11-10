@@ -36,6 +36,8 @@ struct FakeNimble {
     bool mbuf_alloc_fails = false;
     std::vector<int> adv_start_rcs;     /* consumed one per ble_gap_adv_start; then 0 */
     int adv_set_fields_rc = 0;
+    bool synced = true;                 /* ble_hs_synced() */
+    int adv_calls_unsynced = 0;         /* adv HCI calls made while !synced */
 
     static constexpr uint16_t kDataValHandle = 42;
 };

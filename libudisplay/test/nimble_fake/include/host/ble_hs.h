@@ -64,6 +64,7 @@ int ble_hs_mbuf_to_flat(const struct os_mbuf* om, void* flat, uint16_t max_len,
 #define BLE_HS_EINVAL                  3
 #define BLE_HS_ENOTSUP                 8
 #define BLE_HS_EBUSY                   15
+#define BLE_HS_ECONTROLLER             12
 #define BLE_HS_ETIMEOUT_HCI            19
 #define BLE_HS_ENOTSYNCED              22
 #define BLE_HS_EDISABLED               30
@@ -165,6 +166,7 @@ int ble_gap_adv_start(uint8_t own_addr_type, const ble_addr_t* direct_addr,
                       int32_t duration_ms, const struct ble_gap_adv_params* adv_params,
                       ble_gap_event_fn* cb, void* cb_arg);
 int ble_gap_terminate(uint16_t conn_handle, uint8_t hci_reason);
+int ble_hs_synced(void);
 int ble_hs_id_infer_auto(int privacy, uint8_t* out_addr_type);
 
 /* ── Host config ─────────────────────────────────────────────────────────── */

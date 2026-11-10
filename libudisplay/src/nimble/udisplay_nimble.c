@@ -24,6 +24,10 @@
  * error names the connection it belongs to and is dropped if that
  * connection has since been replaced, so it can't kill a newer one.
  *
+ * Advertising restarts only while the host is synced with the controller;
+ * during a host reset (which reports open connections as disconnected)
+ * on_sync() restarts it instead.
+ *
  * The protocol core can end a session on its own (auth_check() returning
  * -1, a malformed auth ACK): it clears ctx->connected but has no way to
  * close the transport. The backend checks for that after every control
@@ -308,8 +312,13 @@ static int ctrl_access(uint16_t conn_handle, uint16_t attr_handle,
     }
 
     lock();
-    /* Only the current connection feeds the instance. */
-    if (conn_handle == s.conn_handle) {
+    /* Only the current connection feeds the instance, and only once it has
+     * subscribed: before that no session exists and a write is just a
+     * client skipping the handshake. The core does its own state checks
+     * too (it drops anything before the HELLO echo, and everything but the
+     * auth answer while auth is pending); this keeps pre-session bytes out
+     * of its reassembly buffer altogether. */
+    if (conn_handle == s.conn_handle && s.session_started) {
         if (udisplay_feed(s.ctx, s_rx_buf, len) != 0) {
             link_error(conn_handle, "framing error on control write");
         } else {
@@ -402,6 +411,18 @@ static void start_adv(void)
     int rc;
 
     ble_npl_callout_stop(&s.adv_retry);
+
+    /* A host reset clears the sync state first and then reports every open
+     * connection as broken, so BLE_GAP_EVENT_DISCONNECT lands here while the
+     * controller is being reset. Any HCI command now (set_fields is the
+     * first) is unsafe; on_sync() restarts advertising once the host is
+     * back. Covers every caller: disconnect, failed connect, ADV_COMPLETE
+     * and the retry callout. */
+    if (!ble_hs_synced()) {
+        MODLOG_DFLT(INFO, "udisplay: host not synced, advertising waits for sync");
+        s.adv_retry_ms = 0;
+        return;
+    }
 
     memset(&f, 0, sizeof(f));
     f.flags                = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;

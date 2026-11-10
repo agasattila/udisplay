@@ -189,6 +189,33 @@ single-threaded).
   undiscoverable-until-reboot state. A connection or a host reset cancels a
   pending retry.
 
+## PR review (2026-11-06) follow-ups
+
+- **Handshake/auth bypass.** The core accepted `CLIENT_READY` (and so
+  `on_client_ready` and every later `EVENT`) in any state, even before
+  `udisplay_on_connect()`. Fixed in the core, so it holds for every
+  transport: `udisplay_on_message()` drops everything unless a session is
+  open (`connected`, and on BLE past the HELLO echo, so the first HANDSHAKE
+  has gone out); while an auth challenge is outstanding it accepts only
+  `HANDSHAKE_ACK` and `HEARTBEAT`, so `CLIENT_READY`, chunk requests and
+  events are dropped until `auth_check()` returns 1. The backend also
+  ignores control writes until the client has subscribed. `HEARTBEAT`
+  stays allowed during auth because the password prompt can outlast the
+  bootstrap watchdog. Not covered here: CLIENT_READY before the no-auth
+  HANDSHAKE_ACK. That is issue #12 (protocol ordering, both device
+  runtimes); without auth the ACK carries no secret, so it isn't a
+  security boundary.
+- **Advertising during a host reset.** `ble_hs_reset()` clears the sync
+  state, then reports open connections as broken (DISCONNECT event), then
+  calls `reset_cb`. `start_adv()` now returns early when `!ble_hs_synced()`
+  (no HCI call, no retry scheduled); `on_sync()` restarts advertising. The
+  check is in `start_adv()` itself, so it covers every caller (disconnect,
+  failed connect, `ADV_COMPLETE`, retry callout).
+- **Hardware.** Tested on hardware by the reviewer (2026-11-10): works as
+  expected. The edge-case scenarios the review lists (disconnect during
+  HELLO/auth/YAML, resubscribe with indications pending, host reset
+  mid-session) are not yet run on hardware.
+
 ## Not in scope
 
 Mynewt/Zephyr glue, multiple concurrent BLE connections, bonding/security,

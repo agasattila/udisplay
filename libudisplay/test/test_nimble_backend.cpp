@@ -64,6 +64,23 @@ std::vector<uint8_t> auth_ack_fragment(uint8_t ack_flags)
     f.insert(f.end(), msg.begin(), msg.end());
     return f;
 }
+/* Any client→device protocol message as one BLE data fragment. */
+std::vector<uint8_t> data_fragment(const std::vector<uint8_t>& msg)
+{
+    std::vector<uint8_t> f = { 0x00, 0x00, 0x01,
+                               static_cast<uint8_t>(msg.size()), 0x00,
+                               UDISPLAY_BLE_FLAGS_DATA };
+    f.insert(f.end(), msg.begin(), msg.end());
+    return f;
+}
+const std::vector<uint8_t> kClientReady = { 0x02 };
+const std::vector<uint8_t> kButtonEvent = { 0x31, 0x10, 0x01 };   /* widget 0x10, press */
+
+int g_app_ready;
+int g_app_events;
+void app_ready(void*) { ++g_app_ready; }
+void app_event(const udisplay_event_t*, void*) { ++g_app_events; }
+
 void app_connect(void*) { ++g_app_connects; }
 void app_disconnect(int reason, void*)
 {
@@ -84,6 +101,7 @@ protected:
         g_app_comms_errors = g_app_connects = g_app_disconnects = 0;
         g_last_disconnect_reason = g_lock_depth_in_disconnect = -1;
         g_auth_result = 1;
+        g_app_ready = g_app_events = 0;
 
         udisplay_config_t cfg{};
         cfg.merkle_root    = kRoot;
@@ -93,6 +111,8 @@ protected:
         cfg.chunk_count    = 1u;
         cfg.send           = udisplay_nimble_send;
         cfg.on_comms_error = app_comms_error;
+        cfg.on_client_ready = app_ready;
+        cfg.on_event       = app_event;
         cfg.transport      = UDISPLAY_TRANSPORT_BLE;
         udisplay_init(&ctx_, &cfg);
 
@@ -789,6 +809,65 @@ TEST_F(NimbleBackendTest, WriteBeforeSubscribeDoesNotDropLink)
     EXPECT_TRUE(g_fake.terminated.empty());
 }
 
+/* ── handshake bypass (review 2026-11-06, finding 1) ───────────────────── */
+
+TEST_F(NimbleBackendTest, ClientReadyAndEventBeforeSubscribeIgnored)
+{
+    bring_up();
+    connect();
+    ASSERT_EQ(write_ctrl(data_fragment(kClientReady)), 0);
+    ASSERT_EQ(write_ctrl(data_fragment(kButtonEvent)), 0);
+    EXPECT_EQ(g_app_ready, 0);
+    EXPECT_EQ(g_app_events, 0);
+    EXPECT_EQ(ctx_.active, 0);
+
+    /* A proper session afterwards still works. */
+    subscribe();
+    confirm();                                  /* HELLO */
+    ASSERT_EQ(write_ctrl(kHelloEcho), 0);
+    drain();
+    ASSERT_EQ(write_ctrl(data_fragment(kClientReady)), 0);
+    ASSERT_EQ(write_ctrl(data_fragment(kButtonEvent)), 0);
+    EXPECT_EQ(g_app_ready, 1);
+    EXPECT_EQ(g_app_events, 1);
+}
+
+TEST_F(NimbleBackendTest, ClientReadyAndEventBeforeHelloEchoIgnored)
+{
+    bring_up();
+    connect();
+    subscribe();                                /* session started, HELLO pending */
+    ASSERT_EQ(write_ctrl(data_fragment(kClientReady)), 0);
+    ASSERT_EQ(write_ctrl(data_fragment(kButtonEvent)), 0);
+    EXPECT_EQ(g_app_ready, 0);
+    EXPECT_EQ(g_app_events, 0);
+}
+
+TEST_F(NimbleBackendTest, ClientReadyAndEventWhileAuthPendingIgnored)
+{
+    enable_auth();
+    session_ready();                            /* auth challenge sent */
+    ASSERT_EQ(ctx_.awaiting_auth_ack, 1);
+    size_t sent = g_fake.indications.size();
+    ASSERT_EQ(write_ctrl(data_fragment(kClientReady)), 0);
+    ASSERT_EQ(write_ctrl(data_fragment(kButtonEvent)), 0);
+    ASSERT_EQ(write_ctrl(data_fragment({ 0x20, 0x00, 0x00 })), 0);   /* CHUNK_REQUEST 0 */
+    EXPECT_EQ(g_app_ready, 0);
+    EXPECT_EQ(g_app_events, 0);
+    EXPECT_EQ(ctx_.active, 0);
+    EXPECT_EQ(g_fake.indications.size(), sent) << "no chunk served before auth";
+    EXPECT_TRUE(g_fake.terminated.empty());
+
+    /* Authenticating unlocks the session. */
+    ASSERT_EQ(write_ctrl(auth_ack_fragment(0x01)), 0);
+    ASSERT_EQ(ctx_.awaiting_auth_ack, 0);
+    drain();
+    ASSERT_EQ(write_ctrl(data_fragment(kClientReady)), 0);
+    ASSERT_EQ(write_ctrl(data_fragment(kButtonEvent)), 0);
+    EXPECT_EQ(g_app_ready, 1);
+    EXPECT_EQ(g_app_events, 1);
+}
+
 /* ── stale connections and locking ─────────────────────────────────────── */
 
 TEST_F(NimbleBackendTest, WriteFromOtherConnectionIgnored)
@@ -901,5 +980,55 @@ TEST_F(NimbleBackendTest, HostResetCancelsAdvertisingRetry)
     bring_up();
     ASSERT_TRUE(udisplay_nimble_test_adv_retry()->armed);
     ble_hs_cfg.reset_cb(0x10);
+    EXPECT_FALSE(udisplay_nimble_test_adv_retry()->armed);
+}
+
+/* ── host reset (review 2026-11-06, finding 2) ─────────────────────────── */
+
+/* NimBLE's ble_hs_reset() clears the sync state, then reports every open
+ * connection as broken (DISCONNECT event), then calls reset_cb. No
+ * advertising HCI command may go out until on_sync(). */
+TEST_F(NimbleBackendTest, HostResetWithActiveConnectionDefersAdvertisingToSync)
+{
+    session_ready();
+    int starts = g_fake.adv_starts;
+
+    g_fake.synced = false;
+    disconnect(BLE_HS_ECONTROLLER);
+    ble_hs_cfg.reset_cb(BLE_HS_ECONTROLLER);
+    EXPECT_EQ(g_fake.adv_calls_unsynced, 0);
+    EXPECT_EQ(g_fake.adv_starts, starts);
+    EXPECT_FALSE(udisplay_nimble_test_adv_retry()->armed)
+        << "no retry either: on_sync restarts advertising";
+    EXPECT_EQ(g_app_disconnects, 1) << "the app still hears about the lost link";
+    EXPECT_EQ(ctx_.connected, 0);
+
+    g_fake.synced = true;
+    ble_hs_cfg.sync_cb();
+    EXPECT_EQ(g_fake.adv_starts, starts + 1);
+}
+
+TEST_F(NimbleBackendTest, AdvertisingPathsWaitWhileUnsynced)
+{
+    bring_up();
+    int starts = g_fake.adv_starts;
+    g_fake.synced = false;
+
+    connect(0x3E);                              /* failed connect restarts adv */
+    ble_gap_event ev{};
+    ev.type = BLE_GAP_EVENT_ADV_COMPLETE;
+    gap(ev);
+    EXPECT_EQ(g_fake.adv_calls_unsynced, 0);
+    EXPECT_EQ(g_fake.adv_starts, starts);
+}
+
+TEST_F(NimbleBackendTest, AdvertisingRetryFiringWhileUnsyncedWaitsForSync)
+{
+    g_fake.adv_start_rcs = { BLE_HS_EBUSY };
+    bring_up();
+    ASSERT_TRUE(udisplay_nimble_test_adv_retry()->armed);
+    g_fake.synced = false;
+    fake_fire(udisplay_nimble_test_adv_retry());
+    EXPECT_EQ(g_fake.adv_calls_unsynced, 0);
     EXPECT_FALSE(udisplay_nimble_test_adv_retry()->armed);
 }
