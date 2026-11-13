@@ -49,6 +49,9 @@ int tx_ring_push(tx_ring_t* r, const uint8_t* data, uint16_t len);
  * Dequeue the oldest fragment into @p out. @return its length, or 0 when the
  * ring is empty. A fragment longer than @p out_cap is discarded and 0 is
  * returned — size @p out for the largest fragment you push.
+ * If the queued bytes are inconsistent (a truncated length prefix, or a
+ * prefix that is zero or longer than what is queued), the ring is reset and
+ * 0 is returned. This can't happen through this API; it is a defensive check.
  */
 uint16_t tx_ring_pop(tx_ring_t* r, uint8_t* out, uint16_t out_cap);
 

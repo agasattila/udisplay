@@ -109,3 +109,47 @@ TEST_F(TxRingTest, OversizedFragmentForCallerBufferIsDiscarded)
     EXPECT_EQ(tx_ring_pop(&r_, small, sizeof(small)), 0u);
     EXPECT_EQ(pop(), b);   /* the next fragment is still intact */
 }
+
+/* Defensive checks in tx_ring_pop(). The public API can't produce these
+ * states, so the tests corrupt the struct directly. */
+
+TEST_F(TxRingTest, TruncatedLengthPrefixResetsRing)
+{
+    auto a = bytes(4, 1);
+    ASSERT_TRUE(tx_ring_push(&r_, a.data(), 4));
+    r_.used = 1;   /* only one byte of the 2-byte prefix "queued" */
+    EXPECT_EQ(tx_ring_pop(&r_, out_, sizeof(out_)), 0u);
+    EXPECT_TRUE(tx_ring_empty(&r_));
+    /* still usable afterwards */
+    ASSERT_TRUE(tx_ring_push(&r_, a.data(), 4));
+    EXPECT_EQ(pop(), a);
+}
+
+TEST_F(TxRingTest, PrefixLongerThanQueuedDataResetsRing)
+{
+    auto a = bytes(10, 1);
+    ASSERT_TRUE(tx_ring_push(&r_, a.data(), 10));
+    r_.used = 2 + 5;   /* prefix says 10, only 5 payload bytes queued */
+    EXPECT_EQ(tx_ring_pop(&r_, out_, sizeof(out_)), 0u);
+    EXPECT_TRUE(tx_ring_empty(&r_));
+}
+
+TEST_F(TxRingTest, ZeroLengthPrefixResetsRing)
+{
+    auto a = bytes(4, 1);
+    ASSERT_TRUE(tx_ring_push(&r_, a.data(), 4));
+    storage_[0] = 0;
+    storage_[1] = 0;
+    EXPECT_EQ(tx_ring_pop(&r_, out_, sizeof(out_)), 0u);
+    EXPECT_TRUE(tx_ring_empty(&r_));
+}
+
+TEST_F(TxRingTest, ExactFitAtBufferEndDoesNotWrap)
+{
+    /* 64-byte buffer: a 62-byte fragment fills it exactly, so the second
+     * (wrap) copy has zero bytes and is skipped in both directions. */
+    auto a = bytes(62, 7);
+    ASSERT_TRUE(tx_ring_push(&r_, a.data(), 62));
+    EXPECT_EQ(pop(), a);
+    EXPECT_TRUE(tx_ring_empty(&r_));
+}
