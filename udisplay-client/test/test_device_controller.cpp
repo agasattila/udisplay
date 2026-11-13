@@ -6,9 +6,12 @@
  * transport layer (which is integration-tested in test_bootstrap.cpp).
  */
 #include <QtTest>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <zlib.h>
 #include "DeviceController.h"
 #include "DeviceInfo.h"
+#include "Transport.h"
 #ifdef HAVE_BLE
 #include <QBluetoothDeviceInfo>
 #endif
@@ -61,6 +64,23 @@ static void injectBootstrapRawBlob(DeviceController& dc, const QByteArray& rawBl
                               Qt::DirectConnection,
                               Q_ARG(QByteArray, QByteArray(32, '\0')),
                               Q_ARG(QByteArray, rawBlob));
+}
+
+/* Connect dc to a QTcpServer on localhost and return the server's end of
+ * the connection once dc has reached "bootstrapping" (the transport is
+ * connected), or nullptr on failure. Used by the TODO-046 tests, which need
+ * a real open connection to check that a failed bootstrap closes it. */
+static QTcpSocket* connectToLocalServer(DeviceController& dc, QTcpServer& server)
+{
+    if (!server.listen(QHostAddress::LocalHost))
+        return nullptr;
+    dc.connectTcp(QStringLiteral("127.0.0.1"), server.serverPort());
+    if (!server.waitForNewConnection(5000))
+        return nullptr;
+    QTcpSocket* peer = server.nextPendingConnection();
+    if (!QTest::qWaitFor([&]() { return dc.state() == QStringLiteral("bootstrapping"); }, 5000))
+        return nullptr;
+    return peer;
 }
 
 /* Helper: builds a YAML doc with `depth` nested `row`s below a `style:
@@ -1066,6 +1086,89 @@ private slots:
         dc.sendButtonRelease(0x12);
         dc.sendButtonClick(0x12);
         QCOMPARE(m->data(m->index(0, 0), WidgetModel::ValueRole).toInt(), 0x11);
+    }
+    /* ── Unusable payload after bootstrap (TODO-046) ─────────────────── */
+
+    /* YAML that fails to parse after a successful bootstrap must tear the
+     * connection down, like a capability rejection does. It used to leave
+     * the transport open with no heartbeat watchdog running, so the client
+     * stayed connected to a device it could not display. */
+    void bootstrap_parseFailure_closesConnection()
+    {
+        QTcpServer server;
+        DeviceController dc;
+        QTcpSocket* peer = connectToLocalServer(dc, server);
+        QVERIFY(peer);
+
+        injectBootstrap(dc,
+            "widgets:\n"
+            "  a:\n"
+            "    type: no_such_widget_type\n");
+
+        QCOMPARE(dc.state(), QStringLiteral("error"));
+        QTRY_COMPARE(peer->state(), QAbstractSocket::UnconnectedState);
+        QTRY_VERIFY(dc.findChildren<Transport*>().isEmpty());
+        QTRY_VERIFY(dc.findChildren<BootstrapManager*>().isEmpty());
+        /* Checked after the connection is gone: closing it must not
+         * replace the parse error with BootstrapManager's "Disconnected". */
+        QCOMPARE(dc.state(), QStringLiteral("error"));
+        QVERIFY2(dc.errorString().startsWith(QStringLiteral("YAML parse failed")),
+                 qPrintable(dc.errorString()));
+    }
+
+    /* The capability-rejection path already called teardown(); over a real
+     * connection its message must survive the close as well. */
+    void bootstrap_capabilityRejection_keepsErrorAfterClose()
+    {
+        QTcpServer server;
+        DeviceController dc;
+        QTcpSocket* peer = connectToLocalServer(dc, server);
+        QVERIFY(peer);
+
+        injectBootstrap(dc,
+            "device:\n"
+            "  capabilities:\n"
+            "    - some_unknown_cap\n"
+            "widgets:\n"
+            "  a:\n"
+            "    type: toggle\n");
+
+        QTRY_COMPARE(peer->state(), QAbstractSocket::UnconnectedState);
+        QTRY_VERIFY(dc.findChildren<Transport*>().isEmpty());
+        QCOMPARE(dc.state(), QStringLiteral("error"));
+        QVERIFY2(dc.errorString().contains(QStringLiteral("unknown capability")),
+                 qPrintable(dc.errorString()));
+    }
+
+    /* Same for a blob that does not decompress: also a bootstrap that
+     * completed with nothing usable to show. */
+    void bootstrap_decompressFailure_closesConnection()
+    {
+        QTcpServer server;
+        DeviceController dc;
+        QTcpSocket* peer = connectToLocalServer(dc, server);
+        QVERIFY(peer);
+
+        injectBootstrapRawBlob(dc, QByteArray("not valid zlib data at all"));
+
+        QTRY_COMPARE(peer->state(), QAbstractSocket::UnconnectedState);
+        QTRY_VERIFY(dc.findChildren<Transport*>().isEmpty());
+        QCOMPARE(dc.state(), QStringLiteral("error"));
+        QCOMPARE(dc.errorString(), QStringLiteral("Failed to decompress YAML blob"));
+    }
+
+    /* The torn-down state is a normal "error": connecting again works. */
+    void bootstrap_parseFailure_canReconnect()
+    {
+        QTcpServer server;
+        DeviceController dc;
+        QVERIFY(connectToLocalServer(dc, server));
+        injectBootstrap(dc, "not: [valid");
+        QCOMPARE(dc.state(), QStringLiteral("error"));
+
+        dc.connectTcp(QStringLiteral("127.0.0.1"), server.serverPort());
+        QVERIFY(server.waitForNewConnection(5000));
+        QTRY_COMPARE(dc.state(), QStringLiteral("bootstrapping"));
     }
 };
 

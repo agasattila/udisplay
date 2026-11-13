@@ -41,9 +41,11 @@ Page {
 
     /* Design Mode error overlay — shown in-place when YAML has a parse error.
      * State stays "running" so the navigation stack is unaffected; the developer
-     * fixes the file and the overlay clears on the next successful reload. */
+     * fixes the file and the overlay clears on the next successful reload.
+     * Starts below the warning banner, which also lists the failed parse's
+     * diagnostics and would otherwise cover this overlay's title. */
     Rectangle {
-        anchors.fill: parent
+        anchors { top: warningBanner.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
         visible: controller.designErrorString !== ""
         color: controller.activeStyle.background
         z: 1
@@ -86,7 +88,22 @@ Page {
         }
     }
 
-    /* Parse-warning banner (TODO-040) — non-fatal YAML issues (unlike the
+    /* "widgetKey.field" for a parseWarnings entry; either part may be empty. */
+    function diagnosticLocation(d) {
+        if (d.widgetKey && d.field)
+            return d.widgetKey + "." + d.field
+        return d.widgetKey || d.field || ""
+    }
+
+    function diagnosticCount(severity) {
+        var n = 0
+        for (var i = 0; i < controller.parseWarnings.length; i++)
+            if (controller.parseWarnings[i].severity === severity)
+                n++
+        return n
+    }
+
+    /* Parse-diagnostic banner (TODO-040) — non-fatal YAML issues (unlike the
      * parse-error overlay above, which blocks the whole screen) shown in
      * BOTH bootstrap (real device) and design mode: `parseWarnings`
      * previously reached no QML listener anywhere in the app — the client
@@ -96,13 +113,18 @@ Page {
      * log, never on the embedded touchscreen actually running it. Reads
      * controller.parseWarnings directly (not just a live Connections), so
      * this banner is also correct for a screen instantiated AFTER the
-     * parse already happened — see DeviceController.h's parseWarnings doc. */
+     * parse already happened — see DeviceController.h's parseWarnings doc.
+     *
+     * One line only; tapping it opens warningDetails with every entry,
+     * whatever its severity or source. In design mode a failed parse's
+     * entries show here too, above the error overlay. */
     Rectangle {
         id: warningBanner
         objectName: "warningBanner"
         anchors { top: parent.top; left: parent.left; right: parent.right }
         visible: controller.parseWarnings.length > 0 && !warningBanner.dismissed
         property bool dismissed: false
+        readonly property int errorCount: root.diagnosticCount("error")
         /* Re-arm on every parse (not just when visible flips true) — dismissed
          * stayed true across a subsequent parse that also produced warnings,
          * since visible never toggled to trigger a reset. parseWarningsChanged
@@ -110,11 +132,20 @@ Page {
          * also harmlessly resets dismissed when there's nothing to show. */
         Connections {
             target: controller
-            function onParseWarningsChanged() { warningBanner.dismissed = false }
+            function onParseWarningsChanged() {
+                warningBanner.dismissed = false
+                if (controller.parseWarnings.length === 0)
+                    warningDetails.close()
+            }
         }
         height: visible ? bannerContent.implicitHeight + 16 : 0
-        color: "#3a2a00"
+        color: errorCount > 0 ? "#3d0f0f" : "#3a2a00"
         z: 2
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: warningDetails.open()
+        }
 
         RowLayout {
             id: bannerContent
@@ -123,14 +154,32 @@ Page {
             spacing: 8
 
             Label {
+                objectName: "warningBannerText"
                 Layout.fillWidth: true
-                text: controller.parseWarnings.length === 1
-                      ? "⚠ 1 YAML issue: " + controller.parseWarnings[0].message
-                      : "⚠ " + controller.parseWarnings.length + " YAML issues — see log for details"
-                color: "#f5a623"
+                text: {
+                    var n = controller.parseWarnings.length
+                    if (n === 1) {
+                        var d = controller.parseWarnings[0]
+                        var loc = root.diagnosticLocation(d)
+                        return "⚠ " + (loc ? loc + ": " : "") + d.message
+                    }
+                    return "⚠ " + n + " YAML issues"
+                           + (warningBanner.errorCount > 0
+                              ? " (" + warningBanner.errorCount + " "
+                                + (warningBanner.errorCount === 1 ? "error" : "errors") + ")"
+                              : "")
+                }
+                color: warningBanner.errorCount > 0 ? "#ff6b6b" : "#f5a623"
                 font.pixelSize: 12
                 elide: Text.ElideRight
                 wrapMode: Text.NoWrap
+            }
+            ToolButton {
+                objectName: "warningDetailsButton"
+                text: "Details"
+                font.pixelSize: 12
+                implicitHeight: 28
+                onClicked: warningDetails.open()
             }
             ToolButton {
                 text: "✕"
@@ -138,6 +187,95 @@ Page {
                 implicitWidth: 28
                 implicitHeight: 28
                 onClicked: warningBanner.dismissed = true
+            }
+        }
+    }
+
+    /* Every entry of controller.parseWarnings, with severity and location —
+     * the only place a device's YAML issues are readable in full when no
+     * console is attached. Lists whatever the controller reports, so new
+     * diagnostics need no change here. */
+    readonly property alias warningDetails: warningDetails
+    Popup {
+        id: warningDetails
+        objectName: "warningDetails"
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: parent ? Math.min(parent.width - 32, 520) : 0
+        height: parent ? Math.min(detailsLayout.implicitHeight + topPadding + bottomPadding,
+                                  parent.height - 64) : 0
+        modal: true
+        focus: true
+        padding: 16
+        background: Rectangle {
+            color: controller.activeStyle.surface
+            border.color: controller.activeStyle.border
+            radius: 8
+        }
+
+        ColumnLayout {
+            id: detailsLayout
+            anchors.fill: parent
+            spacing: 12
+
+            Label {
+                Layout.fillWidth: true
+                text: controller.parseWarnings.length === 1
+                      ? "1 YAML issue" : controller.parseWarnings.length + " YAML issues"
+                font.pixelSize: 16
+                font.bold: true
+                color: controller.activeStyle.text_heading
+            }
+
+            ListView {
+                id: detailsList
+                objectName: "warningDetailsList"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.preferredHeight: contentHeight
+                clip: true
+                spacing: 10
+                model: controller.parseWarnings
+                boundsBehavior: Flickable.StopAtBounds
+
+                delegate: ColumnLayout {
+                    required property var modelData
+                    width: ListView.view.width
+                    spacing: 2
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: modelData.severity === "error" ? "ERROR" : "WARNING"
+                            font.pixelSize: 11
+                            font.bold: true
+                            color: modelData.severity === "error" ? "#ff6b6b" : "#f5a623"
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.diagnosticLocation(modelData)
+                            font.family: "monospace"
+                            font.pixelSize: 12
+                            color: controller.activeStyle.text_muted
+                            elide: Text.ElideMiddle
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: modelData.message
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 13
+                        color: controller.activeStyle.text
+                    }
+                }
+            }
+
+            Button {
+                Layout.alignment: Qt.AlignRight
+                text: "Close"
+                flat: true
+                onClicked: warningDetails.close()
             }
         }
     }
