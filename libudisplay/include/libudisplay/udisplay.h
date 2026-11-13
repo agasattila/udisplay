@@ -14,7 +14,9 @@
  * full-featured WiFi UI on one device) means allocating two `udisplay_t`
  * instances and passing the correct one to every call.
  *
- * Usage pattern (ESP-IDF / FreeRTOS, BLE transport):
+ * Usage pattern (ESP-IDF / FreeRTOS, BLE transport, firmware-provided BLE
+ * code). On NimBLE, libudisplay/udisplay_nimble.h replaces everything below
+ * except udisplay_init() and the send_float-style calls:
  *
  *   // Provide send callback. The library calls this once per BLE ATT fragment
  *   // (BLE transport) or once per length-prefixed TCP write (TCP transport).
@@ -243,7 +245,8 @@ typedef struct {
  * connection). Silently discarding a fragment corrupts the peer's
  * reassembly. On BLE the data characteristic uses INDICATE, which allows one
  * unconfirmed indication at a time: queue the fragments and send the next one
- * when the previous is confirmed (see demos/demo05).
+ * when the previous is confirmed. On NimBLE, the optional built-in backend
+ * (libudisplay/udisplay_nimble.h) does all of this.
  */
 typedef void (*udisplay_send_fn)(const uint8_t* data, uint16_t len, void* userdata);
 
@@ -314,7 +317,8 @@ typedef struct {
      * @return  1 = accepted (device sends HANDSHAKE flags=0 with merkle_root)
      *          0 = rejected (device re-issues HANDSHAKE flags=1 with a fresh salt)
      *         -1 = disconnect (library clears connection state; transport close
-     *              is the firmware's responsibility via its own transport API)
+     *              is the firmware's responsibility via its own transport API,
+     *              except with the NimBLE backend, which closes the link itself)
      *
      * The credential and salt pointers are valid only during this callback.
      * MUST NOT call udisplay_on_disconnect() from within this callback.
@@ -569,6 +573,11 @@ int udisplay_ble_set_mtu(udisplay_t* ctx, uint16_t mtu_payload);
  * Feed a complete (already-unframed) message directly.
  * Use this for TRANSPORT_NONE (unit tests, MockTransport pattern) or when
  * the firmware handles framing itself before calling this function.
+ *
+ * Messages are dropped unless a session is open (after udisplay_on_connect()
+ * and, on BLE, after the HELLO echo). While an auth challenge is outstanding
+ * only HANDSHAKE_ACK and HEARTBEAT are accepted, so on_client_ready and
+ * on_event can't be reached without authenticating.
  */
 void udisplay_on_message(udisplay_t* ctx, const uint8_t* msg, uint16_t len);
 

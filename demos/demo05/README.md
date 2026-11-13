@@ -1,7 +1,18 @@
 # demo05 — Minimal ESP32 BLE demo
 
 Button press toggles an LED. State is pushed to a connected uDisplay client
-over BLE using NimBLE GATT indications (confirmed delivery; the firmware queues fragments and sends one at a time).
+over BLE using NimBLE GATT indications (confirmed delivery; fragments are queued and sent one at a time).
+
+BLE is handled by libudisplay's built-in NimBLE transport
+([`udisplay_nimble.h`](../../libudisplay/include/libudisplay/udisplay_nimble.h)),
+enabled by `CONFIG_UDISPLAY_ENABLE_NIMBLE=y` in `sdkconfig.defaults`. `main.cpp`
+initializes NVS, configures the backend (device name, disconnect callback) and
+holds the LED and UI logic; it contains no GATT, GAP or advertising code.
+
+> **Existing `sdkconfig`?** `sdkconfig.defaults` only applies when `sdkconfig` is
+> created. If yours predates the backend, the build stops with
+> "enable CONFIG_UDISPLAY_ENABLE_NIMBLE": delete `sdkconfig` (or enable
+> uDisplay → "NimBLE BLE transport backend" in `idf.py menuconfig`).
 
 ## Supported targets
 
@@ -26,8 +37,8 @@ public pinout docs.
 | `esp32c6` | ESP32-C6-DevKitC-1 (UNVERIFIED) | 8 | WS2812 | n/a |
 | `esp32h2` | ESP32-H2-DevKitM-1 (UNVERIFIED) | 8 | WS2812 | n/a |
 
-The firmware code uses only NimBLE and FreeRTOS APIs, so it is portable across
-all targets. If your board isn't hardware-verified above, or you know your LED
+The firmware code uses only libudisplay's NimBLE backend and ESP-IDF APIs, so it is
+portable across all targets. If your board isn't hardware-verified above, or you know your LED
 is wired differently than these Kconfig defaults, override
 `DEMO05_LED_GPIO`/`DEMO05_LED_IS_WS2812`/`DEMO05_LED_ACTIVE_LOW`/
 `DEMO05_LED_WS2812_COLOR` directly in menuconfig.
@@ -107,8 +118,8 @@ demo05/
     Kconfig.projbuild   — board choice + LED GPIO/type/polarity config
     idf_component.yml   — managed dependency on espressif/led_strip (WS2812 boards)
     demo05.yaml         — widget layout (push_btn + status_led)
-    main.cpp            — NimBLE GATT server + uDisplay callbacks
-  sdkconfig             — current target + board config (esp32c3 / Super Mini)
+    main.cpp            — LED control + uDisplay callbacks + backend setup
+  sdkconfig.defaults    — NimBLE + CONFIG_UDISPLAY_ENABLE_NIMBLE, no WiFi
 ```
 
 ## Manual smoke test
@@ -124,9 +135,9 @@ uDisplay client (Qt app):
    is a regression check: a prior bug called the raw active-low GPIO write
    directly and left the LED lit from power-on until first button press —
    `led_init()`/`led_set(false)` must leave it off on every board/polarity.)
-2. **Advertise + connect** — flash and monitor; confirm `advertising as
-   "Demo05"` in the log, then connect from the client. Confirm `connected`
-   and `client subscribed — sending HELLO, HANDSHAKE follows its echo`
+2. **Advertise + connect** — flash and monitor; confirm `udisplay: advertising
+   as "Demo05"` in the log (NimBLE tag), then connect from the client. Confirm
+   `udisplay: connected` and `udisplay: client subscribed, sending HELLO`
    appear, and that the client proceeds to bootstrap (the HANDSHAKE is sent
    only after the client echoes the HELLO readiness probe).
    Disconnect and reconnect several times: every reconnect must bootstrap
@@ -139,14 +150,16 @@ uDisplay client (Qt app):
    sync across repeated presses.
 5. **Heartbeat / comms-error disconnect** — background the client (or block
    its network) for >15s. Confirm the firmware logs
-   `comms_error: heartbeat timeout` and terminates the BLE connection, AND
+   `comms_error: heartbeat timeout` and the backend terminates the BLE
+   connection (`udisplay: comms error ..., disconnecting`), AND
    confirm the physical LED turns **off** at the moment of disconnect (not
    just the client widget) — this is a regression check for a prior bug
    where disconnect reset `g_led` in software but never drove the physical
    pin/strip, leaving the LED lit if it was on when the link dropped.
 6. **Reconnect resets state** — reconnect the client. Confirm the LED
    widget shows **OFF** again regardless of the toggle state before
-   disconnect (firmware resets `g_led = 0` on `BLE_GAP_EVENT_DISCONNECT`).
+   disconnect (firmware resets `g_led = 0` in its backend `on_disconnect`
+   callback).
 
 Build must also succeed for every supported target before merging any
 `main.cpp`/`Kconfig.projbuild`/codegen change. CI does not cross-build the

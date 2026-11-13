@@ -791,18 +791,6 @@ emitted) surfaced while adversarially reviewing one new instance of it.
 
 ---
 
-### TODO-041: Extract `demos/shared/demo_ble.c/h` BLE GATT helper
-**What:** Extract the NimBLE GATT server boilerplate from `demo05/main/main.cpp` into a shared `demos/shared/demo_ble.c/h` helper, mirroring `demo_tcp.c/h`. The helper owns: service table registration, GAP event handling (connect/disconnect), advertising setup, send callback wiring. Each demo's main file would contain only uDisplay API calls and application logic.
-**Why:** When TODO-012 (multimeter ESP32 demo) is implemented, it will need identical NimBLE GATT boilerplate. Without extraction, two copies of ~200-line setup code will diverge and debugging requires diffing both.
-**Pros:** DRY — each BLE demo's main.cpp is ~50 lines of application logic, not ~250 lines of BLE plumbing. Mirrors the `demo_tcp.c/h` abstraction pattern already established.
-**Cons:** Extraction adds a header design step (what does `demo_ble_hooks_t` look like?). Rule of three: don't extract until the second BLE demo starts.
-**Context:** Identified during /plan-eng-review of demo05. demo05 is the first BLE demo; `demo_tcp.c/h` was extracted after the TCP demos established the pattern. Extract when TODO-012 development begins, not before.
-**Effort:** S (human: ~3 hours / CC: ~10 min)
-**Depends on:** demo05 (working BLE demo as extraction source); TODO-012 start (trigger condition).
-**Priority:** P3 — deferred until second BLE demo starts
-
----
-
 ### TODO-042: Cross-device BLE subscribe-timing verification (Android OEM / iOS)
 **What:** Verify `BLE_GAP_EVENT_SUBSCRIBE` fires reliably and promptly across real Android OEM BLE stacks and iOS CoreBluetooth, once more than one physical device is available for testing.
 **Why:** demo05's HANDSHAKE-drop fix (this session) moved `udisplay_on_connect()` from `BLE_GAP_EVENT_CONNECT` to `BLE_GAP_EVENT_SUBSCRIBE`, assuming standard NimBLE/CCCD semantics on the central side. The original office-hours design doc's Known Risks section already flags "Qt Bluetooth Android fragmentation: BLE behavior varies across Android versions and OEM stacks" — OEM stacks are the documented risk category most likely to deviate from the assumption this fix relies on.
@@ -920,6 +908,19 @@ turning a config-portability task into also completing a half-finished feature.
 **Depends on:** Nothing. Can be done any time.
 
 ## Completed
+
+### TODO-041: Extract `demos/shared/demo_ble.c/h` BLE GATT helper
+**What:** Extract the NimBLE GATT server boilerplate from `demo05/main/main.cpp` into a shared `demos/shared/demo_ble.c/h` helper, mirroring `demo_tcp.c/h`. The helper owns: service table registration, GAP event handling (connect/disconnect), advertising setup, send callback wiring. Each demo's main file would contain only uDisplay API calls and application logic.
+**Why:** When TODO-012 (multimeter ESP32 demo) is implemented, it will need identical NimBLE GATT boilerplate. Without extraction, two copies of ~200-line setup code will diverge and debugging requires diffing both.
+**Pros:** DRY — each BLE demo's main.cpp is ~50 lines of application logic, not ~250 lines of BLE plumbing. Mirrors the `demo_tcp.c/h` abstraction pattern already established.
+**Cons:** Extraction adds a header design step (what does `demo_ble_hooks_t` look like?). Rule of three: don't extract until the second BLE demo starts.
+**Context:** Identified during /plan-eng-review of demo05. demo05 is the first BLE demo; `demo_tcp.c/h` was extracted after the TCP demos established the pattern. Extract when TODO-012 development begins, not before.
+**Effort:** S (human: ~3 hours / CC: ~10 min)
+**Depends on:** demo05 (working BLE demo as extraction source); TODO-012 start (trigger condition).
+**Priority:** P3 — deferred until second BLE demo starts
+**Status:** ✅ DONE (superseded) — issue #50: the GATT server moved into libudisplay itself as the optional NimBLE transport backend (`libudisplay/udisplay_nimble.h`, `CONFIG_UDISPLAY_ENABLE_NIMBLE`), not a demo helper. demo05 uses it; demo07/TODO-012 get it for free.
+
+---
 
 ### TODO-038: Pre-existing `test_handshake` merkle_root vector mismatch
 **What:** `udisplay-gen/tests/test_vectors.py::TestMessageVectors::test_handshake` fails —
