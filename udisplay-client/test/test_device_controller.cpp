@@ -6,6 +6,8 @@
  * transport layer (which is integration-tested in test_bootstrap.cpp).
  */
 #include <QtTest>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <zlib.h>
 #include "DeviceController.h"
 #include "DeviceInfo.h"
@@ -1066,6 +1068,47 @@ private slots:
         dc.sendButtonRelease(0x12);
         dc.sendButtonClick(0x12);
         QCOMPARE(m->data(m->index(0, 0), WidgetModel::ValueRole).toInt(), 0x11);
+    }
+    /* Issue #59: a busy single-client server (demo01) accepts the TCP
+     * connection and closes it immediately. The controller must report an
+     * error without tearing the socket down from inside QTcpSocket's own
+     * signal emission — that produced "QCoreApplication::postEvent:
+     * Unexpected null receiver" on desktop and a crash on Android. */
+    void connectTcp_serverClosesImmediately_failsCleanly()
+    {
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+        connect(&server, &QTcpServer::newConnection, &server, [&server]() {
+            while (QTcpSocket* s = server.nextPendingConnection()) {
+                s->close();
+                s->deleteLater();
+            }
+        });
+
+        static QStringList s_warnings;
+        s_warnings.clear();
+        static QtMessageHandler s_prev = nullptr;
+        s_prev = qInstallMessageHandler(
+            [](QtMsgType type, const QMessageLogContext& ctx, const QString& msg) {
+                if (type != QtDebugMsg && type != QtInfoMsg)
+                    s_warnings << msg;
+                if (s_prev) s_prev(type, ctx, msg);
+            });
+
+        DeviceController dc;
+        dc.connectTcp(QStringLiteral("127.0.0.1"), server.serverPort());
+        QTRY_COMPARE_WITH_TIMEOUT(dc.state(), QStringLiteral("error"), 5000);
+        /* Let deferred deletes and any queued socket work drain. */
+        for (int i = 0; i < 20; ++i) {
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            QTest::qWait(10);
+        }
+        qInstallMessageHandler(s_prev);
+
+        QVERIFY2(s_warnings.filter(QStringLiteral("null receiver")).isEmpty(),
+                 qPrintable(s_warnings.join(QLatin1Char('\n'))));
+        QCOMPARE(dc.state(), QStringLiteral("error"));
+        QVERIFY(!dc.errorString().isEmpty());
     }
 };
 
