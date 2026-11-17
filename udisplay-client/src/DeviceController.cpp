@@ -7,6 +7,7 @@
 #include "WidgetDump.h"
 #include <QDebug>
 #include <functional>
+#include <utility>
 #ifdef HAVE_BLE
 #include "BleTransport.h"
 #include <QBluetoothDeviceInfo>
@@ -265,14 +266,25 @@ void DeviceController::disconnectDevice()
 void DeviceController::teardown()
 {
     m_watchdog.stop();
-    if (m_bootstrap) {
-        m_bootstrap->deleteLater();
-        m_bootstrap = nullptr;
+    /* Detach the members before calling into the old connection, and cut
+     * its signals off from this controller. disconnectFromDevice() can emit
+     * Transport::disconnected synchronously (TcpTransport does when the
+     * socket is closed from inside its own errorOccurred, e.g. a busy server
+     * that accepts and immediately closes — issue #59), which
+     * BootstrapManager turns into failed("Disconnected") → onBootstrapFailed
+     * → teardown() again. That nested call used to null m_transport, and the
+     * outer call then ran nullptr->deleteLater(): "postEvent: Unexpected null
+     * receiver" on desktop, a crash on Android. */
+    BootstrapManager* bootstrap = std::exchange(m_bootstrap, nullptr);
+    Transport* transport = std::exchange(m_transport, nullptr);
+    if (bootstrap) {
+        disconnect(bootstrap, nullptr, this, nullptr);
+        bootstrap->deleteLater();
     }
-    if (m_transport) {
-        m_transport->disconnectFromDevice();
-        m_transport->deleteLater();
-        m_transport = nullptr;
+    if (transport) {
+        disconnect(transport, nullptr, this, nullptr);
+        transport->disconnectFromDevice();
+        transport->deleteLater();
     }
 }
 
