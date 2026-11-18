@@ -54,8 +54,9 @@
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/widgetOrContainer" },
       "propertyNames": {
-        "description": "Names must be lowercase snake_case identifiers.",
-        "pattern": "^[a-z][a-z0-9_]*$"
+        "description": "Names must be lowercase snake_case identifiers, and not a word YAML 1.1 reads as a boolean or null (yes, no, on, off, true, false, null), quoted or not (issue #70).",
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "not": { "enum": ["yes", "no", "on", "off", "true", "false", "null"] }
       },
       "minProperties": 1
     },
@@ -221,7 +222,8 @@
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/buttonFaceChild" },
       "propertyNames": {
-        "pattern": "^[a-z][a-z0-9_]*$"
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "not": { "enum": ["yes", "no", "on", "off", "true", "false", "null"] }
       },
       "minProperties": 1
     },
@@ -315,7 +317,8 @@
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/buttonGroupItem" },
           "propertyNames": {
-            "pattern": "^[a-z][a-z0-9_]*$"
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "not": { "enum": ["yes", "no", "on", "off", "true", "false", "null"] }
           },
           "minProperties": 2
         },
@@ -468,7 +471,8 @@
             "maxLength": 32
           },
           "propertyNames": {
-            "pattern": "^[a-z][a-z0-9_]*$"
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "not": { "enum": ["yes", "no", "on", "off", "true", "false", "null"] }
           },
           "minProperties": 2
         },
@@ -586,7 +590,8 @@
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/buttonWidget" },
       "propertyNames": {
-        "pattern": "^[a-z][a-z0-9_]*$"
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "not": { "enum": ["yes", "no", "on", "off", "true", "false", "null"] }
       },
       "minProperties": 1
     },
@@ -640,8 +645,9 @@
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/styleTokenSet" },
       "propertyNames": {
-        "description": "Theme names must be lowercase snake_case identifiers.",
-        "pattern": "^[a-z][a-z0-9_]*$"
+        "description": "Theme names must be lowercase snake_case identifiers, and not a word YAML 1.1 reads as a boolean or null (yes, no, on, off, true, false, null), quoted or not (issue #70).",
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "not": { "enum": ["yes", "no", "on", "off", "true", "false", "null"] }
       }
     }
 

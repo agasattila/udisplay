@@ -86,10 +86,11 @@ def mapping_key_error(yaml_text: str) -> str | None:
 
     - a YAML 1.1 implicit non-string (`yes`, `off`, `0x10`, `1.5`,
       `2026-01-01`; PyYAML converts these, yaml-cpp keeps the text), so a
-      widget `yes:` would be WIDGET_ID_TRUE. Quoting the key or `!!str`
-      makes it a string.
-    - a null key (empty, `~`, `null`)
-    - a `<<` merge key (PyYAML merges, yaml-cpp 0.8 doesn't)
+      widget `yes:` would be WIDGET_ID_TRUE. Quoting it, single-quoting it
+      or tagging it `!!str` doesn't help (issue #70): a key must be a string
+      however it is written, so no key ever needs quoting.
+    - a null key (empty, `~`, `null`, quoted or not)
+    - a `<<` merge key (PyYAML merges, yaml-cpp 0.8 doesn't), quoted or not
     - an alias, mapping or sequence used as a key, or a key with any
       explicit tag other than `!!str`
     - the same key twice in one mapping (PyYAML keeps the last, yaml-cpp
@@ -110,17 +111,18 @@ def mapping_key_error(yaml_text: str) -> str | None:
         if event.tag not in (None, "!", _STR_TAG):
             return error(mark, f"mapping key '{value}' has an explicit non-string tag; "
                                f"keys must be strings")
-        if event.tag is None and event.style is None:
-            tag = _resolver.resolve(yaml.ScalarNode, value, (True, False))
-            if tag == "tag:yaml.org,2002:null":
-                return error(mark, "mapping key is null (empty, ~ or null); "
-                                   "keys must be strings")
-            if tag == "tag:yaml.org,2002:merge":
-                return error(mark, "YAML merge keys (<<) are not supported; "
-                                   "write the keys out")
-            if tag != _STR_TAG:
-                return error(mark, f"mapping key '{value}' reads as {_KEY_KINDS[tag]} "
-                                   f"in YAML 1.1, not a string; quote it: \"{value}\"")
+        # How the key would read written plain, whatever its quoting or tag.
+        tag = _resolver.resolve(yaml.ScalarNode, value, (True, False))
+        if tag == "tag:yaml.org,2002:null":
+            return error(mark, "mapping key is null (empty, ~ or null); "
+                               "keys must be strings")
+        if tag == "tag:yaml.org,2002:merge":
+            return error(mark, "YAML merge keys (<<) are not supported; "
+                               "write the keys out")
+        if tag != _STR_TAG:
+            return error(mark, f"mapping key '{value}' reads as {_KEY_KINDS[tag]} "
+                               f"in YAML 1.1, not a string; rename it "
+                               f"(quoting is not enough)")
         if value in keys:
             return error(mark, f"duplicate mapping key '{value}'")
         keys.add(value)
