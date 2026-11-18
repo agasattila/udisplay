@@ -673,6 +673,8 @@
       "=": "line 1, column 1: mapping key '=' reads as a value key in YAML 1.1, not a string; rename it (quoting is not enough)",
       "lamp": null,
       "\"lamp\"": null,
+      "\"0x10\\n\"": null,
+      "\"~\\n\"": null,
       "!!str lamp": null,
       "y": null,
       "n": null,

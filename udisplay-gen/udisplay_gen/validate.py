@@ -112,7 +112,12 @@ def mapping_key_error(yaml_text: str) -> str | None:
             return error(mark, f"mapping key '{value}' has an explicit non-string tag; "
                                f"keys must be strings")
         # How the key would read written plain, whatever its quoting or tag.
-        tag = _resolver.resolve(yaml.ScalarNode, value, (True, False))
+        # A trailing newline (only a quoted key can have one) never reads
+        # as anything else: PyYAML's resolver regexes end in `$`, which
+        # also matches before a final "\n", but the client's anchored
+        # QRegularExpressions don't.
+        tag = (_STR_TAG if value.endswith("\n")
+               else _resolver.resolve(yaml.ScalarNode, value, (True, False)))
         if tag == "tag:yaml.org,2002:null":
             return error(mark, "mapping key is null (empty, ~ or null); "
                                "keys must be strings")
