@@ -4,8 +4,9 @@ PyYAML converts YAML 1.1 implicit keys (`yes:`, `0x10:`), applies `<<`
 merge keys and keeps the last of two duplicate keys; yaml-cpp, in
 udisplay-client, does none of that. validate rejects all of them (and
 alias, collection and non-!!str tagged keys) so both tools derive the same
-widget paths. The cross-tool cases live in tests/protocol_vectors.json
-(mapping_key_fixtures, test_vectors.py)."""
+widget paths. Quoting such a key, or tagging it `!!str`, doesn't make it
+valid (issue #70): no key may need quoting. The cross-tool cases live in
+tests/protocol_vectors.json (mapping_key_fixtures, test_vectors.py)."""
 import time
 
 import pytest
@@ -30,10 +31,23 @@ def test_plain_key_fixtures(vectors):
 def test_implicit_key_message():
     assert mapping_key_error("0x10: x\n") == (
         "line 1, column 1: mapping key '0x10' reads as an integer in YAML 1.1, "
-        "not a string; quote it: \"0x10\"")
+        "not a string; rename it (quoting is not enough)")
 
 
-@pytest.mark.parametrize("key", ["~", "null", "Null", "NULL"])
+@pytest.mark.parametrize("key", ['"0x10"', "'0x10'", "!!str 0x10", "! 0x10"])
+def test_quoted_or_str_tagged_implicit_key_rejected(key):
+    """Issue #70: the key is checked as if it were written plain."""
+    assert mapping_key_error(f"{key}: x\n") == (
+        "line 1, column 1: mapping key '0x10' reads as an integer in YAML 1.1, "
+        "not a string; rename it (quoting is not enough)")
+
+
+@pytest.mark.parametrize("key", ['"lamp"', "'lamp'", "!!str lamp"])
+def test_quoted_string_key_accepted(key):
+    assert mapping_key_error(f"{key}: x\n") is None
+
+
+@pytest.mark.parametrize("key", ["~", "null", "Null", "NULL", '""', '"~"', "'null'"])
 def test_null_keys_rejected(key):
     assert "mapping key is null" in mapping_key_error(f"{key}: x\n")
 
@@ -92,3 +106,22 @@ def test_cli_rejects_collection_key_cleanly(tmp_path):
     result = CliRunner().invoke(cli, ["validate", str(src)])
     assert result.exit_code == 1
     assert "could not parse YAML" in result.output
+
+
+@pytest.mark.parametrize("name", ["yes", "no", "on", "off", "true", "false", "null"])
+def test_schema_rejects_reserved_word_names(name):
+    """The schema says the same as mapping_key_error() for a document that
+    reaches it already loaded (no YAML text, so no key scan): a widget,
+    item or theme can't be named after a YAML 1.1 boolean or null."""
+    from udisplay_gen.validate import validate
+    doc = {"device": {"name": "x"},
+           "style": {name: {"text": "#ffffff"}},
+           "widgets": {name: {"type": "led"},
+                       "sel": {"type": "dropdown", "items": {"auto": "A", name: "B"}},
+                       "grp": {"type": "button-group",
+                               "items": {"auto": {"label": "A"}, name: {"label": "B"}}}}}
+    errors = validate(doc)
+    assert any(e.startswith(f"  widgets: '{name}' should not be valid") for e in errors), errors
+    assert any(e.startswith(f"  style: '{name}' should not be valid") for e in errors), errors
+    assert "  widgets.sel: invalid `dropdown` widget definition" in errors, errors
+    assert "  widgets.grp: invalid `button-group` widget definition" in errors, errors

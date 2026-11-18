@@ -336,6 +336,30 @@ class TestCppBackend:
         with pytest.raises(ValueError, match="C\\+\\+ keyword"):
             cpp_backend.generate(_ctx(text))
 
+    def test_cpp_keyword_button_group_item_rejected(self):
+        """A button-group item is a member of the group's class as well as
+        an `Item` enumerator, so a keyword name is rejected like any other
+        widget name (issue #73 checked this; only dropdown items, which
+        are enumerators alone, are escaped)."""
+        text = EVERY_WIDGET_YAML.replace("      dc:\n", "      default:\n")
+        with pytest.raises(ValueError, match="'default' is a C\\+\\+ keyword"):
+            cpp_backend.generate(_ctx(text))
+
+    def test_cpp_keyword_dropdown_item_escaped(self):
+        """Issue #73: `default` is the enumerator `Option::default_`."""
+        text = EVERY_WIDGET_YAML.replace("          sta: Station\n", "          default: Station\n")
+        header = cpp_backend.generate(_ctx(text))[0].content
+        assert "default_ = 0u," in header
+        assert re.search(r"\bdefault = ", header) is None
+
+    def test_cpp_dropdown_items_colliding_after_escaping_rejected(self):
+        text = EVERY_WIDGET_YAML.replace(
+            "          sta: Station\n", "          default: Station\n          default_: Fallback\n")
+        with pytest.raises(ValueError, match=(
+                "items 'default' and 'default_' both generate the C\\+\\+ "
+                "enumerator Option::default_; rename one")):
+            cpp_backend.generate(_ctx(text))
+
     @pytest.mark.parametrize("name", ["set_property", "id", "on_click"])
     def test_face_child_shadowing_widget_api_rejected(self, name):
         text = EVERY_WIDGET_YAML.replace("          status:\n", f"          {name}:\n")

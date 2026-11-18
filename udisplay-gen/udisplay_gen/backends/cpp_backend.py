@@ -61,6 +61,16 @@ union unsigned using virtual void volatile wchar_t while xor xor_eq
 """.split())
 
 
+def _cpp_option_enumerator(item_key: str) -> str:
+    """The `Option` enumerator for a dropdown item (issue #73): the key
+    itself, or the key with a trailing underscore when it is a C++ keyword
+    (`default` -> `Option::default_`). Item keys are only ever enumerators,
+    so escaping them, unlike widget names (members of the generated API,
+    rejected instead), costs nothing; the C and MicroPython constants keep
+    the plain key."""
+    return f"{item_key}_" if item_key in _CPP_KEYWORDS else item_key
+
+
 def _cpp_child_reserved_names(type_str: str) -> frozenset:
     """Names a child member of a widget of this type must not take: the
     generated class derives from Widget (and ButtonWidget for a button)."""
@@ -74,8 +84,10 @@ def _cpp_child_reserved_names(type_str: str) -> frozenset:
 def _validate_cpp_identifiers(ctx: BuildContext) -> None:
     """Reject widget names that would produce a non-compiling (or silently
     shadowing) C++ header: C++ keywords, names colliding with UDisplay's or
-    the parent class's own members, and paths that normalize to the same
-    generated class name (`a_b` and `a.b` are both `ABWidget`). Every widget
+    the parent class's own members, paths that normalize to the same
+    generated class name (`a_b` and `a.b` are both `ABWidget`), and two
+    dropdown items whose enumerators collide once keywords are escaped
+    (_cpp_option_enumerator()). Every widget
     is a member (issue #43) of its naming scope's class: UDisplay for the
     top-level scope, a namespace widget's generated class otherwise
     (scope_members()). Raises ValueError listing every violation."""
@@ -98,6 +110,19 @@ def _validate_cpp_identifiers(ctx: BuildContext) -> None:
         reserved = _cpp_child_reserved_names(node.type)
         for child in scope_members(node.children):
             check(child.key, reserved, f"widget '{child.path}'")
+
+    # Two dropdown items escaping to one enumerator (`default`, `default_`).
+    for path, items in collect_dropdown_items(ctx.widgets_yaml or {}).items():
+        seen: dict = {}
+        for key, _ in items:
+            enumerator = _cpp_option_enumerator(key)
+            if enumerator in seen:
+                errors.append(
+                    f"dropdown '{path}': items '{seen[enumerator]}' and '{key}' "
+                    f"both generate the C++ enumerator Option::{enumerator}; rename one"
+                )
+            else:
+                seen[enumerator] = key
 
     errors += widget_name_errors(ctx.widget_ids, ctx.widgets_yaml)
 
@@ -251,7 +276,11 @@ def _cpp_generated_classes(
             option = _cpp_enum_type("Option", variant)
             lines += _cpp_class_with_handlers(
                 cn, "OutputWidget<uint8_t>", [f"on_change({option} selection)"], variant,
-                _cpp_enum("Option", [(key, f"{idx}u") for idx, (key, _) in enumerate(items)], variant)
+                _cpp_enum(
+                    "Option",
+                    [(_cpp_option_enumerator(key), f"{idx}u") for idx, (key, _) in enumerate(items)],
+                    variant,
+                )
                 + [f"    void set({option} v) {{ OutputWidget<uint8_t>::set(static_cast<uint8_t>(v)); }}"],
             ) + [""]
             return

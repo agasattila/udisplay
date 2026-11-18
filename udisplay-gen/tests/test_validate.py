@@ -1075,8 +1075,8 @@ def test_compound_widget_children_are_always_namespaced():
                 "up": {"type": "button", "position": "top"}}},
             "nav_b": {"type": "dpad", "widgets": {
                 "up": {"type": "button", "position": "top"}}},
-            "g1": {"type": "button-group", "items": {"off": {"label": "Off"}}},
-            "g2": {"type": "button-group", "items": {"off": {"label": "Off"}}},
+            "g1": {"type": "button-group", "items": {"idle": {"label": "Idle"}}},
+            "g2": {"type": "button-group", "items": {"idle": {"label": "Idle"}}},
             "b1": {"type": "button", "widgets": {"icon": {"type": "led"}}},
             "b2": {"type": "button", "widgets": {"icon": {"type": "led"}}},
         },
