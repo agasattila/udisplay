@@ -88,13 +88,6 @@ Page {
         }
     }
 
-    /* "widgetKey.field" for a parseWarnings entry; either part may be empty. */
-    function diagnosticLocation(d) {
-        if (d.widgetKey && d.field)
-            return d.widgetKey + "." + d.field
-        return d.widgetKey || d.field || ""
-    }
-
     function diagnosticCount(severity) {
         var n = 0
         for (var i = 0; i < controller.parseWarnings.length; i++)
@@ -160,7 +153,7 @@ Page {
                     var n = controller.parseWarnings.length
                     if (n === 1) {
                         var d = controller.parseWarnings[0]
-                        var loc = root.diagnosticLocation(d)
+                        var loc = warningDetails.diagnosticLocation(d)
                         return "⚠ " + (loc ? loc + ": " : "") + d.message
                     }
                     return "⚠ " + n + " YAML issues"
@@ -191,93 +184,16 @@ Page {
         }
     }
 
-    /* Every entry of controller.parseWarnings, with severity and location —
-     * the only place a device's YAML issues are readable in full when no
-     * console is attached. Lists whatever the controller reports, so new
-     * diagnostics need no change here. */
+    /* Every entry of controller.parseWarnings — see YamlDiagnosticsPopup. */
     readonly property alias warningDetails: warningDetails
-    Popup {
+    YamlDiagnosticsPopup {
         id: warningDetails
-        objectName: "warningDetails"
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        width: parent ? Math.min(parent.width - 32, 520) : 0
-        height: parent ? Math.min(detailsLayout.implicitHeight + topPadding + bottomPadding,
-                                  parent.height - 64) : 0
-        modal: true
-        focus: true
-        padding: 16
-        background: Rectangle {
-            color: controller.activeStyle.surface
-            border.color: controller.activeStyle.border
-            radius: 8
-        }
-
-        ColumnLayout {
-            id: detailsLayout
-            anchors.fill: parent
-            spacing: 12
-
-            Label {
-                Layout.fillWidth: true
-                text: controller.parseWarnings.length === 1
-                      ? "1 YAML issue" : controller.parseWarnings.length + " YAML issues"
-                font.pixelSize: 16
-                font.bold: true
-                color: controller.activeStyle.text_heading
-            }
-
-            ListView {
-                id: detailsList
-                objectName: "warningDetailsList"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.preferredHeight: contentHeight
-                clip: true
-                spacing: 10
-                model: controller.parseWarnings
-                boundsBehavior: Flickable.StopAtBounds
-
-                delegate: ColumnLayout {
-                    required property var modelData
-                    width: ListView.view.width
-                    spacing: 2
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        Label {
-                            text: modelData.severity === "error" ? "ERROR" : "WARNING"
-                            font.pixelSize: 11
-                            font.bold: true
-                            color: modelData.severity === "error" ? "#ff6b6b" : "#f5a623"
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: root.diagnosticLocation(modelData)
-                            font.family: "monospace"
-                            font.pixelSize: 12
-                            color: controller.activeStyle.text_muted
-                            elide: Text.ElideMiddle
-                        }
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        text: modelData.message
-                        wrapMode: Text.Wrap
-                        font.pixelSize: 13
-                        color: controller.activeStyle.text
-                    }
-                }
-            }
-
-            Button {
-                Layout.alignment: Qt.AlignRight
-                text: "Close"
-                flat: true
-                onClicked: warningDetails.close()
-            }
-        }
+        diagnostics: controller.parseWarnings
+        surfaceColor: controller.activeStyle.surface
+        borderColor:  controller.activeStyle.border
+        headingColor: controller.activeStyle.text_heading
+        textColor:    controller.activeStyle.text
+        mutedColor:   controller.activeStyle.text_muted
     }
 
     ScrollView {

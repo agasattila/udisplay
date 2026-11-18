@@ -118,6 +118,17 @@ void DeviceController::storeBlob(const QByteArray& root,
                  qPrintable(q.lastError().text()));
 }
 
+void DeviceController::removeBlob(const QByteArray& root)
+{
+    if (!m_db.isOpen()) return;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("DELETE FROM blobs WHERE root = ?"));
+    q.addBindValue(root);
+    if (!q.exec())
+        qWarning("DeviceController: removeBlob failed: %s",
+                 qPrintable(q.lastError().text()));
+}
+
 /* ── Blob decompression (zlib) ──────────────────────────────────────────── */
 
 QByteArray DeviceController::decompressBlob(const QByteArray& compressed)
@@ -163,6 +174,14 @@ QByteArray DeviceController::decompressBlob(const QByteArray& compressed)
 
 void DeviceController::startConnection(Transport* t)
 {
+    /* The diagnostics belong to the previous device's YAML. Drop them now,
+     * so a failure of this attempt for another reason (refused, timeout)
+     * doesn't offer that list from DiscoveryScreen's error banner. */
+    if (!m_parseWarnings.isEmpty()) {
+        m_parseWarnings.clear();
+        emit parseWarningsChanged({});
+    }
+
     m_bootstrap = new BootstrapManager(t, this);
 
     m_bootstrap->setBlobLookup([this](const QByteArray& root) {
@@ -534,12 +553,20 @@ void DeviceController::onBootstrapSucceeded(QByteArray merkleRoot,
     /* Every failure below ends in setError() + teardown() (TODO-046): the
      * transport is up but there is nothing to show, and the heartbeat
      * watchdog only starts on success, so a connection left open here would
-     * stay open forever. The blob is not cached, so reconnecting fetches it
-     * again rather than reusing a bad copy. */
+     * stay open forever.
+     *
+     * A blob this client can't decompress or parse is also evicted from the
+     * cache. A freshly downloaded one was never stored, but one stored by an
+     * older client version that accepted YAML this parser now rejects still
+     * passes Merkle verification and would be reused on every reconnect;
+     * evicting it makes the next attempt download it again. A capability
+     * rejection keeps its entry: the blob is fine, the app is too old, and
+     * the cached copy is valid for the updated app. */
     QByteArray yaml = decompressBlob(compressedBlob);
     if (yaml.isEmpty()) {
         setError(QStringLiteral("Failed to decompress YAML blob"));
         printDebugFailure(QStringLiteral("failed to decompress YAML blob"));
+        removeBlob(merkleRoot);
         teardown();
         return;
     }
@@ -561,6 +588,7 @@ void DeviceController::onBootstrapSucceeded(QByteArray merkleRoot,
     switch (applyParsedYaml(yaml, /*designMode=*/false, capabilityGate)) {
     case ApplyResult::ParseFailed:
         setError(QStringLiteral("YAML parse failed: %1").arg(m_yamlParser.errorString()));
+        removeBlob(merkleRoot);
         teardown();
         return;
     case ApplyResult::Rejected:

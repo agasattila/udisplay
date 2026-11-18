@@ -8,6 +8,8 @@
 #include <QtTest>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <zlib.h>
 #include "DeviceController.h"
 #include "DeviceInfo.h"
@@ -64,6 +66,50 @@ static void injectBootstrapRawBlob(DeviceController& dc, const QByteArray& rawBl
                               Qt::DirectConnection,
                               Q_ARG(QByteArray, QByteArray(32, '\0')),
                               Q_ARG(QByteArray, rawBlob));
+}
+
+/* Like injectBootstrap/injectBootstrapRawBlob, with an explicit Merkle root
+ * so the blob cache entry it touches is known. */
+static void injectBootstrapWithRoot(DeviceController& dc, const QByteArray& root,
+                                    const QByteArray& blob)
+{
+    QMetaObject::invokeMethod(&dc, "onBootstrapSucceeded",
+                              Qt::DirectConnection,
+                              Q_ARG(QByteArray, root),
+                              Q_ARG(QByteArray, blob));
+}
+
+/* Direct access to DeviceController's SQLite blob cache (the named
+ * connection it opens in its constructor). A distinctive root per test keeps
+ * these from touching entries other tests or real runs rely on. */
+static QSqlDatabase cacheDb()
+{
+    return QSqlDatabase::database(QStringLiteral("udisplay_cache"));
+}
+
+static void cachePut(const QByteArray& root, const QByteArray& blob)
+{
+    QSqlQuery q(cacheDb());
+    q.prepare(QStringLiteral("INSERT OR REPLACE INTO blobs (root, compressed) VALUES (?, ?)"));
+    q.addBindValue(root);
+    q.addBindValue(blob);
+    q.exec();
+}
+
+static bool cacheHas(const QByteArray& root)
+{
+    QSqlQuery q(cacheDb());
+    q.prepare(QStringLiteral("SELECT 1 FROM blobs WHERE root = ?"));
+    q.addBindValue(root);
+    return q.exec() && q.next();
+}
+
+static void cacheDrop(const QByteArray& root)
+{
+    QSqlQuery q(cacheDb());
+    q.prepare(QStringLiteral("DELETE FROM blobs WHERE root = ?"));
+    q.addBindValue(root);
+    q.exec();
 }
 
 /* Connect dc to a QTcpServer on localhost and return the server's end of
@@ -1211,6 +1257,113 @@ private slots:
         dc.connectTcp(QStringLiteral("127.0.0.1"), server.serverPort());
         QVERIFY(server.waitForNewConnection(5000));
         QTRY_COMPARE(dc.state(), QStringLiteral("bootstrapping"));
+    }
+
+    /* ── Cache eviction of unusable blobs (PR #67 review) ─────────────── */
+
+    /* A blob cached by an older client that accepted YAML this parser
+     * rejects still passes Merkle verification, so it would be reused on
+     * every reconnect. A parse failure must evict it. */
+    void bootstrap_parseFailure_evictsCachedBlob()
+    {
+        DeviceController dc;
+        QVERIFY(cacheDb().isOpen());
+        const QByteArray root(32, '\xA1');
+        const QByteArray blob = zlibCompress("widgets:\n  a:\n    type: no_such_widget_type\n");
+        cachePut(root, blob);
+        QVERIFY(cacheHas(root));
+
+        injectBootstrapWithRoot(dc, root, blob);
+
+        QCOMPARE(dc.state(), QStringLiteral("error"));
+        QVERIFY(!cacheHas(root));
+    }
+
+    void bootstrap_decompressFailure_evictsCachedBlob()
+    {
+        DeviceController dc;
+        QVERIFY(cacheDb().isOpen());
+        const QByteArray root(32, '\xA2');
+        const QByteArray blob("not valid zlib data at all");
+        cachePut(root, blob);
+
+        injectBootstrapWithRoot(dc, root, blob);
+
+        QCOMPARE(dc.errorString(), QStringLiteral("Failed to decompress YAML blob"));
+        QVERIFY(!cacheHas(root));
+    }
+
+    /* A capability rejection is the app being too old, not the blob being
+     * bad: the cached copy stays valid for the updated app. */
+    void bootstrap_capabilityRejection_keepsCachedBlob()
+    {
+        DeviceController dc;
+        QVERIFY(cacheDb().isOpen());
+        const QByteArray root(32, '\xA3');
+        const QByteArray blob = zlibCompress(
+            "device:\n  capabilities:\n    - some_unknown_cap\n"
+            "widgets:\n  a:\n    type: toggle\n");
+        cachePut(root, blob);
+
+        injectBootstrapWithRoot(dc, root, blob);
+
+        QCOMPARE(dc.state(), QStringLiteral("error"));
+        QVERIFY(cacheHas(root));
+        cacheDrop(root);
+    }
+
+    /* ── Diagnostics of a rejected bootstrap (PR #67 review) ──────────── */
+
+    /* The teardown of a rejected YAML must keep its diagnostics readable:
+     * the app goes back to DiscoveryScreen, which offers them from its
+     * error banner. */
+    void bootstrap_parseFailure_keepsDiagnosticsAfterTeardown()
+    {
+        QTcpServer server;
+        DeviceController dc;
+        QVERIFY(connectToLocalServer(dc, server));
+
+        injectBootstrap(dc,
+            "widgets:\n"
+            "  a:\n"
+            "    type: no_such_widget_type\n");
+
+        QTRY_VERIFY(dc.findChildren<Transport*>().isEmpty());
+        QCOMPARE(dc.state(), QStringLiteral("error"));
+        QVERIFY(!dc.parseWarnings().isEmpty());
+        QCOMPARE(dc.parseWarnings().last().toMap().value("severity").toString(),
+                 QStringLiteral("error"));
+    }
+
+    /* ...but not past the next connection attempt: if that one fails for
+     * another reason, the old device's list must not be offered with it. */
+    void connect_clearsPreviousDiagnostics()
+    {
+        DeviceController dc;
+        injectBootstrap(dc,
+            "widgets:\n"
+            "  a:\n"
+            "    type: no_such_widget_type\n");
+        QVERIFY(!dc.parseWarnings().isEmpty());
+
+        QSignalSpy spy(&dc, &DeviceController::parseWarningsChanged);
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        dc.connectTcp(QStringLiteral("127.0.0.1"), server.serverPort());
+
+        QVERIFY(dc.parseWarnings().isEmpty());
+        QCOMPARE(spy.count(), 1);
+    }
+
+    /* Nothing to clear → no spurious signal. */
+    void connect_withoutDiagnostics_noParseWarningsChanged()
+    {
+        DeviceController dc;
+        QSignalSpy spy(&dc, &DeviceController::parseWarningsChanged);
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        dc.connectTcp(QStringLiteral("127.0.0.1"), server.serverPort());
+        QCOMPARE(spy.count(), 0);
     }
 };
 

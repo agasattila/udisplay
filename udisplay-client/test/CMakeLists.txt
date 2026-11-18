@@ -79,6 +79,20 @@ if(QML_EXECUTABLE)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         TIMEOUT 10)
 
+    add_test(NAME test_qml_device_screen_warning_details_layout
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_device_screen_warning_details_layout.qml")
+    set_tests_properties(test_qml_device_screen_warning_details_layout PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10)
+
+    add_test(NAME test_qml_discovery_error_diagnostics
+             COMMAND ${QML_EXECUTABLE} -platform offscreen
+                     "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_discovery_error_diagnostics.qml")
+    set_tests_properties(test_qml_discovery_error_diagnostics PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 10)
+
     add_test(NAME test_qml_button_face_children
              COMMAND ${QML_EXECUTABLE} -platform offscreen
                      "${CMAKE_CURRENT_SOURCE_DIR}/qml/test_button_face_children.qml")
