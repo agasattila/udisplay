@@ -1124,6 +1124,13 @@ API's `#define` index constants. As with `button-group`, the enumerators are
 (only possible from a misbehaving client) is ignored, like an event for an unknown
 widget ID: `on_change` is not called.
 
+An item named after a C++ keyword gets a trailing underscore in C++ only: an item
+`default` is `Option::default_` (likewise `auto_`, `delete_`, `new_`, ...), while
+the C and MicroPython constants keep the plain name (`THEME_SEL_DEFAULT` in C). Two items
+that end up with the same enumerator (`default` next to `default_`) are a build
+error. Widget names, button-group items included, can't be C++ keywords at all:
+they are also members of the generated classes.
+
 Default build (`--lang cpp`):
 
 ```cpp
