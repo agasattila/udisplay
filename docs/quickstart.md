@@ -80,6 +80,11 @@ error instead of a silent misrender):
 udisplay-gen validate device.yaml
 ```
 
+To try the file over the real protocol before writing firmware, run
+`udisplay-gen serve device.yaml` and connect the client to this machine on TCP
+port 5555. It logs every event the client sends. See the
+[udisplay-gen README](../udisplay-gen/README.md#testing-a-yaml-file-with-the-client).
+
 Then build. `udisplay-gen build` supports four output modes, selected by `--lang` and
 `--modern`:
 

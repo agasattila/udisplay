@@ -44,6 +44,9 @@ udisplay-gen build device.yaml --lang cpp --modern -o ./generated
 
 # Generate MicroPython code
 udisplay-gen build device.yaml --lang micropython -o ./generated
+
+# Serve a YAML definition to udisplay-client over TCP, no device needed
+udisplay-gen serve device.yaml
 ```
 
 `python -m udisplay_gen` runs the same CLI without installing it, from a
@@ -78,6 +81,29 @@ The namespace prefixes the widget-ID macros, the blob data arrays and the
 bind/init helper. For example, `WIDGET_ID_*` becomes `BLE_WIDGET_ID_*` and
 `udisplay_ui_init` becomes `udisplay_ble_ui_init`. The MicroPython backend does
 not support `--namespace` yet.
+
+### Testing a YAML file with the client
+
+`serve` runs a minimal uDisplay device on your PC, so you can view a YAML file
+in `udisplay-client` without firmware. In the client, add a manual TCP device
+with this machine's address and the port (default `5555`).
+
+```bash
+udisplay-gen serve device.yaml                 # validates first, like build
+udisplay-gen serve device.yaml --port 6000 --host 127.0.0.1
+udisplay-gen serve broken.yaml --no-validate   # serve the file byte-for-byte
+```
+
+- The server answers the handshake and chunk requests and sends heartbeats.
+  It uses the MicroPython runtime's protocol code (`udisplay_runtime.py`).
+- Every message the client sends is logged raw: the type byte, its name and
+  the payload in hex. Events also show the widget ID and event type. Heartbeat
+  echoes are hidden unless you pass `-v`, which also logs outbound messages.
+- `--no-validate` skips YAML parsing, schema validation and the blob size
+  limits. Use it to test the client's own parsing and error handling.
+- It never sends `STATE_UPDATE`, so display widgets keep their YAML defaults.
+- It serves one client at a time. A new connection replaces the current one.
+  It does not advertise itself over mDNS, and it has no authentication.
 
 ## Tests
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 import math
 import pathlib
 import sys
+import time
 
 import click
 
@@ -196,3 +197,76 @@ def build(yaml_file: str, output_dir: str, lang: str, modern: bool, namespace: s
 def init(output: str) -> None:
     """Interactive wizard: create a new uDisplay YAML definition."""
     run_wizard(output)
+
+
+@cli.command()
+@click.argument("yaml_file", metavar="YAML_FILE", type=click.Path(exists=True, dir_okay=False))
+@click.option("--host", default="0.0.0.0", show_default=True, help="Address to listen on.")
+@click.option("-p", "--port", default=5555, show_default=True, type=click.IntRange(0, 65535),
+              help="TCP port to listen on.")
+@click.option(
+    "--no-validate",
+    is_flag=True,
+    default=False,
+    help="Serve the file byte-for-byte without parsing or validating it, and "
+         "without the blob size limits, so the client's own parsing and "
+         "error handling can be tested with malformed input.",
+)
+@click.option("-v", "--verbose", is_flag=True, default=False,
+              help="Also log heartbeats and outbound message types.")
+def serve(yaml_file: str, host: str, port: int, no_validate: bool, verbose: bool) -> None:
+    """
+    Serve YAML_FILE to udisplay-client over the uDisplay TCP protocol.
+
+    Acts as a minimal device: answers the handshake and chunk requests,
+    sends heartbeats, and logs every inbound message (type and raw payload).
+    It never sends STATE_UPDATE. One client at a time; a new connection
+    replaces the current one. Stop with Ctrl+C.
+    """
+    from .serve import Server
+
+    yaml_bytes = pathlib.Path(yaml_file).read_bytes()
+
+    if no_validate:
+        click.echo("Warning: --no-validate: serving the file unchecked.", err=True)
+    else:
+        try:
+            yaml_text = yaml_bytes.decode("utf-8")
+            doc = parse_yaml_text(yaml_text)
+        except Exception as exc:
+            click.echo(f"Error: could not parse YAML: {exc}", err=True)
+            click.echo("Use --no-validate to serve it anyway.", err=True)
+            sys.exit(1)
+        errors = validate(doc, load_schema(), yaml_text=yaml_text)
+        if errors:
+            click.echo(f"Error: YAML validation failed: {yaml_file}", err=True)
+            for msg in errors:
+                click.echo(msg, err=True)
+            click.echo("Use --no-validate to serve it anyway.", err=True)
+            sys.exit(1)
+
+    def log(msg: str) -> None:
+        click.echo(f"[{time.strftime('%H:%M:%S')}] {msg}")
+
+    try:
+        server = Server(yaml_bytes, host=host, port=port,
+                        enforce_limits=not no_validate, log=log, verbose=verbose)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    except OSError as exc:
+        click.echo(f"Error: cannot listen on {host}:{port}: {exc}", err=True)
+        sys.exit(1)
+
+    bound_host, bound_port = server.address
+    connect_host = "127.0.0.1" if bound_host == "0.0.0.0" else bound_host
+    click.echo(
+        f"Serving {yaml_file}: {server.blob_len:,} bytes compressed, "
+        f"{server.chunk_count} chunk(s), root {server.root.hex()[:16]}..."
+    )
+    click.echo(f"Listening on {bound_host}:{bound_port} — connect udisplay-client to "
+               f"{connect_host}:{bound_port} (manual TCP entry). Ctrl+C to stop.")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("\nStopped.")
