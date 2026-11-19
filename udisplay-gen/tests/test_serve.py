@@ -6,7 +6,6 @@ then sends events and checks they are logged raw.
 """
 import hashlib
 import os
-import pathlib
 import socket
 import struct
 import threading
@@ -147,14 +146,98 @@ def test_invalid_yaml_served_unchanged(run_server):
 
 
 def test_heartbeat_sent_and_echo_not_logged(run_server):
-    srv, log = run_server(VALID_YAML, heartbeat_s=0.05)
+    srv, log = run_server(VALID_YAML, heartbeat_s=0.3)
     c = _Client(srv.address)
     c.recv()  # HANDSHAKE
+    c.send(bytes([rt.MSG_CLIENT_READY]))
     assert c.recv(skip_heartbeats=False) == bytes([rt.MSG_HEARTBEAT])
     c.send(bytes([rt.MSG_HEARTBEAT]))
-    c.send(bytes([rt.MSG_CLIENT_READY]))
-    log.wait_for("CLIENT_READY")
+    c.send(bytes([rt.MSG_EVENT, 1, rt.UDISPLAY_EVENT_BUTTON_CLICK]))
+    log.wait_for("BUTTON_CLICK")  # sent after the echo, so the echo was processed
     assert not [l for l in log.lines if "HEARTBEAT" in l]
+    c.close()
+
+
+def test_verbose_logs_tx_and_heartbeats(run_server):
+    srv, log = run_server(VALID_YAML, verbose=True)
+    c = _Client(srv.address)
+    c.recv()
+    log.wait_for("TX HANDSHAKE")
+    c.send(bytes([rt.MSG_HEARTBEAT]))
+    log.wait_for("RX 0x40 HEARTBEAT len=0")
+    c.close()
+
+
+def test_event_before_ready_still_logged(run_server):
+    # The runtime drops EVENTs before CLIENT_READY; the log must still show them.
+    srv, log = run_server(VALID_YAML)
+    c = _Client(srv.address)
+    c.recv()
+    c.send(bytes([rt.MSG_EVENT, 5, rt.UDISPLAY_EVENT_BUTTON_CLICK]))
+    log.wait_for("widget_id=5 event=0x01 BUTTON_CLICK")
+    c.close()
+
+
+def test_inbound_burst_larger_than_runtime_buffer(run_server):
+    # The client sends every CHUNK_HEADER_REQUEST in one burst. 600 of them
+    # (3000 bytes) exceed the runtime's 2052-byte reassembly buffer in one
+    # recv(); none may be dropped.
+    big = os.urandom(150_000)
+    srv, log = run_server(big, enforce_limits=False)
+    c = _Client(srv.address)
+    hs = c.recv()
+    count = struct.unpack("<H", hs[35:37])[0]
+    assert count > 410
+    c.sock.sendall(b"".join(
+        rt.tcp_frame(bytes([rt.MSG_CHUNK_HEADER_REQUEST]) + struct.pack("<H", i))
+        for i in range(count)))
+    for _ in range(count):
+        assert c.recv()[0] == rt.MSG_CHUNK_HEADER_RESPONSE
+    assert not [l for l in log.lines if "overflow" in l]
+    c.close()
+
+
+def test_client_that_stops_reading_is_dropped(run_server):
+    # Requests whose responses are never read fill the socket buffers; the
+    # send timeout must drop that client, and the server must keep serving.
+    big = os.urandom(150_000)
+    srv, log = run_server(big, enforce_limits=False, send_timeout_s=0.3)
+    stuck = socket.create_connection(srv.address, timeout=3)
+    stuck.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    req = b"".join(rt.tcp_frame(bytes([rt.MSG_CHUNK_REQUEST]) + struct.pack("<H", i % 500))
+                   for i in range(400))
+    deadline = time.monotonic() + 10
+    while not [l for l in log.lines if "send failed" in l]:
+        assert time.monotonic() < deadline, log.lines
+        try:
+            stuck.sendall(req)
+        except OSError:
+            break
+        time.sleep(0.05)
+    log.wait_for("client disconnected")
+    c = _Client(srv.address)
+    assert c.recv()[0] == rt.MSG_HANDSHAKE
+    c.close()
+    stuck.close()
+
+
+def test_stall_does_not_burst_heartbeats(run_server, monkeypatch):
+    # After the loop stalls for several intervals, one heartbeat goes out,
+    # not a catch-up burst that trips the 3-miss watchdog.
+    import udisplay_gen.serve as serve_mod
+    real = time.monotonic
+    offset = [0.0]
+    monkeypatch.setattr(serve_mod.time, "monotonic", lambda: real() + offset[0])
+    srv, log = run_server(VALID_YAML, heartbeat_s=0.2)
+    c = _Client(srv.address)
+    c.recv()
+    c.send(bytes([rt.MSG_CLIENT_READY]))
+    log.wait_for("client ready")
+    offset[0] = 10.0  # jump 50 intervals ahead
+    assert c.recv(skip_heartbeats=False) == bytes([rt.MSG_HEARTBEAT])
+    c.send(bytes([rt.MSG_HEARTBEAT]))
+    time.sleep(0.1)
+    assert not [l for l in log.lines if "watchdog" in l]
     c.close()
 
 
@@ -208,6 +291,28 @@ def test_cli_rejects_schema_invalid_yaml(tmp_path):
     r = CliRunner().invoke(cli, ["serve", str(f), "--port", "0"])
     assert r.exit_code == 1
     assert "validation failed" in r.output
+
+
+def test_cli_no_validate_serves_unchecked(tmp_path, monkeypatch):
+    import udisplay_gen.serve as serve_mod
+    seen = {}
+
+    class FakeServer:
+        def __init__(self, yaml_bytes, **kw):
+            seen.update(kw, yaml=yaml_bytes)
+            self.address = ("0.0.0.0", 5555)
+            self.blob_len, self.chunk_count, self.root = 1, 1, bytes(32)
+
+        def serve_forever(self):
+            pass
+
+    monkeypatch.setattr(serve_mod, "Server", FakeServer)
+    f = tmp_path / "bad.yaml"
+    f.write_bytes(INVALID_YAML)
+    r = CliRunner().invoke(cli, ["serve", str(f), "--no-validate"])
+    assert r.exit_code == 0, r.output
+    assert seen["yaml"] == INVALID_YAML and seen["enforce_limits"] is False
+    assert "this machine's IP address" in r.output
 
 
 def test_cli_port_in_use(tmp_path):

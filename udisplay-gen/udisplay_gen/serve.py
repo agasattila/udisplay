@@ -17,49 +17,38 @@ crash doesn't have to wait for the watchdog to drop its old socket.
 from __future__ import annotations
 
 import math
+import os
 import select
 import socket
 import threading
 import time
 from typing import Callable, Optional
 
-from .backends._shared import MAX_CHUNK_COUNT
-from .merkle import CHUNK_SIZE, MAX_BLOB_SIZE, chunk_hashes, compress, root
+from .backends._shared import validate_blob_size
+from .merkle import CHUNK_SIZE, chunk_hashes, compress, compute, root
 from .runtime import udisplay_runtime as rt
 
+DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 5555
 HEARTBEAT_S = 5.0
+# A client that stops reading must not wedge the single-threaded loop:
+# a send that can't complete in this time drops the client.
+SEND_TIMEOUT_S = 5.0
+# Feed inbound bytes to the runtime in slices no larger than one framed
+# message. TcpRx holds 2 * (MAX_MSG_SIZE + 2) bytes and at most
+# MAX_MSG_SIZE + 1 of them are a pending partial frame, so a slice this
+# size always fits; a bigger one can overflow it, and the runtime then
+# throws the whole buffer away.
+_FEED_SLICE = rt.UDISPLAY_MAX_MSG_SIZE + 2
 
 # Largest blob the HANDSHAKE can describe at all (chunk_count is a u16).
 # Anything up to this is served even if it breaks MAX_BLOB_SIZE or
 # MAX_CHUNK_COUNT, so the client's own limit checks can be exercised.
 _WIRE_MAX_CHUNKS = 0xFFFF
 
-_MSG_NAMES = {
-    rt.MSG_HANDSHAKE: "HANDSHAKE",
-    rt.MSG_HANDSHAKE_ACK: "HANDSHAKE_ACK",
-    rt.MSG_CLIENT_READY: "CLIENT_READY",
-    rt.MSG_CHUNK_HEADER_REQUEST: "CHUNK_HEADER_REQUEST",
-    rt.MSG_CHUNK_HEADER_RESPONSE: "CHUNK_HEADER_RESPONSE",
-    rt.MSG_CHUNK_REQUEST: "CHUNK_REQUEST",
-    rt.MSG_CHUNK_RESPONSE: "CHUNK_RESPONSE",
-    rt.MSG_ERR_INVALID_CHUNK: "ERR_INVALID_CHUNK",
-    rt.MSG_HEARTBEAT: "HEARTBEAT",
-    rt.MSG_STATE_UPDATE: "STATE_UPDATE",
-    rt.MSG_EVENT: "EVENT",
-    rt.MSG_SET_PROPERTY: "SET_PROPERTY",
-    rt.MSG_RESET_PROPERTY: "RESET_PROPERTY",
-}
-
-_EVENT_NAMES = {
-    rt.UDISPLAY_EVENT_BUTTON_CLICK: "BUTTON_CLICK",
-    rt.UDISPLAY_EVENT_SLIDER_CHANGE: "SLIDER_CHANGE",
-    rt.UDISPLAY_EVENT_TOGGLE_CHANGE: "TOGGLE_CHANGE",
-    rt.UDISPLAY_EVENT_TEXT_SUBMIT: "TEXT_SUBMIT",
-    rt.UDISPLAY_EVENT_SELECTION_CHANGE: "SELECTION_CHANGE",
-    rt.UDISPLAY_EVENT_BUTTON_PRESS: "BUTTON_PRESS",
-    rt.UDISPLAY_EVENT_BUTTON_RELEASE: "BUTTON_RELEASE",
-}
+_MSG_NAMES = {v: k[len("MSG_"):] for k, v in vars(rt).items() if k.startswith("MSG_")}
+_EVENT_NAMES = {v: k[len("UDISPLAY_EVENT_"):] for k, v in vars(rt).items()
+                if k.startswith("UDISPLAY_EVENT_")}
 
 
 def build_blob(yaml_bytes: bytes, *, enforce_limits: bool = True):
@@ -69,23 +58,18 @@ def build_blob(yaml_bytes: bytes, *, enforce_limits: bool = True):
     enforce_limits=True applies the same limits as `build` (64 KB blob,
     MAX_CHUNK_COUNT chunks). False only refuses what the HANDSHAKE cannot
     express, so oversized blobs reach the client unchanged."""
-    blob = compress(yaml_bytes)
-    n = math.ceil(len(blob) / CHUNK_SIZE)
     if enforce_limits:
-        if len(blob) > MAX_BLOB_SIZE:
-            raise ValueError(
-                f"Compressed blob is {len(blob):,} bytes — exceeds the 64 KB limit "
-                f"({MAX_BLOB_SIZE:,} bytes)."
-            )
-        if n > MAX_CHUNK_COUNT:
-            raise ValueError(
-                f"Blob requires {n} chunks but protocol maximum is {MAX_CHUNK_COUNT}."
-            )
-    elif n > _WIRE_MAX_CHUNKS:
-        raise ValueError(f"Blob requires {n} chunks; the HANDSHAKE can describe at most {_WIRE_MAX_CHUNKS}.")
-    hashes = chunk_hashes(blob)
-    chunks = [blob[i * CHUNK_SIZE:(i + 1) * CHUNK_SIZE] for i in range(n)]
-    return root(hashes), chunks, hashes, [len(c) for c in chunks], len(blob)
+        blob, blob_root, hashes = compute(yaml_bytes)
+        validate_blob_size(blob)
+    else:
+        blob = compress(yaml_bytes)
+        if math.ceil(len(blob) / CHUNK_SIZE) > _WIRE_MAX_CHUNKS:
+            raise ValueError(f"Blob needs more than {_WIRE_MAX_CHUNKS} chunks, "
+                             "which the HANDSHAKE cannot describe.")
+        hashes = chunk_hashes(blob)
+        blob_root = root(hashes)
+    chunks = [blob[i:i + CHUNK_SIZE] for i in range(0, len(blob), CHUNK_SIZE)]
+    return blob_root, chunks, hashes, [len(c) for c in chunks], len(blob)
 
 
 def describe_message(msg: bytes) -> str:
@@ -119,6 +103,16 @@ class LoggingDevice(rt.UDisplayDevice):
         self._log = log
         self._log_heartbeats = log_heartbeats
 
+    def feed(self, data):
+        for i in range(0, len(data), _FEED_SLICE):
+            if self.rx.feed(data[i:i + _FEED_SLICE], self._on_message):
+                # Unreachable with _FEED_SLICE-sized input unless the peer
+                # sends a frame length > MAX_MSG_SIZE: the stream is desynced.
+                self._log("RX overflow: frame length over the protocol maximum "
+                          "— reassembly buffer reset, stream may be desynced")
+                self.rx.reset()
+
+    # Overrides the runtime's per-frame dispatch hook to log before parsing.
     def _on_message(self, msg):
         if self._log_heartbeats or msg != bytes([rt.MSG_HEARTBEAT]):
             self._log("RX " + describe_message(msg))
@@ -128,9 +122,10 @@ class LoggingDevice(rt.UDisplayDevice):
 class Server:
     """Listening socket + single-client loop around a LoggingDevice."""
 
-    def __init__(self, yaml_bytes: bytes, *, host: str = "0.0.0.0", port: int = DEFAULT_PORT,
+    def __init__(self, yaml_bytes: bytes, *, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
                  enforce_limits: bool = True, log: Callable[[str], None] = print,
-                 verbose: bool = False, heartbeat_s: float = HEARTBEAT_S):
+                 verbose: bool = False, heartbeat_s: float = HEARTBEAT_S,
+                 send_timeout_s: float = SEND_TIMEOUT_S):
         self.root, chunks, hashes, lens, self.blob_len = build_blob(
             yaml_bytes, enforce_limits=enforce_limits)
         self.chunk_count = len(chunks)
@@ -138,15 +133,26 @@ class Server:
         self._log = log
         self._verbose = verbose
         self._heartbeat_s = heartbeat_s
+        self._send_timeout_s = send_timeout_s
         self._stop = threading.Event()
         self._conn: Optional[socket.socket] = None
         self._device: Optional[LoggingDevice] = None
         self._drop = False
 
         self._listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._listener.bind((host, port))
-        self._listener.listen(1)
+        if os.name == "nt":
+            # SO_REUSEADDR on Windows lets a second server bind the same port
+            # silently; exclusive use gives the expected "address in use".
+            self._listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            self._listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self._listener.bind((host, port))
+            self._listener.listen(1)
+        except OSError:
+            self._listener.close()
+            raise
+        self._listener.setblocking(False)
 
     @property
     def address(self):
@@ -158,12 +164,14 @@ class Server:
     # ── connection handling ──────────────────────────────────────────────
 
     def _send(self, data: bytes) -> None:
+        if self._drop:
+            return
         if self._verbose and len(data) > 2:
             self._log("TX " + _MSG_NAMES.get(data[2], f"0x{data[2]:02X}"))
         try:
             rt.tcp_send_all(self._conn, data)
-        except OSError as exc:
-            self._log(f"send failed: {exc}")
+        except OSError as exc:  # includes socket.timeout
+            self._log(f"send failed ({exc or 'timed out'}) — dropping client")
             self._drop = True
 
     def _on_comms_error(self) -> None:
@@ -171,11 +179,24 @@ class Server:
         self._drop = True
 
     def _accept(self) -> None:
-        conn, addr = self._listener.accept()
+        try:
+            conn, addr = self._listener.accept()
+        except BlockingIOError:  # spurious readiness: nothing to accept
+            return
+        except OSError as exc:  # peer reset before accept, EMFILE, ...
+            self._log(f"accept failed: {exc}")
+            return
+        try:
+            conn.setblocking(True)
+            conn.settimeout(self._send_timeout_s)
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError as exc:
+            self._log(f"accept failed: {exc}")
+            conn.close()
+            return
         if self._conn is not None:
             self._log("new connection replaces the current client")
             self._close()
-        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._conn = conn
         self._drop = False
         self._log(f"client connected: {addr[0]}:{addr[1]}")
@@ -219,8 +240,12 @@ class Server:
                 if self._listener in readable:
                     self._accept()
 
-                if time.monotonic() >= next_hb:
-                    next_hb += self._heartbeat_s
+                now = time.monotonic()
+                if now >= next_hb:
+                    # Re-arm from now, not from the missed deadline: after a
+                    # stall, catch-up heartbeats fired back to back would
+                    # trip the watchdog before the client could echo.
+                    next_hb = now + self._heartbeat_s
                     if self._device is not None:
                         self._device.heartbeat()
                         if self._drop:

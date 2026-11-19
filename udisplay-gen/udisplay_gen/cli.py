@@ -19,6 +19,7 @@ from .backends import c_backend, cpp_backend, python_backend
 from .merkle import compute, CHUNK_SIZE
 from .widget_ids import assign, collect_types
 from .init_wizard import run_wizard
+from .serve import DEFAULT_HOST, DEFAULT_PORT
 
 _BACKENDS = {"c": c_backend, "cpp": cpp_backend, "micropython": python_backend}
 
@@ -201,8 +202,10 @@ def init(output: str) -> None:
 
 @cli.command()
 @click.argument("yaml_file", metavar="YAML_FILE", type=click.Path(exists=True, dir_okay=False))
-@click.option("--host", default="0.0.0.0", show_default=True, help="Address to listen on.")
-@click.option("-p", "--port", default=5555, show_default=True, type=click.IntRange(0, 65535),
+@click.option("--host", default=DEFAULT_HOST, show_default=True,
+              help="Address to listen on. The default accepts clients from the "
+                   "network (e.g. a phone); use 127.0.0.1 for this PC only.")
+@click.option("-p", "--port", default=DEFAULT_PORT, show_default=True, type=click.IntRange(0, 65535),
               help="TCP port to listen on.")
 @click.option(
     "--no-validate",
@@ -259,13 +262,17 @@ def serve(yaml_file: str, host: str, port: int, no_validate: bool, verbose: bool
         sys.exit(1)
 
     bound_host, bound_port = server.address
-    connect_host = "127.0.0.1" if bound_host == "0.0.0.0" else bound_host
+    if bound_host == "0.0.0.0":
+        connect_hint = (f"this machine's IP address, port {bound_port} "
+                        f"(127.0.0.1:{bound_port} from this PC)")
+    else:
+        connect_hint = f"{bound_host}:{bound_port}"
     click.echo(
         f"Serving {yaml_file}: {server.blob_len:,} bytes compressed, "
         f"{server.chunk_count} chunk(s), root {server.root.hex()[:16]}..."
     )
-    click.echo(f"Listening on {bound_host}:{bound_port} — connect udisplay-client to "
-               f"{connect_host}:{bound_port} (manual TCP entry). Ctrl+C to stop.")
+    click.echo(f"Listening on {bound_host}:{bound_port}. In udisplay-client, add a manual "
+               f"TCP device: {connect_hint}. Ctrl+C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
