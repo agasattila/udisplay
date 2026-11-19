@@ -208,6 +208,7 @@ qt_add_qml_module(udisplay-client
         qml/main.qml
         qml/DiscoveryScreen.qml
         qml/DeviceScreen.qml
+        qml/YamlDiagnosticsPopup.qml
         qml/AboutScreen.qml
         qml/LicensesScreen.qml
         qml/LicenseDetailScreen.qml
