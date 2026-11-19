@@ -169,10 +169,26 @@ class Server:
         if self._verbose and len(data) > 2:
             self._log("TX " + _MSG_NAMES.get(data[2], f"0x{data[2]:02X}"))
         try:
-            rt.tcp_send_all(self._conn, data)
+            self._send_all(data)
         except OSError as exc:  # includes socket.timeout
             self._log(f"send failed ({exc or 'timed out'}) — dropping client")
             self._drop = True
+
+    def _send_all(self, data: bytes) -> None:
+        """Like rt.tcp_send_all, but with one deadline for the whole message:
+        a per-send() timeout restarts on every partial write, so a peer
+        reading just fast enough could hold the loop for much longer."""
+        deadline = time.monotonic() + self._send_timeout_s
+        view = memoryview(data)
+        while view:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise socket.timeout("timed out")
+            self._conn.settimeout(remaining)
+            n = self._conn.send(view)
+            if not n:
+                raise OSError("socket closed during send")
+            view = view[n:]
 
     def _on_comms_error(self) -> None:
         self._log("comms watchdog fired (no client progress / heartbeat echo) — dropping client")

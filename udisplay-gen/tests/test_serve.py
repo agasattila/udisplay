@@ -224,10 +224,13 @@ def test_client_that_stops_reading_is_dropped(run_server):
 def test_stall_does_not_burst_heartbeats(run_server, monkeypatch):
     # After the loop stalls for several intervals, one heartbeat goes out,
     # not a catch-up burst that trips the 3-miss watchdog.
+    import types
     import udisplay_gen.serve as serve_mod
     real = time.monotonic
     offset = [0.0]
-    monkeypatch.setattr(serve_mod.time, "monotonic", lambda: real() + offset[0])
+    # Replace serve.py's own `time` binding only, not the global module.
+    monkeypatch.setattr(serve_mod, "time", types.SimpleNamespace(
+        monotonic=lambda: real() + offset[0]))
     srv, log = run_server(VALID_YAML, heartbeat_s=0.2)
     c = _Client(srv.address)
     c.recv()
@@ -294,7 +297,6 @@ def test_cli_rejects_schema_invalid_yaml(tmp_path):
 
 
 def test_cli_no_validate_serves_unchecked(tmp_path, monkeypatch):
-    import udisplay_gen.serve as serve_mod
     seen = {}
 
     class FakeServer:
@@ -306,7 +308,8 @@ def test_cli_no_validate_serves_unchecked(tmp_path, monkeypatch):
         def serve_forever(self):
             pass
 
-    monkeypatch.setattr(serve_mod, "Server", FakeServer)
+    import udisplay_gen.cli as cli_mod
+    monkeypatch.setattr(cli_mod, "Server", FakeServer)
     f = tmp_path / "bad.yaml"
     f.write_bytes(INVALID_YAML)
     r = CliRunner().invoke(cli, ["serve", str(f), "--no-validate"])

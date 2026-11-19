@@ -102,8 +102,9 @@ udisplay-gen serve broken.yaml --no-validate   # serve the file byte-for-byte
 - `--no-validate` skips YAML parsing, schema validation and the blob size
   limits. Use it to test the client's own parsing and error handling.
 - It never sends `STATE_UPDATE`, so display widgets keep their YAML defaults.
-- It serves one client at a time. A new connection replaces the current one,
-  and a client that stops reading for 5 seconds is dropped.
+- It serves one client at a time. A new connection replaces the current one.
+  A client that stops answering heartbeats is dropped after about 15 seconds;
+  one that stops reading while the server is sending, after 5 seconds.
 - It does not advertise itself over mDNS and has no authentication. By default
   it listens on all interfaces so a phone can connect; anyone on your network
   can then read the YAML. Use `--host 127.0.0.1` when the client runs on the

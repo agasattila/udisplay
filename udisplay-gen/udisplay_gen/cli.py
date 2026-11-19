@@ -19,7 +19,7 @@ from .backends import c_backend, cpp_backend, python_backend
 from .merkle import compute, CHUNK_SIZE
 from .widget_ids import assign, collect_types
 from .init_wizard import run_wizard
-from .serve import DEFAULT_HOST, DEFAULT_PORT
+from .serve import DEFAULT_HOST, DEFAULT_PORT, Server
 
 _BACKENDS = {"c": c_backend, "cpp": cpp_backend, "micropython": python_backend}
 
@@ -226,8 +226,6 @@ def serve(yaml_file: str, host: str, port: int, no_validate: bool, verbose: bool
     It never sends STATE_UPDATE. One client at a time; a new connection
     replaces the current one. Stop with Ctrl+C.
     """
-    from .serve import Server
-
     yaml_bytes = pathlib.Path(yaml_file).read_bytes()
 
     if no_validate:

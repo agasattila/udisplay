@@ -301,6 +301,11 @@ udisplay-gen build device.yaml --lang cpp --modern -o ./generated
 # default unprefixed single-instance output.
 udisplay-gen build ble_ui.yaml --namespace ble -o ./generated
 udisplay-gen build wifi_ui.yaml --namespace wifi -o ./generated
+
+# Serve a YAML file to udisplay-client over TCP (port 5555), no device needed.
+# --no-validate serves even malformed YAML byte-for-byte, to test the client.
+udisplay-gen serve device.yaml
+udisplay-gen serve broken.yaml --no-validate
 ```
 
 `--namespace` must be a valid C identifier (letters, digits, underscore; cannot start
