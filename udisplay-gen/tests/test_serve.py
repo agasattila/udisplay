@@ -193,7 +193,30 @@ def test_inbound_burst_larger_than_runtime_buffer(run_server):
         for i in range(count)))
     for _ in range(count):
         assert c.recv()[0] == rt.MSG_CHUNK_HEADER_RESPONSE
-    assert not [l for l in log.lines if "overflow" in l]
+    assert not [l for l in log.lines if "desynced" in l]
+    c.close()
+
+
+def test_oversized_frame_length_drops_client(run_server):
+    # A declared length over MAX_MSG_SIZE can never complete and hides the
+    # next frame boundary: the server must drop the client at once, not keep
+    # reading and misparse what follows (PR #77 review).
+    srv, log = run_server(VALID_YAML)
+    c = _Client(srv.address)
+    c.recv()  # HANDSHAKE
+    c.send(bytes([rt.MSG_EVENT, 1, rt.UDISPLAY_EVENT_BUTTON_CLICK]))
+    log.wait_for("widget_id=1 event=0x01")
+    # Well under the 2052-byte RX buffer, so no overflow ever forces the
+    # issue; the trailing bytes form a valid-looking EVENT that must not be
+    # parsed.
+    c.sock.sendall(struct.pack("<H", rt.UDISPLAY_MAX_MSG_SIZE + 1)
+                   + rt.tcp_frame(bytes([rt.MSG_EVENT, 9, rt.UDISPLAY_EVENT_BUTTON_CLICK])))
+    log.wait_for(f"RX frame length {rt.UDISPLAY_MAX_MSG_SIZE + 1} over the protocol maximum")
+    log.wait_for("client disconnected")
+    with pytest.raises(ConnectionError):
+        while True:
+            c.recv()
+    assert not [l for l in log.lines if "widget_id=9" in l]
     c.close()
 
 

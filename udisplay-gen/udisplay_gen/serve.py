@@ -98,19 +98,29 @@ class LoggingDevice(rt.UDisplayDevice):
     silently) and events before CLIENT_READY (which the runtime drops) show
     up too."""
 
-    def __init__(self, *args, log: Callable[[str], None], log_heartbeats: bool = False, **kwargs):
+    def __init__(self, *args, log: Callable[[str], None], on_desync: Callable[[], None],
+                 log_heartbeats: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self._log = log
+        self._on_desync = on_desync
         self._log_heartbeats = log_heartbeats
 
     def feed(self, data):
         for i in range(0, len(data), _FEED_SLICE):
-            if self.rx.feed(data[i:i + _FEED_SLICE], self._on_message):
-                # Unreachable with _FEED_SLICE-sized input unless the peer
-                # sends a frame length > MAX_MSG_SIZE: the stream is desynced.
-                self._log("RX overflow: frame length over the protocol maximum "
-                          "— reassembly buffer reset, stream may be desynced")
-                self.rx.reset()
+            overflow = self.rx.feed(data[i:i + _FEED_SLICE], self._on_message)
+            # After a drain the buffer starts at a frame boundary. A declared
+            # length over MAX_MSG_SIZE never completes (tcp_unframe keeps
+            # returning None), and the real frame boundary can't be recovered,
+            # so give up on the stream now rather than wait for the overflow
+            # and then misread payload bytes as frame headers.
+            rx = self.rx
+            declared = rx.buf[0] | rx.buf[1] << 8 if rx.used >= 2 else 0
+            if overflow or declared > rt.UDISPLAY_MAX_MSG_SIZE:
+                self._log(f"RX frame length {declared} over the protocol maximum "
+                          f"({rt.UDISPLAY_MAX_MSG_SIZE}) — stream desynced, dropping client")
+                rx.reset()
+                self._on_desync()
+                return
 
     # Overrides the runtime's per-frame dispatch hook to log before parsing.
     def _on_message(self, msg):
@@ -194,6 +204,9 @@ class Server:
         self._log("comms watchdog fired (no client progress / heartbeat echo) — dropping client")
         self._drop = True
 
+    def _on_desync(self) -> None:
+        self._drop = True
+
     def _accept(self) -> None:
         try:
             conn, addr = self._listener.accept()
@@ -221,7 +234,7 @@ class Server:
             self.root, chunks, hashes, lens, self._send,
             on_client_ready=lambda: self._log("client ready (UI loaded)"),
             on_comms_error=self._on_comms_error,
-            log=self._log, log_heartbeats=self._verbose,
+            log=self._log, on_desync=self._on_desync, log_heartbeats=self._verbose,
         )
         self._device.on_connect()
 
