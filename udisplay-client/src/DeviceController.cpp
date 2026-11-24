@@ -177,10 +177,7 @@ void DeviceController::startConnection(Transport* t)
     /* The diagnostics belong to the previous device's YAML. Drop them now,
      * so a failure of this attempt for another reason (refused, timeout)
      * doesn't offer that list from DiscoveryScreen's error banner. */
-    if (!m_parseWarnings.isEmpty()) {
-        m_parseWarnings.clear();
-        emit parseWarningsChanged({});
-    }
+    clearParseWarnings();
 
     m_bootstrap = new BootstrapManager(t, this);
 
@@ -343,6 +340,10 @@ void DeviceController::reloadDesignFile()
 {
     QFile f(m_designFilePath);
     if (!f.open(QIODevice::ReadOnly)) {
+        /* Nothing was parsed, so the previous parse's diagnostics no longer
+         * describe the file; like a YAML syntax error, the list is empty and
+         * designErrorString says why. */
+        clearParseWarnings();
         setDesignError(QStringLiteral("Cannot open file: %1").arg(m_designFilePath));
         return;
     }
@@ -355,6 +356,14 @@ void DeviceController::reloadDesignFile()
         setDesignError(m_yamlParser.errorString());
     else
         setDesignError(QString());
+}
+
+void DeviceController::clearParseWarnings()
+{
+    if (m_parseWarnings.isEmpty())
+        return;
+    m_parseWarnings.clear();
+    emit parseWarningsChanged({});
 }
 
 void DeviceController::setDesignError(const QString& msg)

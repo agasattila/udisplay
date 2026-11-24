@@ -57,7 +57,9 @@ Page {
     }
 
     /* Diagnostics of a device YAML that was rejected — opened from the
-     * error banner's Details button. Closed when the error goes away. */
+     * error banner's Details button. Closes itself when the list empties
+     * (a new connection starts); also closed here when the error state
+     * ends, since the banner it belongs to is gone then. */
     readonly property alias errorDetails: errorDetails
     YamlDiagnosticsPopup {
         id: errorDetails
@@ -473,7 +475,13 @@ Page {
                 Rectangle {
                     objectName: "discoveryErrorBanner"
                     Layout.fillWidth: true
-                    height: errorContent.implicitHeight + 16
+                    /* implicitHeight, not height: the ColumnLayout writes
+                     * height itself, which broke a height binding, so the
+                     * banner kept the height of the first error it showed.
+                     * After a failure, reconnect and a second failure it was
+                     * one line tall over a multi-line message (PR #67
+                     * review 3). */
+                    implicitHeight: errorContent.implicitHeight + 16
                     color: "#2d1a1a"
                     radius: 6
                     border.color: "#c0392b"
@@ -487,6 +495,7 @@ Page {
 
                         Label {
                             id: errorLabel
+                            objectName: "discoveryErrorLabel"
                             Layout.fillWidth: true
                             text: controller.errorString
                             wrapMode: Text.WordWrap

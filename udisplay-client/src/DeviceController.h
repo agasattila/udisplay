@@ -229,6 +229,10 @@ private:
     void initCache();
     QByteArray cachedBlob(const QByteArray& root) const;
     void storeBlob(const QByteArray& root, const QByteArray& blob);
+    /** Empty parseWarnings, emitting parseWarningsChanged only if it held
+     *  anything — for when the previous parse no longer applies (a new
+     *  connection starts, the design file can't be read). */
+    void clearParseWarnings();
     /** Evict a cache entry — used when the cached YAML is unusable. */
     void removeBlob(const QByteArray& root);
     QByteArray decompressBlob(const QByteArray& compressed);

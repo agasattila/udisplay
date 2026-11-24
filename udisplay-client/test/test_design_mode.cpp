@@ -15,6 +15,7 @@
  */
 #include <QtTest>
 #include <QFile>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <zlib.h>
 #include "DeviceController.h"
@@ -850,6 +851,36 @@ private slots:
         triggerReload(dc);
 
         QVERIFY(!dc.designErrorString().isEmpty());
+        QVERIFY(dc.parseWarnings().isEmpty());
+        QCOMPARE(spy.count(), 1);
+    }
+
+    /* A file that can't be opened any more must not keep showing the
+     * previous parse's warnings next to "Cannot open file" (PR #67
+     * review 3, P3): the list empties, and the change is notified. */
+    void reload_unreadableFile_clearsPreviousWarnings()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("design.yaml"));
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("widgets:\n"
+                    "  led:\n"
+                    "    type: led\n"
+                    "    color: not_a_hex_color\n");
+        }
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+        QCOMPARE(dc.parseWarnings().size(), 1);
+
+        QSignalSpy spy(&dc, &DeviceController::parseWarningsChanged);
+        QVERIFY(QFile::remove(path));
+        triggerReload(dc);
+
+        QVERIFY(dc.designErrorString().contains(QStringLiteral("Cannot open file")));
         QVERIFY(dc.parseWarnings().isEmpty());
         QCOMPARE(spy.count(), 1);
     }

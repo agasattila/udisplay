@@ -118,17 +118,17 @@ Page {
         visible: controller.parseWarnings.length > 0 && !warningBanner.dismissed
         property bool dismissed: false
         readonly property int errorCount: root.diagnosticCount("error")
-        /* Re-arm on every parse (not just when visible flips true) — dismissed
-         * stayed true across a subsequent parse that also produced warnings,
-         * since visible never toggled to trigger a reset. parseWarningsChanged
-         * fires on every parse, including one that clears to empty, so this
-         * also harmlessly resets dismissed when there's nothing to show. */
+        /* Re-arm whenever the list changes (not just when visible flips
+         * true) — dismissed stayed true across a subsequent parse that also
+         * produced warnings, since visible never toggled to trigger a reset.
+         * parseWarningsChanged fires when a parse has diagnostics, and when
+         * one clears a non-empty list; a clean parse with nothing to clear
+         * emits nothing, which is fine, as there's nothing to show then.
+         * The details popup closes itself once the list is empty. */
         Connections {
             target: controller
             function onParseWarningsChanged() {
                 warningBanner.dismissed = false
-                if (controller.parseWarnings.length === 0)
-                    warningDetails.close()
             }
         }
         height: visible ? bannerContent.implicitHeight + 16 : 0

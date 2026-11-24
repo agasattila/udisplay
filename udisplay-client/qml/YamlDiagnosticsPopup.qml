@@ -18,12 +18,19 @@ import QtQuick.Layouts
  * fixed palette.
  *
  * Sized to the overlay: with many entries, or on a small display, the list
- * scrolls and the header and Close button stay on screen. */
+ * scrolls and the header and Close button stay on screen.
+ *
+ * Closes itself when the list becomes empty (a clean reparse, a new
+ * connection): there is nothing left to show, whichever screen opened it. */
 Popup {
     id: popup
     objectName: "warningDetails"
 
     property var diagnostics: []
+    onDiagnosticsChanged: {
+        if (!diagnostics || diagnostics.length === 0)
+            close()
+    }
     property color surfaceColor: "#1a1a2e"
     property color borderColor:  "#1e1e3a"
     property color headingColor: "#ffffff"
