@@ -15,6 +15,7 @@
  */
 #include <QtTest>
 #include <QFile>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <zlib.h>
 #include "DeviceController.h"
@@ -825,6 +826,92 @@ private slots:
         QVERIFY2(!captured.contains(QStringLiteral("[YamlParser WARNING]")),
                   "design mode must not log parse diagnostics via qWarning() "
                   "(TODO-034 D4)");
+    }
+    /* ── parseWarnings follows the latest parse, failed ones too (#25) ── */
+
+    /* A save that breaks the file must not keep showing the previous
+     * save's warnings: a failure the parser has no diagnostic for (a YAML
+     * syntax error) leaves the list empty, and the change is notified. */
+    void reload_syntaxError_clearsPreviousWarnings()
+    {
+        QTemporaryFile f;
+        const QString path = writeTempYaml(f,
+            "widgets:\n"
+            "  led:\n"
+            "    type: led\n"
+            "    color: not_a_hex_color\n");
+        QVERIFY(!path.isEmpty());
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+        QCOMPARE(dc.parseWarnings().size(), 1);
+
+        QSignalSpy spy(&dc, &DeviceController::parseWarningsChanged);
+        writeTempYaml(f, "this: is: not: valid: yaml: [\n");
+        triggerReload(dc);
+
+        QVERIFY(!dc.designErrorString().isEmpty());
+        QVERIFY(dc.parseWarnings().isEmpty());
+        QCOMPARE(spy.count(), 1);
+    }
+
+    /* A file that can't be opened any more must not keep showing the
+     * previous parse's warnings next to "Cannot open file" (PR #67
+     * review 3, P3): the list empties, and the change is notified. */
+    void reload_unreadableFile_clearsPreviousWarnings()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("design.yaml"));
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("widgets:\n"
+                    "  led:\n"
+                    "    type: led\n"
+                    "    color: not_a_hex_color\n");
+        }
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+        QCOMPARE(dc.parseWarnings().size(), 1);
+
+        QSignalSpy spy(&dc, &DeviceController::parseWarningsChanged);
+        QVERIFY(QFile::remove(path));
+        triggerReload(dc);
+
+        QVERIFY(dc.designErrorString().contains(QStringLiteral("Cannot open file")));
+        QVERIFY(dc.parseWarnings().isEmpty());
+        QCOMPARE(spy.count(), 1);
+    }
+
+    /* A parse stopped by an Error diagnostic lists it alongside the
+     * warnings found before it, so the UI can show everything at once. */
+    void reload_errorDiagnostic_listedWithWarnings()
+    {
+        QTemporaryFile f;
+        const QString path = writeTempYaml(f,
+            "widgets:\n"
+            "  led:\n"
+            "    type: led\n"
+            "    color: not_a_hex_color\n"
+            "  bad:\n"
+            "    type: no_such_widget_type\n");
+        QVERIFY(!path.isEmpty());
+
+        DeviceController dc;
+        dc.startDesignMode(path);
+
+        QVERIFY(!dc.designErrorString().isEmpty());
+        QStringList seen;
+        for (const QVariant& v : dc.parseWarnings()) {
+            const QVariantMap d = v.toMap();
+            seen << d.value(QStringLiteral("severity")).toString() + QLatin1Char(' ')
+                    + d.value(QStringLiteral("widgetKey")).toString() + QLatin1Char('.')
+                    + d.value(QStringLiteral("field")).toString();
+        }
+        QVERIFY2(seen.contains(QStringLiteral("warning led.color")), qPrintable(seen.join(", ")));
+        QVERIFY2(seen.contains(QStringLiteral("error bad.type")), qPrintable(seen.join(", ")));
     }
 };
 

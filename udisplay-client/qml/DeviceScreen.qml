@@ -41,9 +41,11 @@ Page {
 
     /* Design Mode error overlay — shown in-place when YAML has a parse error.
      * State stays "running" so the navigation stack is unaffected; the developer
-     * fixes the file and the overlay clears on the next successful reload. */
+     * fixes the file and the overlay clears on the next successful reload.
+     * Starts below the warning banner, which also lists the failed parse's
+     * diagnostics and would otherwise cover this overlay's title. */
     Rectangle {
-        anchors.fill: parent
+        anchors { top: warningBanner.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
         visible: controller.designErrorString !== ""
         color: controller.activeStyle.background
         z: 1
@@ -86,7 +88,15 @@ Page {
         }
     }
 
-    /* Parse-warning banner (TODO-040) — non-fatal YAML issues (unlike the
+    function diagnosticCount(severity) {
+        var n = 0
+        for (var i = 0; i < controller.parseWarnings.length; i++)
+            if (controller.parseWarnings[i].severity === severity)
+                n++
+        return n
+    }
+
+    /* Parse-diagnostic banner (TODO-040) — non-fatal YAML issues (unlike the
      * parse-error overlay above, which blocks the whole screen) shown in
      * BOTH bootstrap (real device) and design mode: `parseWarnings`
      * previously reached no QML listener anywhere in the app — the client
@@ -96,25 +106,39 @@ Page {
      * log, never on the embedded touchscreen actually running it. Reads
      * controller.parseWarnings directly (not just a live Connections), so
      * this banner is also correct for a screen instantiated AFTER the
-     * parse already happened — see DeviceController.h's parseWarnings doc. */
+     * parse already happened — see DeviceController.h's parseWarnings doc.
+     *
+     * One line only; tapping it opens warningDetails with every entry,
+     * whatever its severity or source. In design mode a failed parse's
+     * entries show here too, above the error overlay. */
     Rectangle {
         id: warningBanner
         objectName: "warningBanner"
         anchors { top: parent.top; left: parent.left; right: parent.right }
         visible: controller.parseWarnings.length > 0 && !warningBanner.dismissed
         property bool dismissed: false
-        /* Re-arm on every parse (not just when visible flips true) — dismissed
-         * stayed true across a subsequent parse that also produced warnings,
-         * since visible never toggled to trigger a reset. parseWarningsChanged
-         * fires on every parse, including one that clears to empty, so this
-         * also harmlessly resets dismissed when there's nothing to show. */
+        readonly property int errorCount: root.diagnosticCount("error")
+        /* Re-arm whenever the list changes (not just when visible flips
+         * true) — dismissed stayed true across a subsequent parse that also
+         * produced warnings, since visible never toggled to trigger a reset.
+         * parseWarningsChanged fires when a parse has diagnostics, and when
+         * one clears a non-empty list; a clean parse with nothing to clear
+         * emits nothing, which is fine, as there's nothing to show then.
+         * The details popup closes itself once the list is empty. */
         Connections {
             target: controller
-            function onParseWarningsChanged() { warningBanner.dismissed = false }
+            function onParseWarningsChanged() {
+                warningBanner.dismissed = false
+            }
         }
         height: visible ? bannerContent.implicitHeight + 16 : 0
-        color: "#3a2a00"
+        color: errorCount > 0 ? "#3d0f0f" : "#3a2a00"
         z: 2
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: warningDetails.open()
+        }
 
         RowLayout {
             id: bannerContent
@@ -123,14 +147,32 @@ Page {
             spacing: 8
 
             Label {
+                objectName: "warningBannerText"
                 Layout.fillWidth: true
-                text: controller.parseWarnings.length === 1
-                      ? "⚠ 1 YAML issue: " + controller.parseWarnings[0].message
-                      : "⚠ " + controller.parseWarnings.length + " YAML issues — see log for details"
-                color: "#f5a623"
+                text: {
+                    var n = controller.parseWarnings.length
+                    if (n === 1) {
+                        var d = controller.parseWarnings[0]
+                        var loc = warningDetails.diagnosticLocation(d)
+                        return "⚠ " + (loc ? loc + ": " : "") + d.message
+                    }
+                    return "⚠ " + n + " YAML issues"
+                           + (warningBanner.errorCount > 0
+                              ? " (" + warningBanner.errorCount + " "
+                                + (warningBanner.errorCount === 1 ? "error" : "errors") + ")"
+                              : "")
+                }
+                color: warningBanner.errorCount > 0 ? "#ff6b6b" : "#f5a623"
                 font.pixelSize: 12
                 elide: Text.ElideRight
                 wrapMode: Text.NoWrap
+            }
+            ToolButton {
+                objectName: "warningDetailsButton"
+                text: "Details"
+                font.pixelSize: 12
+                implicitHeight: 28
+                onClicked: warningDetails.open()
             }
             ToolButton {
                 text: "✕"
@@ -140,6 +182,18 @@ Page {
                 onClicked: warningBanner.dismissed = true
             }
         }
+    }
+
+    /* Every entry of controller.parseWarnings — see YamlDiagnosticsPopup. */
+    readonly property alias warningDetails: warningDetails
+    YamlDiagnosticsPopup {
+        id: warningDetails
+        diagnostics: controller.parseWarnings
+        surfaceColor: controller.activeStyle.surface
+        borderColor:  controller.activeStyle.border
+        headingColor: controller.activeStyle.text_heading
+        textColor:    controller.activeStyle.text
+        mutedColor:   controller.activeStyle.text_muted
     }
 
     ScrollView {

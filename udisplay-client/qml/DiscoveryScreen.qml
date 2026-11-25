@@ -56,6 +56,24 @@ Page {
         }
     }
 
+    /* Diagnostics of a device YAML that was rejected — opened from the
+     * error banner's Details button. Closes itself when the list empties
+     * (a new connection starts); also closed here when the error state
+     * ends, since the banner it belongs to is gone then. */
+    readonly property alias errorDetails: errorDetails
+    YamlDiagnosticsPopup {
+        id: errorDetails
+        objectName: "discoveryErrorDetails"
+        diagnostics: controller.parseWarnings
+        Connections {
+            target: controller
+            function onStateChanged() {
+                if (controller.state !== "error")
+                    errorDetails.close()
+            }
+        }
+    }
+
     /* ── Header bar ─────────────────────────────────────────────────────
      * One shared ToolBar for the whole screen (never a second, stacked
      * header): its content switches between "hamburger mode" (☰ button,
@@ -448,23 +466,51 @@ Page {
                 }
 
                 /* ── Error banner ────────────────────────────────────────── */
+                /* A device whose YAML is rejected tears the connection down
+                 * (issue #26) and lands here, never on DeviceScreen — so the
+                 * diagnostics of that failed parse are offered from this
+                 * banner (issue #25). controller.parseWarnings is cleared
+                 * when a new connection starts, so a later failure for any
+                 * other reason doesn't offer the old device's list. */
                 Rectangle {
                     objectName: "discoveryErrorBanner"
                     Layout.fillWidth: true
-                    height: errorLabel.implicitHeight + 16
+                    /* implicitHeight, not height: the ColumnLayout writes
+                     * height itself, which broke a height binding, so the
+                     * banner kept the height of the first error it showed.
+                     * After a failure, reconnect and a second failure it was
+                     * one line tall over a multi-line message (PR #67
+                     * review 3). */
+                    implicitHeight: errorContent.implicitHeight + 16
                     color: "#2d1a1a"
                     radius: 6
                     border.color: "#c0392b"
                     border.width: 1
                     visible: controller.state === "error"
 
-                    Label {
-                        id: errorLabel
+                    RowLayout {
+                        id: errorContent
                         anchors { fill: parent; margins: 8 }
-                        text: controller.errorString
-                        wrapMode: Text.WordWrap
-                        color: "#e74c3c"
-                        font.pixelSize: 13
+                        spacing: 8
+
+                        Label {
+                            id: errorLabel
+                            objectName: "discoveryErrorLabel"
+                            Layout.fillWidth: true
+                            text: controller.errorString
+                            wrapMode: Text.WordWrap
+                            color: "#e74c3c"
+                            font.pixelSize: 13
+                        }
+                        ToolButton {
+                            objectName: "discoveryErrorDetailsButton"
+                            Layout.alignment: Qt.AlignTop
+                            visible: controller.parseWarnings.length > 0
+                            text: "Details"
+                            font.pixelSize: 12
+                            implicitHeight: 28
+                            onClicked: errorDetails.open()
+                        }
                     }
                 }
 

@@ -67,12 +67,13 @@
  *          │
  *          └─ onBootstrapSucceeded(merkleRoot, compressedBlob)
  *                ├─ decompressBlob(compressedBlob)
- *                │     └─ empty → setError("Failed to decompress...") + printDebugFailure, return
+ *                │     └─ empty → setError("Failed to decompress...") + printDebugFailure,
+ *                │                removeBlob(merkleRoot), teardown(), return
  *                ├─ capabilityGate = lambda checking kKnownCapabilities,
  *                │                   captures rejectionReason by reference
  *                ├─ applyParsedYaml(yaml, false, capabilityGate)
- *                │     ├─ ParseFailed → setError("YAML parse failed: " + yamlParser.errorString())
- *                │     │                 (no teardown() — matches historical behavior, see TODO-046)
+ *                │     ├─ ParseFailed → setError("YAML parse failed: " + yamlParser.errorString()),
+ *                │     │                 removeBlob(merkleRoot), teardown()  (TODO-046)
  *                │     ├─ Rejected    → setError(rejectionReason), teardown()
  *                │     │                 (model/name/styles left untouched — gate ran
  *                │     │                  before any mutation, see applyParsedYaml doc)
@@ -130,7 +131,11 @@ public:
      * reachable via the parseWarningsChanged signal, so a QML element
      * constructed AFTER a parse (e.g. this screen loading post-bootstrap)
      * can see what already happened, not only future emissions. Each entry:
-     * { severity: "error"|"warning", widgetKey, field, message }. Empty
+     * { severity: "error"|"warning", widgetKey, field, message }. Describes
+     * the latest parse attempt, failed ones included (an "error" entry is
+     * the diagnostic that failed it), and survive the teardown of a rejected
+     * bootstrap so DiscoveryScreen can show them; cleared when the next
+     * connection starts. Empty
      * (not just unset) once every diagnostic from the last parse is fixed —
      * see applyParsedYaml()'s emit-on-transition comment for why the
      * NOTIFY signal still fires on that clear, even though it carries an
@@ -200,10 +205,10 @@ private slots:
 
 private:
     /** Result of applyParsedYaml(). ParseFailed and Rejected are distinct
-     *  because callers react differently: a capability Rejected connection
-     *  calls teardown(), a ParseFailed one does not (TODO-046 tracks whether
-     *  that historical asymmetry should change — this refactor preserves it
-     *  exactly, not decide it fresh). */
+     *  because callers report them differently: design mode shows a
+     *  ParseFailed in designErrorString, and bootstrap words the two
+     *  errors differently. Bootstrap tears the connection down on both
+     *  (TODO-046). */
     enum class ApplyResult { Success, ParseFailed, Rejected };
 
     void setState(const QString& s);
@@ -224,6 +229,12 @@ private:
     void initCache();
     QByteArray cachedBlob(const QByteArray& root) const;
     void storeBlob(const QByteArray& root, const QByteArray& blob);
+    /** Empty parseWarnings, emitting parseWarningsChanged only if it held
+     *  anything — for when the previous parse no longer applies (a new
+     *  connection starts, the design file can't be read). */
+    void clearParseWarnings();
+    /** Evict a cache entry — used when the cached YAML is unusable. */
+    void removeBlob(const QByteArray& root);
     QByteArray decompressBlob(const QByteArray& compressed);
     /** Parse raw YAML bytes and populate the widget model. Shared by both
      *  design mode (reloadDesignFile) and real-device bootstrap
@@ -245,9 +256,9 @@ private:
      *  only return Success or ParseFailed.
      *
      *  Diagnostics (parseWarningsChanged, plus qWarning() in bootstrap mode)
-     *  emit right after parse, before mutation — even when a capabilityGate
-     *  subsequently rejects the connection, since the parser's findings are
-     *  independent of protocol compatibility. */
+     *  emit right after parse, before mutation — even when the parse failed
+     *  or a capabilityGate subsequently rejects the connection, since the
+     *  parser's findings are independent of protocol compatibility. */
     ApplyResult applyParsedYaml(const QByteArray& raw, bool designMode,
                                 const std::function<QString(const QStringList&)>& capabilityGate = nullptr);
 

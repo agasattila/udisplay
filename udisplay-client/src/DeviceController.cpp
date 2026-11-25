@@ -118,6 +118,17 @@ void DeviceController::storeBlob(const QByteArray& root,
                  qPrintable(q.lastError().text()));
 }
 
+void DeviceController::removeBlob(const QByteArray& root)
+{
+    if (!m_db.isOpen()) return;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("DELETE FROM blobs WHERE root = ?"));
+    q.addBindValue(root);
+    if (!q.exec())
+        qWarning("DeviceController: removeBlob failed: %s",
+                 qPrintable(q.lastError().text()));
+}
+
 /* ── Blob decompression (zlib) ──────────────────────────────────────────── */
 
 QByteArray DeviceController::decompressBlob(const QByteArray& compressed)
@@ -163,6 +174,11 @@ QByteArray DeviceController::decompressBlob(const QByteArray& compressed)
 
 void DeviceController::startConnection(Transport* t)
 {
+    /* The diagnostics belong to the previous device's YAML. Drop them now,
+     * so a failure of this attempt for another reason (refused, timeout)
+     * doesn't offer that list from DiscoveryScreen's error banner. */
+    clearParseWarnings();
+
     m_bootstrap = new BootstrapManager(t, this);
 
     m_bootstrap->setBlobLookup([this](const QByteArray& root) {
@@ -274,7 +290,10 @@ void DeviceController::teardown()
      * BootstrapManager turns into failed("Disconnected") → onBootstrapFailed
      * → teardown() again. That nested call used to null m_transport, and the
      * outer call then ran nullptr->deleteLater(): "postEvent: Unexpected null
-     * receiver" on desktop, a crash on Android. */
+     * receiver" on desktop, a crash on Android. Cutting the signals off
+     * also keeps whatever the old connection reports while going down
+     * (failed("Disconnected"), a transport error) from overwriting the error
+     * that caused the teardown, e.g. "YAML parse failed: ...". */
     BootstrapManager* bootstrap = std::exchange(m_bootstrap, nullptr);
     Transport* transport = std::exchange(m_transport, nullptr);
     if (bootstrap) {
@@ -321,6 +340,10 @@ void DeviceController::reloadDesignFile()
 {
     QFile f(m_designFilePath);
     if (!f.open(QIODevice::ReadOnly)) {
+        /* Nothing was parsed, so the previous parse's diagnostics no longer
+         * describe the file; like a YAML syntax error, the list is empty and
+         * designErrorString says why. */
+        clearParseWarnings();
         setDesignError(QStringLiteral("Cannot open file: %1").arg(m_designFilePath));
         return;
     }
@@ -333,6 +356,14 @@ void DeviceController::reloadDesignFile()
         setDesignError(m_yamlParser.errorString());
     else
         setDesignError(QString());
+}
+
+void DeviceController::clearParseWarnings()
+{
+    if (m_parseWarnings.isEmpty())
+        return;
+    m_parseWarnings.clear();
+    emit parseWarningsChanged({});
 }
 
 void DeviceController::setDesignError(const QString& msg)
@@ -386,10 +417,7 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
     QString name, version;
     QStringList caps;
     QMap<QString, StyleToken> styles;
-    if (!m_yamlParser.parse(raw, widgets, name, version, caps, styles)) {
-        printDebugFailure(m_yamlParser.errorString());
-        return ApplyResult::ParseFailed;
-    }
+    const bool parsed = m_yamlParser.parse(raw, widgets, name, version, caps, styles);
 
     /* Diagnostics emit right after parse, before any mutation — matches
      * design mode's original ordering (TODO-034 D5). qWarning() logging is
@@ -408,7 +436,14 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
      * once fixed), but the signal itself only fires on an actual
      * transition (new diagnostics, OR prior diagnostics now cleared) —
      * preserves the existing "no signal for a clean parse with nothing to
-     * clear" contract (bootstrap_cleanYaml_noParseWarningsChanged). */
+     * clear" contract (bootstrap_cleanYaml_noParseWarningsChanged).
+     *
+     * Published for a failed parse too, so the list always describes the
+     * latest attempt: whatever the parser found before giving up (the fatal
+     * Error diagnostic included, if that's what stopped it), or nothing for
+     * a failure with no diagnostic (e.g. a YAML syntax error). Otherwise a
+     * design-mode save that breaks the file would keep showing the previous
+     * save's warnings. */
     const bool hadPriorWarnings = !m_parseWarnings.isEmpty();
     QVariantList warnings;
     for (const auto& d : diags) {
@@ -435,6 +470,11 @@ DeviceController::ApplyResult DeviceController::applyParsedYaml(
         emit parseWarningsChanged(diags);
     } else if (hadPriorWarnings) {
         emit parseWarningsChanged(diags);
+    }
+
+    if (!parsed) {
+        printDebugFailure(m_yamlParser.errorString());
+        return ApplyResult::ParseFailed;
     }
 
     if (capabilityGate) {
@@ -519,10 +559,24 @@ static const QStringList kKnownCapabilities = {
 void DeviceController::onBootstrapSucceeded(QByteArray merkleRoot,
                                             QByteArray compressedBlob)
 {
+    /* Every failure below ends in setError() + teardown() (TODO-046): the
+     * transport is up but there is nothing to show, and the heartbeat
+     * watchdog only starts on success, so a connection left open here would
+     * stay open forever.
+     *
+     * A blob this client can't decompress or parse is also evicted from the
+     * cache. A freshly downloaded one was never stored, but one stored by an
+     * older client version that accepted YAML this parser now rejects still
+     * passes Merkle verification and would be reused on every reconnect;
+     * evicting it makes the next attempt download it again. A capability
+     * rejection keeps its entry: the blob is fine, the app is too old, and
+     * the cached copy is valid for the updated app. */
     QByteArray yaml = decompressBlob(compressedBlob);
     if (yaml.isEmpty()) {
         setError(QStringLiteral("Failed to decompress YAML blob"));
         printDebugFailure(QStringLiteral("failed to decompress YAML blob"));
+        removeBlob(merkleRoot);
+        teardown();
         return;
     }
 
@@ -542,10 +596,9 @@ void DeviceController::onBootstrapSucceeded(QByteArray merkleRoot,
 
     switch (applyParsedYaml(yaml, /*designMode=*/false, capabilityGate)) {
     case ApplyResult::ParseFailed:
-        /* No teardown() here — matches historical behavior. Whether that's
-         * actually the right recovery behavior is tracked separately
-         * (TODO-046); this refactor preserves it, not decides it fresh. */
         setError(QStringLiteral("YAML parse failed: %1").arg(m_yamlParser.errorString()));
+        removeBlob(merkleRoot);
+        teardown();
         return;
     case ApplyResult::Rejected:
         setError(rejectionReason);

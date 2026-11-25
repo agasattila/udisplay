@@ -17,8 +17,9 @@ import "../../qml" as Screens
  * re-armed for the new diagnostics.
  *
  * Fix: reset `dismissed` from a Connections handler on
- * controller.parseWarningsChanged directly, which fires on every parse
- * (DeviceController.h/.cpp), not just when `visible` happens to toggle.
+ * controller.parseWarningsChanged directly, which fires whenever a parse
+ * has diagnostics or clears a non-empty list (DeviceController.h/.cpp),
+ * not just when `visible` happens to toggle.
  *
  * Run headless: `qml -platform offscreen test_device_screen_warning_banner.qml`.
  * Exits 0 on pass, 1 (with a console.error) on fail -- CTest reads the exit code.
