@@ -724,9 +724,9 @@ private slots:
         QList<WidgetDef> widgets;
         QString name, version;
         QVERIFY(!p.parse(QByteArray::fromStdString(yaml), widgets, name, version));
-        QVERIFY2(p.errorString().endsWith(QStringLiteral(
-                     "reads as an integer in YAML 1.1, not a string; quote it: \"")
-                     + QString::fromStdString(key) + QStringLiteral("\"")),
+        QVERIFY2(p.errorString().endsWith(QString::fromStdString(key) + QStringLiteral(
+                     "' reads as an integer in YAML 1.1, not a string; "
+                     "rename it (quoting is not enough)")),
                  qPrintable(p.errorString().left(120)));
     }
 

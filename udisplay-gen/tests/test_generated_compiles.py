@@ -268,3 +268,57 @@ def test_generated_cpp_full_uint8_dropdown_compiles(tmp_path, modern):
     assert result.exit_code == 0, result.output
     (out / "use.cpp").write_text('#include "udisplay_ui.hpp"\n')
     _compile("c++", _cpp_args("c++11" if modern else "c++98", "use.cpp"), out)
+
+
+KEYWORD_ITEMS_YAML = """\
+device:
+  name: keyword items
+widgets:
+  theme_sel:
+    type: dropdown
+    items:
+      default: Default
+      auto: Auto
+      delete: Delete
+      private: Private
+      requires: Requires
+      plain: Plain
+"""
+
+KEYWORD_ITEMS_USAGE = """\
+#include "libudisplay/udisplay.h"
+#include "udisplay_ui.hpp"
+using namespace udisplay_ui;
+static UDisplay* g_ui;
+static void on_theme(ThemeSelWidget::{option} selection)
+{{
+    if (selection == ThemeSelWidget::Option::default_) g_ui->theme_sel.set(ThemeSelWidget::Option::plain);
+}}
+void use(UDisplay& ui)
+{{
+    g_ui = &ui;
+    ui.theme_sel.on_change = on_theme;
+    ui.theme_sel.set(ThemeSelWidget::Option::auto_);
+    ui.theme_sel.set(ThemeSelWidget::Option::delete_);
+    ui.theme_sel.set(ThemeSelWidget::Option::private_);
+    ui.theme_sel.set(ThemeSelWidget::Option::requires_);
+}}
+"""
+
+
+@pytest.mark.skipif(shutil.which("c++") is None, reason="no C++ compiler")
+@pytest.mark.parametrize("modern,std", [(False, "c++98"), (False, "c++20"),
+                                        (True, "c++11"), (True, "c++20")])
+def test_generated_cpp_keyword_dropdown_items_compile(tmp_path, modern, std):
+    """Issue #73: a dropdown item named after a C++ keyword becomes the
+    enumerator `<key>_`; plain keys stay as they are."""
+    _require_std(std)
+    src = tmp_path / "kw.yaml"
+    src.write_text(KEYWORD_ITEMS_YAML)
+    out = tmp_path / "out"
+    args = ["build", str(src), "--lang", "cpp", "-o", str(out)] + (["--modern"] if modern else [])
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code == 0, result.output
+    option = "Option" if modern else "Option::Value"
+    (out / "use.cpp").write_text(KEYWORD_ITEMS_USAGE.format(option=option))
+    _compile("c++", _cpp_args(std, "use.cpp"), out)

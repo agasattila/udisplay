@@ -187,6 +187,8 @@ static bool isTransparentContainer(const std::string& type, const YAML::Node& w)
  * duplicate keys. yaml-cpp keeps the text, doesn't merge and keeps the
  * first. Both tools reject such keys instead, with the same text
  * (validate.py mapping_key_error()), so they derive the same widget paths.
+ * Quoting or `!!str` doesn't rescue such a key (issue #70): every key is
+ * checked as if it were written plain, so no key ever needs quoting.
  */
 
 /* What PyYAML's YAML 1.1 implicit resolvers read a plain scalar as, tried
@@ -302,15 +304,15 @@ private:
         if (tag != "?" && tag != "!" && tag != "tag:yaml.org,2002:str")
             fail(mark, "mapping key '" + value + "' has an explicit non-string tag; "
                        "keys must be strings");
-        if (tag == "?") {
-            if (YAML::IsNullString(value))
-                fail(mark, "mapping key is null (empty, ~ or null); keys must be strings");
-            if (value == "<<")
-                fail(mark, "YAML merge keys (<<) are not supported; write the keys out");
-            if (const char* kind = implicitKeyKind(value))
-                fail(mark, "mapping key '" + value + "' reads as " + kind
-                           + " in YAML 1.1, not a string; quote it: \"" + value + "\"");
-        }
+        /* How the key would read written plain, whatever its quoting or
+         * tag: no key may need quoting (issue #70). */
+        if (YAML::IsNullString(value))
+            fail(mark, "mapping key is null (empty, ~ or null); keys must be strings");
+        if (value == "<<")
+            fail(mark, "YAML merge keys (<<) are not supported; write the keys out");
+        if (const char* kind = implicitKeyKind(value))
+            fail(mark, "mapping key '" + value + "' reads as " + kind
+                       + " in YAML 1.1, not a string; rename it (quoting is not enough)");
         if (!m_stack.back().keys.insert(value).second)
             fail(mark, "duplicate mapping key '" + value + "'");
     }

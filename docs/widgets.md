@@ -76,10 +76,13 @@ widgets:
 Every mapping key in the document must be a plain string, the same for
 `udisplay-gen validate` and the client:
 
-- Quote keys that YAML 1.1 would read as something else: booleans (`yes`,
-  `no`, `on`, `off`, `true`, `false` in any of their spellings), numbers
-  (`10`, `0x10`, `1.5`), dates (`2026-01-01`) and null (`~`, `null`). Write
-  `"off": "Disabled"`, not `off: "Disabled"`.
+- No key may need quoting. A key that YAML 1.1 would read as something
+  other than a string is rejected, **quoted or not**: booleans (`yes`, `no`,
+  `on`, `off`, `true`, `false` in any of their spellings), numbers (`10`,
+  `0x10`, `1.5`), dates (`2026-01-01`) and null (`~`, `null`, empty).
+  `"off":`, `'off':` and `!!str off:` are all rejected; pick another name,
+  such as `disabled: "Off"`. Quoting a key that already reads as a string
+  (`"lamp":`) is allowed but changes nothing.
 - YAML merge keys (`<<: *defaults`) are not supported; write the keys out.
 - A key may appear only once per mapping.
 - Aliases, sequences and mappings can't be keys.
@@ -1063,13 +1066,14 @@ items:
   sta:   "Station"
   ap:    "Access Point"
   apsta: "AP + Station"
-  "off": "Disabled"
+  disabled: "Off"
 ```
 
-`off` is quoted because YAML 1.1 reads a bare `off:` as the boolean false
-(see [YAML keys](#yaml-keys)).
+An item can't be called `off` (or `on`, `yes`, `no`, ...), even quoted: YAML
+1.1 reads it as a boolean (see [YAML keys](#yaml-keys)). Name it after what it
+means and put the word in the label instead.
 
-The selection index is 0-based in YAML declaration order (`sta`=0, `ap`=1, `apsta`=2, `off`=3).
+The selection index is 0-based in YAML declaration order (`sta`=0, `ap`=1, `apsta`=2, `disabled`=3).
 Items do **not** get individual widget IDs — only the dropdown itself gets one.
 
 **Example:**
@@ -1082,7 +1086,7 @@ wifi_mode:
     sta:   "Station"
     ap:    "Access Point"
     apsta: "AP + Station"
-    "off": "Disabled"
+    disabled: "Off"
 ```
 
 **Generated C API:**
@@ -1119,6 +1123,13 @@ API's `#define` index constants. As with `button-group`, the enumerators are
 `WifiModeWidget::Option` with `--modern`. A selection index outside the item list
 (only possible from a misbehaving client) is ignored, like an event for an unknown
 widget ID: `on_change` is not called.
+
+An item named after a C++ keyword gets a trailing underscore in C++ only: an item
+`default` is `Option::default_` (likewise `auto_`, `delete_`, `new_`, ...), while
+the C and MicroPython constants keep the plain name (`THEME_SEL_DEFAULT` in C). Two items
+that end up with the same enumerator (`default` next to `default_`) are a build
+error. Widget names, button-group items included, can't be C++ keywords at all:
+they are also members of the generated classes.
 
 Default build (`--lang cpp`):
 
